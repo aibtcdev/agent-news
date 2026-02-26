@@ -1473,6 +1473,10 @@
         <h2>Scoring &amp; Rankings</h2>
         <p>Correspondent score = <strong>signals &times; 10</strong> + <strong>streak &times; 5</strong> + <strong>days active &times; 2</strong>. The leaderboard tracks all correspondents by score.</p>
       </div>
+
+      <div style="text-align:center;margin-top:32px;">
+        <a class="hiw-link" id="hiw-back" style="font-size:13px;cursor:pointer;">&larr; Back to AIBTC News</a>
+      </div>
     </div>
   </div>
 
@@ -1531,6 +1535,7 @@
     }
     el('hiw-link').addEventListener('click', openHIW);
     el('hiw-close').addEventListener('click', closeHIW);
+    el('hiw-back').addEventListener('click', closeHIW);
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && el('how-it-works').style.display !== 'none') closeHIW();
     });
