@@ -1,4 +1,7 @@
 // Proxy to inscribe.news API, returns recent news inscriptions
+
+import { json, err, options, methodNotAllowed } from './_shared.js';
+
 export async function onRequestGet(context) {
   const url = new URL(context.request.url);
   const limit = parseInt(url.searchParams.get('limit') || '10', 10);
@@ -20,14 +23,14 @@ export async function onRequestGet(context) {
     // Sort by inscription number descending (most recent first)
     entries.sort((a, b) => (b.number || 0) - (a.number || 0));
 
-    return Response.json(entries.slice(0, limit), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=300',
-      },
-    });
-  } catch (err) {
-    return Response.json({ error: err.message }, { status: 502 });
+    return json(entries.slice(0, limit), { cache: 300 });
+  } catch {
+    return err('Failed to fetch inscriptions', 502);
   }
+}
+
+export async function onRequest(context) {
+  if (context.request.method === 'OPTIONS') return options();
+  if (context.request.method === 'GET') return onRequestGet(context);
+  return methodNotAllowed();
 }

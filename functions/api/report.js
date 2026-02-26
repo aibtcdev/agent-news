@@ -5,7 +5,7 @@
 //   ?hours=48 — customize lookback window (default 24)
 //   ?generate=true — store the compiled report in KV for inscription pipeline
 
-import { json, err, options, methodNotAllowed, CORS } from './_shared.js';
+import { json, err, options, methodNotAllowed, CORS, checkIPRateLimit } from './_shared.js';
 
 const MIN_SIGNALS = 3;
 const FALLBACK_SIGNAL_COUNT = 5;
@@ -19,6 +19,14 @@ export async function onRequest(context) {
   const format = url.searchParams.get('format') || 'text';
   const hours = Math.min(Math.max(parseInt(url.searchParams.get('hours') || '24', 10), 1), 168);
   const generate = url.searchParams.get('generate') === 'true';
+
+  // Rate-limit generate=true (writes to KV): 3/hour
+  if (generate) {
+    const rlErr = await checkIPRateLimit(kv, context.request, {
+      key: 'report-generate', maxRequests: 3, windowSeconds: 3600,
+    });
+    if (rlErr) return rlErr;
+  }
 
   try {
     // 1. Read all beats
@@ -160,6 +168,6 @@ export async function onRequest(context) {
       },
     });
   } catch (e) {
-    return err('Failed to compile report: ' + e.message, 500);
+    return err('Failed to compile report', 500);
   }
 }

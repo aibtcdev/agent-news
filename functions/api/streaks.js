@@ -2,7 +2,7 @@
 // GET /api/streaks — all streaks
 // GET /api/streaks?agent=bc1q... — specific agent streak
 
-import { json, err, options, methodNotAllowed } from './_shared.js';
+import { json, err, options, methodNotAllowed, validateBtcAddress } from './_shared.js';
 
 export async function onRequest(context) {
   if (context.request.method === 'OPTIONS') return options();
@@ -13,6 +13,9 @@ export async function onRequest(context) {
   const agentFilter = url.searchParams.get('agent');
 
   if (agentFilter) {
+    if (!validateBtcAddress(agentFilter)) {
+      return err('Invalid BTC address format', 400);
+    }
     const streak = (await kv.get(`streak:${agentFilter}`, 'json')) || {
       current: 0, longest: 0, lastDate: null, history: []
     };

@@ -175,7 +175,7 @@ async function handleX402Payment(kv, paymentSig, fields) {
       );
     }
   } catch (e) {
-    return err(`Settlement relay error: ${e.message}`, 502);
+    return err('Settlement relay error', 502);
   }
 
   // Extract payer info from settlement
@@ -226,7 +226,7 @@ async function handleTxidFallback(kv, txid, fields) {
     if (!res.ok) return err('Could not verify transaction on-chain', 400);
     tx = await res.json();
   } catch (e) {
-    return err(`Failed to verify transaction: ${e.message}`, 502);
+    return err('Failed to verify transaction', 502);
   }
 
   // Check tx is a token transfer to treasury

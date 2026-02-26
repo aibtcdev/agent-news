@@ -14,60 +14,60 @@ echo "Claiming beats..."
 curl -s -X POST "$BASE/api/beats" \
   -H "Content-Type: application/json" \
   -d '{
-    "btcAddress": "bc1qd0z0a8z8am9j84fk3lk5g2hutpxcreypnf2p47",
+    "btcAddress": "bc1qexampleaddr0001seedsonicmastxxxxxxxxxxxxxx",
     "name": "BTC Macro",
     "slug": "btc-macro",
     "description": "Bitcoin price action, ETF flows, macro sentiment",
     "color": "#F7931A",
-    "signature": "seed-signature-sonic-mast"
+    "signature": "c2VlZC1zaWduYXR1cmUtc29uaWMtbWFzdA=="
   }' | python3 -m json.tool 2>/dev/null
 echo ""
 
 curl -s -X POST "$BASE/api/beats" \
   -H "Content-Type: application/json" \
   -d '{
-    "btcAddress": "bc1q7zpy3kpxjzrfctz4en9k2h5sp8nwhctgz54sn5",
+    "btcAddress": "bc1qexampleaddr0002seedionicanvilxxxxxxxxxxxxx",
     "name": "DAO Watch",
     "slug": "dao-watch",
     "description": "DAO governance, proposals, treasury movements",
     "color": "#b388ff",
-    "signature": "seed-signature-ionic-anvil"
+    "signature": "c2VlZC1zaWduYXR1cmUtaW9uaWMtYW52aWw="
   }' | python3 -m json.tool 2>/dev/null
 echo ""
 
 curl -s -X POST "$BASE/api/beats" \
   -H "Content-Type: application/json" \
   -d '{
-    "btcAddress": "bc1qyu22hyqr406pus0g9jmfytk4ss5z8qsje74l76",
+    "btcAddress": "bc1qexampleaddr0003seedtinymartenxxxxxxxxxxxxxx",
     "name": "Network Ops",
     "slug": "network-ops",
     "description": "Agent network health, onboarding, protocol updates",
     "color": "#22d3ee",
-    "signature": "seed-signature-tiny-marten"
+    "signature": "c2VlZC1zaWduYXR1cmUtdGlueS1tYXJ0ZW4="
   }' | python3 -m json.tool 2>/dev/null
 echo ""
 
 curl -s -X POST "$BASE/api/beats" \
   -H "Content-Type: application/json" \
   -d '{
-    "btcAddress": "bc1qq0uly9hhxe00s0c0hzp3hwtvyp0kp50r737euw",
+    "btcAddress": "bc1qexampleaddr0004seedstarkcometxxxxxxxxxxxxxx",
     "name": "DeFi Yields",
     "slug": "defi-yields",
     "description": "BTCFi yield opportunities, sBTC flows, Zest/ALEX/Bitflow",
     "color": "#4caf50",
-    "signature": "seed-signature-stark-comet"
+    "signature": "c2VlZC1zaWduYXR1cmUtc3RhcmstY29tZXQ="
   }' | python3 -m json.tool 2>/dev/null
 echo ""
 
 curl -s -X POST "$BASE/api/beats" \
   -H "Content-Type: application/json" \
   -d '{
-    "btcAddress": "bc1qzx7rmnyzvj07zdthvwanrtkcu5cjw86q5lu2hy",
+    "btcAddress": "bc1qexampleaddr0005seedionicctigerxxxxxxxxxxxxxx",
     "name": "Agent Commerce",
     "slug": "agent-commerce",
     "description": "x402 transactions, agent-to-agent payments, escrow activity",
     "color": "#f59e0b",
-    "signature": "seed-signature-ionic-tiger"
+    "signature": "c2VlZC1zaWduYXR1cmUtaW9uaWMtdGlnZXI="
   }' | python3 -m json.tool 2>/dev/null
 
 echo ""

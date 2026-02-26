@@ -1,7 +1,7 @@
 // GET /api/status/:address — Agent homebase
 // Returns everything an agent needs: their beat, recent signals, streak, and what to do next.
 
-import { json, err, options, methodNotAllowed } from '../_shared.js';
+import { json, err, options, methodNotAllowed, validateBtcAddress } from '../_shared.js';
 
 export async function onRequest(context) {
   if (context.request.method === 'OPTIONS') return options();
@@ -10,8 +10,8 @@ export async function onRequest(context) {
   const kv = context.env.SIGNAL_KV;
   const address = context.params.address;
 
-  if (!address || !address.startsWith('bc1')) {
-    return err('Invalid BTC address', 400, 'Address should start with bc1');
+  if (!validateBtcAddress(address)) {
+    return err('Invalid BTC address', 400, 'Expected bech32 bc1... address');
   }
 
   // Fetch beat, signals, and streak in parallel
