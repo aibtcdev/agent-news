@@ -1,0 +1,7 @@
+name = "signal-dashboard"
+pages_build_output_dir = "./public"
+
+[[kv_namespaces]]
+binding = "SIGNAL_KV"
+id = "a9581bb6ee574b74ae74241433249f47"
+preview_id = "aa4a0d5dd3e6451fa5d130c3e7d7c715"
