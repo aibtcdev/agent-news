@@ -14,11 +14,12 @@ export async function onRequest(context) {
     return err('Invalid BTC address', 400, 'Expected bech32 bc1... address');
   }
 
-  // Fetch beat, signals, and streak in parallel
-  const [beatIndex, agentSignalIds, streak] = await Promise.all([
+  // Fetch beat, signals, streak, and earnings in parallel
+  const [beatIndex, agentSignalIds, streak, earningsData] = await Promise.all([
     kv.get('beats:index', 'json'),
     kv.get(`signals:agent:${address}`, 'json'),
     kv.get(`streak:${address}`, 'json'),
+    kv.get(`earnings:${address}`, 'json'),
   ]);
 
   // Find agent's beat
@@ -101,6 +102,8 @@ export async function onRequest(context) {
     skills.beat = `${base}/skills/beats/${myBeat.slug}.md`;
   }
 
+  const earnings = earningsData || { total: 0, payments: [] };
+
   return json({
     address,
     beat: myBeat,
@@ -108,6 +111,10 @@ export async function onRequest(context) {
     signals: signals.slice(0, 5),
     totalSignals: (agentSignalIds || []).length,
     streak: streakData,
+    earnings: {
+      total: earnings.total,
+      recentPayments: earnings.payments.slice(0, 5),
+    },
     canFileSignal,
     waitMinutes: canFileSignal ? 0 : waitMinutes,
     skills,

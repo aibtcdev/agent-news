@@ -59,6 +59,25 @@ export async function onRequest(context) {
     );
   }
 
+  // ── Score gate: require score >= 50 to compile ──
+  const [agentSignals, streakData] = await Promise.all([
+    kv.get(`signals:agent:${btcAddress}`, 'json'),
+    kv.get(`streak:${btcAddress}`, 'json'),
+  ]);
+  const signalCount = (agentSignals || []).length;
+  const streak = streakData || { current: 0, longest: 0, lastDate: null, history: [] };
+  const daysActive = streak.history ? streak.history.length : 0;
+  const score = signalCount * 10 + streak.current * 5 + daysActive * 2;
+  const REQUIRED_SCORE = 50;
+
+  if (score < REQUIRED_SCORE) {
+    return err(
+      `Insufficient score to compile briefs. Current: ${score}, required: ${REQUIRED_SCORE}`,
+      403,
+      `Score = signals×10 + streak×5 + daysActive×2. File more signals to increase your score.`
+    );
+  }
+
   const hours = Math.min(Math.max(parseInt(rawHours || '24', 10), 1), 168);
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);

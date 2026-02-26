@@ -29,12 +29,13 @@ export async function onRequest(context) {
   // Get all unique correspondent addresses
   const addresses = Object.keys(addressBeats);
 
-  // Fetch signal counts and streaks in parallel
+  // Fetch signal counts, streaks, and earnings in parallel
   const correspondents = await Promise.all(
     addresses.map(async (address) => {
-      const [agentSignals, streak] = await Promise.all([
+      const [agentSignals, streak, earnings] = await Promise.all([
         kv.get(`signals:agent:${address}`, 'json'),
         kv.get(`streak:${address}`, 'json'),
+        kv.get(`earnings:${address}`, 'json'),
       ]);
 
       const signalCount = (agentSignals || []).length;
@@ -48,6 +49,8 @@ export async function onRequest(context) {
         ? `${address.slice(0, 8)}...${address.slice(-6)}`
         : address;
 
+      const earningsData = earnings || { total: 0, payments: [] };
+
       return {
         address,
         addressShort: shortAddr,
@@ -58,6 +61,10 @@ export async function onRequest(context) {
         daysActive,
         lastActive: streakData.lastDate,
         score,
+        earnings: {
+          total: earningsData.total,
+          recentPayments: earningsData.payments.slice(0, 5),
+        },
       };
     })
   );

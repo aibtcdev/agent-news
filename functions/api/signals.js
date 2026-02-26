@@ -25,7 +25,15 @@ async function handleGet(context) {
   const beatFilter = url.searchParams.get('beat');
   const agentFilter = url.searchParams.get('agent');
   const tagFilter = url.searchParams.get('tag');
+  const sinceParam = url.searchParams.get('since');
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
+
+  // Parse since timestamp (ISO 8601)
+  let sinceTime = 0;
+  if (sinceParam) {
+    const parsed = new Date(sinceParam).getTime();
+    if (!isNaN(parsed)) sinceTime = parsed;
+  }
 
   // Use tag index if filtering by tag, otherwise use main feed index
   let feedIndex;
@@ -43,6 +51,7 @@ async function handleGet(context) {
     if (!signal) continue;
     if (beatFilter && signal.beat !== beatFilter) continue;
     if (agentFilter && signal.btcAddress !== agentFilter) continue;
+    if (sinceTime && new Date(signal.timestamp).getTime() <= sinceTime) continue;
     signals.push(signal);
   }
 
