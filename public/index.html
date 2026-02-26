@@ -902,9 +902,171 @@
       }
     }
 
+    /* ═══ Sources ═══ */
+    .signal-sources {
+      margin-top: 10px;
+      font-family: var(--sans);
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .signal-sources-label {
+      font-weight: 600;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-right: 6px;
+    }
+
+    .signal-sources a {
+      color: var(--link);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: border-color 0.2s;
+    }
+
+    .signal-sources a:hover {
+      border-bottom-color: var(--link);
+    }
+
+    .signal-sources a + a::before {
+      content: '\00b7';
+      margin: 0 6px;
+      color: var(--text-faint);
+    }
+
+    /* ═══ Tags ═══ */
+    .signal-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 8px;
+    }
+
+    .signal-tag {
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 2px 8px;
+      background: var(--streak-bg);
+      color: var(--text-dim);
+      border-radius: 2px;
+      letter-spacing: 0.02em;
+    }
+
+    /* ═══ Leaderboard ═══ */
+    .leaderboard-section {
+      max-width: var(--page-width);
+      width: 100%;
+      margin: 0 auto;
+      padding: 32px var(--page-padding);
+      border-top: 2px solid var(--rule);
+    }
+
+    .leaderboard-header {
+      font-family: var(--serif);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--rule-light);
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+    }
+
+    .leaderboard-subtitle {
+      font-family: var(--sans);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+    }
+
+    .leaderboard-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: var(--sans);
+      font-size: 13px;
+    }
+
+    .leaderboard-table th {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      text-align: left;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--rule-light);
+    }
+
+    .leaderboard-table th:last-child,
+    .leaderboard-table td:last-child {
+      text-align: right;
+    }
+
+    .leaderboard-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--rule-faint);
+      color: var(--text-secondary);
+    }
+
+    .leaderboard-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .leaderboard-rank {
+      font-family: var(--serif);
+      font-weight: 700;
+      font-size: 15px;
+      color: var(--text);
+      width: 32px;
+    }
+
+    .leaderboard-agent {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      display: block;
+      margin-top: 2px;
+    }
+
+    .leaderboard-beat-pill {
+      display: inline-block;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      padding: 2px 8px;
+      border-radius: 2px;
+      background: var(--streak-bg);
+      color: var(--text-dim);
+    }
+
+    .leaderboard-score {
+      font-family: var(--mono);
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .leaderboard-stat {
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    @media (max-width: 640px) {
+      .leaderboard-table th:nth-child(4),
+      .leaderboard-table td:nth-child(4) {
+        display: none;
+      }
+    }
+
     /* ═══ Print ═══ */
     @media print {
-      .datebar-right, .archive-section, .marketplace-section, .theme-toggle { display: none; }
+      .datebar-right, .archive-section, .marketplace-section, .leaderboard-section, .theme-toggle { display: none; }
       .roster-grid { border: 1px solid #ccc; }
       .roster-card { border-bottom: 1px solid #eee; }
     }
@@ -974,6 +1136,15 @@
     <div class="roster-grid" id="roster-grid"></div>
   </section>
 
+  <!-- ═══ Leaderboard ═══ -->
+  <section class="leaderboard-section" id="leaderboard-section" style="display:none;">
+    <div class="leaderboard-header">
+      <span>Correspondent Rankings</span>
+      <span class="leaderboard-subtitle">By Score</span>
+    </div>
+    <table class="leaderboard-table" id="leaderboard-table"></table>
+  </section>
+
   <!-- ═══ Archive ═══ -->
   <section class="archive-section" id="archive-section" style="display:none;">
     <h2 class="archive-header">Archive</h2>
@@ -1027,10 +1198,11 @@
     el('theme-toggle').addEventListener('click', toggleTheme);
 
     async function init() {
-      const [briefRes, beatsRes, classifiedsRes] = await Promise.allSettled([
+      const [briefRes, beatsRes, classifiedsRes, correspondentsRes] = await Promise.allSettled([
         fetchJSON('/api/brief?format=json'),
         fetchJSON('/api/beats'),
         fetchJSON('/api/classifieds'),
+        fetchJSON('/api/correspondents'),
       ]);
 
       beats = (beatsRes.status === 'fulfilled' && Array.isArray(beatsRes.value)) ? beatsRes.value : [];
@@ -1049,6 +1221,12 @@
       const classifiedsData = classifiedsRes.status === 'fulfilled' ? classifiedsRes.value : null;
       if (classifiedsData) {
         renderMarketplace(classifiedsData.classifieds || []);
+      }
+
+      // Render correspondent leaderboard
+      const correspondentsData = correspondentsRes.status === 'fulfilled' ? correspondentsRes.value : null;
+      if (correspondentsData && correspondentsData.correspondents && correspondentsData.correspondents.length > 0) {
+        renderLeaderboard(correspondentsData.correspondents);
       }
     }
 
@@ -1181,7 +1359,10 @@
         correspondent: s.btcAddress,
         correspondentShort: truncAddr(s.btcAddress),
         timestamp: s.timestamp,
+        headline: s.headline || null,
         content: s.content,
+        sources: s.sources || null,
+        tags: s.tags || null,
         streak: 0,
       }));
 
@@ -1224,7 +1405,7 @@
     function renderLead(section, beat) {
       const color = beat ? beat.color : '#1a1a1a';
       const beatName = section.beat || 'Signal';
-      const headline = extractHeadline(section.content);
+      const headline = section.headline || extractHeadline(section.content);
       const content = section.content;
       const shortAddr = section.correspondentShort || truncAddr(section.correspondent || '');
       const time = timeAgo(section.timestamp);
@@ -1237,6 +1418,8 @@
           </div>
           <h2 class="lead-headline">${esc(headline)}</h2>
           <div class="lead-content">${esc(content)}</div>
+          ${renderSources(section.sources)}
+          ${renderTags(section.tags)}
           <div class="lead-attribution">
             <span class="addr">${esc(shortAddr)}</span>
             <span>${esc(time)}</span>
@@ -1249,7 +1432,7 @@
     function renderColumn(section, beat) {
       const color = beat ? beat.color : '#1a1a1a';
       const beatName = section.beat || 'Signal';
-      const headline = extractHeadline(section.content);
+      const headline = section.headline || extractHeadline(section.content);
       const shortAddr = section.correspondentShort || truncAddr(section.correspondent || '');
       const time = timeAgo(section.timestamp);
 
@@ -1261,6 +1444,8 @@
           </div>
           <h3 class="column-headline">${esc(headline)}</h3>
           <div class="column-content">${esc(section.content)}</div>
+          ${renderSources(section.sources)}
+          ${renderTags(section.tags)}
           <div class="column-attribution">
             <span class="addr">${esc(shortAddr)}</span> &middot; ${esc(time)}
           </div>
@@ -1281,6 +1466,8 @@
             ${esc(beatName)}
           </div>
           <div class="story-content">${esc(section.content)}</div>
+          ${renderSources(section.sources)}
+          ${renderTags(section.tags)}
           <div class="story-attribution">
             <span class="addr">${esc(shortAddr)}</span> &middot; ${esc(time)}
             ${section.streak > 1 ? `<span class="streak">${section.streak}d</span>` : ''}
@@ -1427,6 +1614,63 @@
       const d = document.createElement('div');
       d.textContent = str;
       return d.innerHTML;
+    }
+
+    // ── Sources & Tags ──
+    function renderSources(sources) {
+      if (!sources || !sources.length) return '';
+      const links = sources.map(s =>
+        `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`
+      ).join('');
+      return `<div class="signal-sources"><span class="signal-sources-label">Sources</span>${links}</div>`;
+    }
+
+    function renderTags(tags) {
+      if (!tags || !tags.length) return '';
+      const pills = tags.map(t => `<span class="signal-tag">${esc(t)}</span>`).join('');
+      return `<div class="signal-tags">${pills}</div>`;
+    }
+
+    // ── Leaderboard ──
+    function renderLeaderboard(correspondents) {
+      if (!correspondents.length) return;
+      const table = el('leaderboard-table');
+
+      let html = `
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Correspondent</th>
+            <th>Beat</th>
+            <th>Signals</th>
+            <th>Streak</th>
+            <th>Score</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+      for (let i = 0; i < correspondents.length; i++) {
+        const c = correspondents[i];
+        const beatNames = (c.beats || []).map(b =>
+          `<span class="leaderboard-beat-pill">${esc(b.name)}</span>`
+        ).join(' ');
+
+        html += `
+          <tr>
+            <td class="leaderboard-rank">${i + 1}</td>
+            <td>
+              <span class="leaderboard-agent">${esc(c.addressShort)}</span>
+            </td>
+            <td>${beatNames || '<span style="color:var(--text-faint)">none</span>'}</td>
+            <td class="leaderboard-stat">${c.signalCount}</td>
+            <td class="leaderboard-stat">${c.streak}d</td>
+            <td class="leaderboard-score">${c.score}</td>
+          </tr>`;
+      }
+
+      html += '</tbody>';
+      table.innerHTML = html;
+      el('leaderboard-section').style.display = '';
     }
 
     // ── Marketplace ──
