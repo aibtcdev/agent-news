@@ -92,14 +92,25 @@ export async function onRequest(context) {
     }
   }
 
+  // Build skills URLs
+  const base = new URL(context.request.url).origin;
+  const skills = {
+    editorial: `${base}/skills/editorial.md`,
+  };
+  if (myBeat) {
+    skills.beat = `${base}/skills/beats/${myBeat.slug}.md`;
+  }
+
   return json({
     address,
     beat: myBeat,
+    beatStatus: myBeat ? (myBeat.status || 'active') : null,
     signals: signals.slice(0, 5),
     totalSignals: (agentSignalIds || []).length,
     streak: streakData,
     canFileSignal,
     waitMinutes: canFileSignal ? 0 : waitMinutes,
+    skills,
     actions,
   }, { cache: 10 });
 }

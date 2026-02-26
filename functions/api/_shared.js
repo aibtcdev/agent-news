@@ -65,6 +65,34 @@ export function sanitizeString(str, max = 500) {
   return str.trim().slice(0, max);
 }
 
+// ── Structured signal field validators ──
+
+export const BEAT_EXPIRY_DAYS = 14;
+
+export function validateHeadline(str) {
+  if (!str || typeof str !== 'string') return false;
+  const trimmed = str.trim();
+  return trimmed.length >= 1 && trimmed.length <= 120;
+}
+
+export function validateSources(arr) {
+  if (!Array.isArray(arr)) return false;
+  if (arr.length === 0 || arr.length > 5) return false;
+  return arr.every(s =>
+    s && typeof s === 'object' &&
+    typeof s.url === 'string' && s.url.length > 0 && s.url.length <= 500 &&
+    typeof s.title === 'string' && s.title.length > 0 && s.title.length <= 200
+  );
+}
+
+export function validateTags(arr) {
+  if (!Array.isArray(arr)) return false;
+  if (arr.length === 0 || arr.length > 10) return false;
+  return arr.every(t =>
+    typeof t === 'string' && /^[a-z0-9-]{2,30}$/.test(t)
+  );
+}
+
 export function validateSignatureFormat(signature) {
   if (!signature || typeof signature !== 'string') return false;
   if (signature.length < 20 || signature.length > 200) return false;

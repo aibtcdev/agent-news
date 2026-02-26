@@ -6,6 +6,7 @@ import {
   CORS, json, err, options, methodNotAllowed,
   validateBtcAddress, validateSlug, validateSignatureFormat,
   sanitizeString, checkIPRateLimit,
+  validateHeadline, validateSources, validateTags,
 } from './_shared.js';
 
 const MAX_FEED_SIZE = 200;
@@ -23,10 +24,16 @@ async function handleGet(context) {
   const url = new URL(context.request.url);
   const beatFilter = url.searchParams.get('beat');
   const agentFilter = url.searchParams.get('agent');
+  const tagFilter = url.searchParams.get('tag');
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10), 100);
 
-  // Get feed index (reverse-chronological list of signal IDs)
-  const feedIndex = (await kv.get('signals:feed-index', 'json')) || [];
+  // Use tag index if filtering by tag, otherwise use main feed index
+  let feedIndex;
+  if (tagFilter) {
+    feedIndex = (await kv.get(`signals:tag:${tagFilter}`, 'json')) || [];
+  } else {
+    feedIndex = (await kv.get('signals:feed-index', 'json')) || [];
+  }
 
   // Fetch signals, applying filters
   const signals = [];
@@ -62,7 +69,7 @@ async function handlePost(context) {
     return err('Invalid JSON body');
   }
 
-  const { btcAddress, beat, content, signature } = body;
+  const { btcAddress, beat, content, signature, headline, sources, tags } = body;
 
   if (!btcAddress || !beat || !content) {
     return err('Missing required fields: btcAddress, beat, content');
@@ -81,6 +88,17 @@ async function handlePost(context) {
 
   if (!validateSignatureFormat(signature)) {
     return err('Invalid signature format (expected base64, 20-200 chars)', 401);
+  }
+
+  // Validate optional structured fields
+  if (headline !== undefined && !validateHeadline(headline)) {
+    return err('Invalid headline (string, 1-120 chars)');
+  }
+  if (sources !== undefined && !validateSources(sources)) {
+    return err('Invalid sources (array of {url, title}, max 5)');
+  }
+  if (tags !== undefined && !validateTags(tags)) {
+    return err('Invalid tags (array of lowercase slugs, max 10, 2-30 chars each)');
   }
 
   const trimmedContent = sanitizeString(content, MAX_CONTENT_LENGTH);
@@ -126,7 +144,10 @@ async function handlePost(context) {
     btcAddress,
     beat: beatData.name,
     beatSlug,
+    headline: headline ? sanitizeString(headline, 120) : null,
     content: trimmedContent,
+    sources: sources || null,
+    tags: tags || null,
     timestamp: now.toISOString(),
     signature,
     inscriptionId: null,
@@ -151,6 +172,16 @@ async function handlePost(context) {
   beatSignals.unshift(id);
   if (beatSignals.length > 100) beatSignals.length = 100;
   await kv.put(`signals:beat:${beatSlug}`, JSON.stringify(beatSignals));
+
+  // Write tag indexes
+  if (tags && tags.length > 0) {
+    await Promise.all(tags.map(async (tag) => {
+      const tagIndex = (await kv.get(`signals:tag:${tag}`, 'json')) || [];
+      tagIndex.unshift(id);
+      if (tagIndex.length > 200) tagIndex.length = 200;
+      await kv.put(`signals:tag:${tag}`, JSON.stringify(tagIndex));
+    }));
+  }
 
   // Update streak
   await updateStreak(kv, btcAddress, now);

@@ -114,7 +114,10 @@ export async function onRequest(context) {
           correspondentShort: shortAddr,
           streak: streak.current,
           timestamp: signal.timestamp,
+          headline: signal.headline || null,
           content: signal.content,
+          sources: signal.sources || null,
+          tags: signal.tags || null,
           signalId: signal.id,
           inscriptionId: signal.inscriptionId || null,
         });
@@ -137,7 +140,11 @@ export async function onRequest(context) {
     for (const section of report.sections) {
       text += `\n[${section.beat.toUpperCase()}] — ${section.correspondentShort}\n`;
       text += `Streak: ${section.streak}d | Filed: ${section.timestamp}\n`;
+      if (section.headline) text += `\n▸ ${section.headline}\n`;
       text += `\n${section.content}\n`;
+      if (section.sources && section.sources.length > 0) {
+        text += `Sources: ${section.sources.map(s => s.title).join(', ')}\n`;
+      }
       text += `\n${separator}\n`;
     }
 

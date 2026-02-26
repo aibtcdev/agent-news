@@ -6,6 +6,7 @@ import {
   CORS, json, err, options, methodNotAllowed,
   validateBtcAddress, validateSlug, validateHexColor,
   validateSignatureFormat, sanitizeString, checkIPRateLimit,
+  BEAT_EXPIRY_DAYS,
 } from './_shared.js';
 
 export async function onRequest(context) {
@@ -29,7 +30,33 @@ async function handleGet(context) {
     })
   );
 
-  return json(results.filter(Boolean), { cache: 15 });
+  // Check-on-read staleness: mark beats inactive if no recent signals
+  const expiryCutoff = Date.now() - BEAT_EXPIRY_DAYS * 24 * 3600000;
+  const checked = [];
+  for (const beat of results.filter(Boolean)) {
+    if (beat.status === 'inactive') {
+      checked.push(beat);
+      continue;
+    }
+    // Check last signal from claimant
+    const agentSignals = (await kv.get(`signals:agent:${beat.claimedBy}`, 'json')) || [];
+    let stale = true;
+    if (agentSignals.length > 0) {
+      const lastSignal = await kv.get(`signal:${agentSignals[0]}`, 'json');
+      if (lastSignal && new Date(lastSignal.timestamp).getTime() >= expiryCutoff) {
+        stale = false;
+      }
+    }
+    if (stale && agentSignals.length > 0) {
+      beat.status = 'inactive';
+      await kv.put(`beat:${beat.slug}`, JSON.stringify(beat));
+    } else if (!beat.status) {
+      beat.status = 'active';
+    }
+    checked.push(beat);
+  }
+
+  return json(checked, { cache: 15 });
 }
 
 async function handlePost(context) {
@@ -76,8 +103,12 @@ async function handlePost(context) {
 
   // Check if beat already claimed
   const existing = await kv.get(`beat:${slug}`, 'json');
-  if (existing) {
+  let reclaimed = false;
+  if (existing && existing.status !== 'inactive') {
     return err(`Beat "${slug}" is already claimed by ${existing.claimedBy}`, 409);
+  }
+  if (existing && existing.status === 'inactive') {
+    reclaimed = true;
   }
 
   const beat = {
@@ -87,8 +118,13 @@ async function handlePost(context) {
     color: color || '#22d3ee',
     claimedBy: btcAddress,
     claimedAt: new Date().toISOString(),
+    status: 'active',
     signature,
   };
+
+  if (reclaimed) {
+    beat.previousClaimant = existing.claimedBy;
+  }
 
   // Store beat
   await kv.put(`beat:${slug}`, JSON.stringify(beat));
@@ -100,7 +136,7 @@ async function handlePost(context) {
     await kv.put('beats:index', JSON.stringify(index));
   }
 
-  return json({ ok: true, beat }, { status: 201 });
+  return json({ ok: true, beat, reclaimed }, { status: 201 });
 }
 
 // PATCH /api/beats — update a beat (only the claimant can update, requires signature)

@@ -137,7 +137,10 @@ export async function onRequest(context) {
         correspondentShort: shortAddr,
         streak: streak.current,
         timestamp: signal.timestamp,
+        headline: signal.headline || null,
         content: signal.content,
+        sources: signal.sources || null,
+        tags: signal.tags || null,
         signalId: signal.id,
       });
     }
@@ -179,7 +182,11 @@ export async function onRequest(context) {
   for (const [beatName, beatSections] of Object.entries(textByBeat)) {
     text += `\n${beatName.toUpperCase()}\n\n`;
     for (const section of beatSections) {
+      if (section.headline) text += `▸ ${section.headline}\n`;
       text += `${section.content}\n`;
+      if (section.sources && section.sources.length > 0) {
+        text += `Sources: ${section.sources.map(s => s.title).join(', ')}\n`;
+      }
       text += `— ${section.correspondentShort}`;
       if (section.streak > 1) text += ` (${section.streak}d streak)`;
       text += ` · ${new Date(section.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}\n\n`;
