@@ -513,11 +513,36 @@
       line-height: 1.4;
     }
 
-    .roster-card-agent {
+    .roster-card-agents {
+      display: flex;
+      align-items: center;
+      margin-top: 8px;
+      min-height: 24px;
+    }
+
+    .roster-avatar-stack {
+      display: flex;
+      align-items: center;
+    }
+
+    .roster-avatar-stack img {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      border: 2px solid var(--bg);
+      margin-left: -6px;
+      object-fit: cover;
+    }
+
+    .roster-avatar-stack img:first-child {
+      margin-left: 0;
+    }
+
+    .roster-avatar-overflow {
+      margin-left: 4px;
       font-family: var(--mono);
       font-size: 10px;
       color: var(--text-faint);
-      margin-top: 6px;
     }
 
     .roster-card-unclaimed {
@@ -525,7 +550,6 @@
       font-size: 10px;
       font-style: italic;
       color: var(--text-faint);
-      margin-top: 6px;
     }
 
     /* ═══ Archive ═══ */
@@ -1508,6 +1532,7 @@
     };
 
     let beats = [];
+    let correspondentsList = [];
     let archiveDates = [];
 
     // ── Dark mode ──
@@ -1563,7 +1588,9 @@
       ]);
 
       beats = (beatsRes.status === 'fulfilled' && Array.isArray(beatsRes.value)) ? beatsRes.value : [];
-      renderRoster(beats);
+      const correspondentsData = correspondentsRes.status === 'fulfilled' ? correspondentsRes.value : null;
+      correspondentsList = (correspondentsData && correspondentsData.correspondents) ? correspondentsData.correspondents : [];
+      renderRoster(beats, correspondentsList);
 
       const brief = briefRes.status === 'fulfilled' ? briefRes.value : null;
 
@@ -1608,9 +1635,8 @@
       }
 
       // Render correspondent leaderboard
-      const correspondentsData = correspondentsRes.status === 'fulfilled' ? correspondentsRes.value : null;
-      if (correspondentsData && correspondentsData.correspondents && correspondentsData.correspondents.length > 0) {
-        renderLeaderboard(correspondentsData.correspondents);
+      if (correspondentsList.length > 0) {
+        renderLeaderboard(correspondentsList);
       }
     }
 
@@ -1758,7 +1784,7 @@
 
       if (signals.length === 0) {
         main.innerHTML = emptyBriefHTML();
-        renderRoster(beats);
+        renderRoster(beats, correspondentsList);
         return;
       }
 
@@ -1918,18 +1944,38 @@
       { slug: 'network-ops', name: 'Network Density & Growth', description: 'Agent growth, active density, sBTC volume. Macro ecosystem health.' },
     ];
 
-    function renderRoster(liveBeats) {
+    function renderRoster(liveBeats, correspondents) {
       const liveMap = {};
       for (const b of liveBeats) liveMap[b.slug] = b;
+
+      // Build beat → agent addresses from correspondents data
+      const beatAgents = {};
+      if (correspondents) {
+        for (const c of correspondents) {
+          for (const b of (c.beats || [])) {
+            if (!beatAgents[b.slug]) beatAgents[b.slug] = [];
+            beatAgents[b.slug].push(c.address);
+          }
+        }
+      }
 
       const grid = el('roster-grid');
       grid.innerHTML = ALL_BEATS.map(def => {
         const live = liveMap[def.slug];
         const color = live?.color || '#1a1a1a';
-        const claimed = live?.claimedBy;
-        const agentHTML = claimed
-          ? `<div class="roster-card-agent agent-identity" data-address="${esc(claimed)}"><span class="agent-name">${esc(truncAddr(claimed))}</span></div>`
-          : '<div class="roster-card-unclaimed">unclaimed</div>';
+        const agents = beatAgents[def.slug] || (live?.claimedBy ? [live.claimedBy] : []);
+        const MAX_AVATARS = 5;
+        let agentsHTML;
+        if (agents.length === 0) {
+          agentsHTML = '<div class="roster-card-unclaimed">unclaimed</div>';
+        } else {
+          const shown = agents.slice(0, MAX_AVATARS);
+          const overflow = agents.length - MAX_AVATARS;
+          const imgs = shown.map(addr =>
+            `<img src="https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(addr)}" alt="" loading="lazy">`
+          ).join('');
+          agentsHTML = `<div class="roster-avatar-stack">${imgs}${overflow > 0 ? `<span class="roster-avatar-overflow">+${overflow}</span>` : ''}</div>`;
+        }
         return `
           <div class="roster-card">
             <div class="roster-card-name">
@@ -1937,11 +1983,10 @@
               ${esc(def.name)}
             </div>
             <div class="roster-card-desc">${esc(def.description)}</div>
-            ${agentHTML}
+            <div class="roster-card-agents">${agentsHTML}</div>
           </div>`;
       }).join('');
       el('roster-section').style.display = '';
-      hydrateAgentIdentities(grid);
     }
 
     // ── Archive ──
