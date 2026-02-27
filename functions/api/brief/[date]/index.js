@@ -3,14 +3,14 @@
 // When false, gated behind x402 (1000 sats sBTC).
 // Date format: YYYY-MM-DD
 
-// ── Free-brief toggle (set false to re-enable x402 paywall) ──
-const BRIEFS_FREE = true;
-
 import {
   CORS, json, err, options, methodNotAllowed,
   TREASURY_STX_ADDRESS, SBTC_CONTRACT_MAINNET, X402_RELAY_URL,
   BRIEF_PRICE_SATS, CORRESPONDENT_SHARE,
 } from '../../_shared.js';
+
+// ── Free-brief toggle (set false to re-enable x402 paywall) ──
+const BRIEFS_FREE = true;
 
 export async function onRequest(context) {
   if (context.request.method === 'OPTIONS') return options();
