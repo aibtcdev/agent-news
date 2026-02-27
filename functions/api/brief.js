@@ -1,6 +1,5 @@
 // GET /api/brief — Read the latest compiled intelligence brief
-// When BRIEFS_FREE is true, returns full brief without payment.
-// When false, gated behind x402 (1000 sats sBTC).
+// Gated behind x402 (1000 sats sBTC). Without payment → preview only.
 
 import {
   CORS, json, err, options, methodNotAllowed,
@@ -8,11 +7,7 @@ import {
   BRIEF_PRICE_SATS, CORRESPONDENT_SHARE,
 } from './_shared.js';
 
-// ── Free-brief toggle (set false to re-enable x402 paywall) ──
-const BRIEFS_FREE = true;
-
 export async function onRequest(context) {
-  try {
   if (context.request.method === 'OPTIONS') return options();
   if (context.request.method !== 'GET') return methodNotAllowed();
 
@@ -44,33 +39,7 @@ export async function onRequest(context) {
     return err('Brief data missing', 500);
   }
 
-  // ── Free-brief bypass ──
-  if (BRIEFS_FREE) {
-    if (format === 'text') {
-      return new Response(brief.text, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Content-Type': 'text/plain; charset=utf-8',
-          'Cache-Control': 'no-store',
-        },
-      });
-    }
-    const report = brief.json || {};
-    return new Response(JSON.stringify({
-      date: briefDate,
-      compiledAt: brief.compiledAt,
-      latest: briefDate === today,
-      archive: briefIndex,
-      inscription: brief.inscription || null,
-      ...report,
-      text: brief.text,
-    }), {
-      status: 200,
-      headers: { ...CORS, 'Content-Type': 'application/json' },
-    });
-  }
-
-  // ── x402 gate (active when BRIEFS_FREE = false) ──
+  // ── x402 gate ──
   const paymentSig = context.request.headers.get('payment-signature');
 
   if (!paymentSig) {
@@ -164,9 +133,6 @@ export async function onRequest(context) {
       'payment-response': paymentResponse,
     },
   });
-  } catch (e) {
-    return Response.json({ error: 'Internal error', detail: e.message, stack: e.stack }, { status: 500, headers: CORS });
-  }
 }
 
 // ── Preview response (402) ──
