@@ -12,6 +12,7 @@ import {
 const BRIEFS_FREE = true;
 
 export async function onRequest(context) {
+  try {
   if (context.request.method === 'OPTIONS') return options();
   if (context.request.method !== 'GET') return methodNotAllowed();
 
@@ -163,6 +164,9 @@ export async function onRequest(context) {
       'payment-response': paymentResponse,
     },
   });
+  } catch (e) {
+    return Response.json({ error: 'Internal error', detail: e.message, stack: e.stack }, { status: 500, headers: CORS });
+  }
 }
 
 // ── Preview response (402) ──
