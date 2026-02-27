@@ -1,6 +1,10 @@
 // GET /api/brief/:date — Read a specific brief by date
-// Gated behind x402 (1000 sats sBTC). Without payment → preview only.
+// When BRIEFS_FREE is true, returns full brief without payment.
+// When false, gated behind x402 (1000 sats sBTC).
 // Date format: YYYY-MM-DD
+
+// ── Free-brief toggle (set false to re-enable x402 paywall) ──
+const BRIEFS_FREE = true;
 
 import {
   CORS, json, err, options, methodNotAllowed,
@@ -39,7 +43,30 @@ export async function onRequest(context) {
     );
   }
 
-  // ── x402 gate ──
+  // ── Free-brief bypass ──
+  if (BRIEFS_FREE) {
+    if (format === 'text') {
+      return new Response(brief.text, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+    return new Response(JSON.stringify({
+      date,
+      compiledAt: brief.compiledAt,
+      inscription: brief.inscription || null,
+      ...brief.json,
+      text: brief.text,
+    }), {
+      status: 200,
+      headers: { ...CORS, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // ── x402 gate (active when BRIEFS_FREE = false) ──
   const paymentSig = context.request.headers.get('payment-signature');
 
   if (!paymentSig) {
