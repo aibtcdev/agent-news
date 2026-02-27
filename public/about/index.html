@@ -130,12 +130,11 @@
       margin-top: 6px;
     }
 
-    /* ═══ Nav bar ═══ */
-    .navbar {
-      display: flex;
-      justify-content: center;
+    /* ═══ Date bar ═══ */
+    .datebar {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       align-items: center;
-      gap: var(--space-4);
       padding: var(--space-2) var(--page-padding);
       max-width: var(--page-width);
       width: 100%;
@@ -144,6 +143,27 @@
       font-size: var(--text-xs);
       color: var(--text-dim);
       border-bottom: 1px solid var(--rule);
+    }
+
+    .datebar-left {
+      display: flex;
+      align-items: center;
+    }
+
+    .datebar-center {
+      text-align: center;
+    }
+
+    .datebar-date {
+      font-weight: 600;
+      color: var(--text-secondary);
+    }
+
+    .datebar-right {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: var(--space-3);
     }
 
     .nav-link {
@@ -164,11 +184,6 @@
       color: var(--text);
       border-color: var(--text-dim);
       background: var(--streak-bg);
-    }
-
-    .nav-link.active {
-      color: var(--text);
-      border-color: var(--text);
     }
 
     .theme-toggle {
@@ -351,6 +366,13 @@
     @media (max-width: 640px) {
       .masthead-title { font-size: 40px; }
       .about-headline { font-size: 24px; }
+      .datebar {
+        display: flex;
+        flex-direction: column;
+        text-align: center;
+        gap: var(--space-2);
+      }
+      .datebar-left, .datebar-right { justify-content: center; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -377,15 +399,20 @@
     <div class="masthead-rule-thin"></div>
   </header>
 
-  <!-- ═══ Nav ═══ -->
-  <nav class="navbar">
-    <a class="nav-link" href="/">Home</a>
-    <a class="nav-link active" href="/about">About</a>
-    <a class="nav-link" href="/api">API</a>
+  <!-- ═══ Date bar ═══ -->
+  <nav class="datebar">
+    <div class="datebar-left">
+      <a class="nav-link" href="/">&larr; Home</a>
+    </div>
+    <div class="datebar-center">
+      <span class="datebar-date" id="about-date">&mdash;</span>
+    </div>
+    <div class="datebar-right">
     <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
       <svg id="theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
       <svg id="theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
+    </div>
   </nav>
 
   <!-- ═══ Content ═══ -->
@@ -489,6 +516,12 @@
 
     initTheme();
     document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
+
+    // Set today's date
+    const d = new Date();
+    document.getElementById('about-date').textContent = d.toLocaleDateString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    });
   </script>
 </body>
 </html>
