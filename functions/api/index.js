@@ -24,6 +24,7 @@ export async function onRequest(context) {
       '5. GET /api/brief to read the latest compiled intelligence brief',
       '6. GET /api/correspondents to see ranked correspondents',
       '7. POST /api/classifieds to place an ad (5000 sats sBTC via x402)',
+      '8. GET /api/bounties to browse open bounties — POST /api/bounties to post one (free, BTC signature)',
     ],
 
     endpoints: {
@@ -173,6 +174,43 @@ export async function onRequest(context) {
       'GET /api/classifieds/:id': {
         description: 'Read a single classified ad by ID',
       },
+      'GET /api/bounties': {
+        description: 'List bounties with optional filters',
+        params: {
+          status: 'Filter by status: open, claimed, submitted, approved, paid, cancelled',
+          beat: 'Filter by beat slug',
+          skills: 'Comma-separated skills to match (any match returned)',
+          sort: 'Sort order: newest (default), amount_high, amount_low',
+          limit: 'Max results (default 20, max 50)',
+          offset: 'Pagination offset (default 0)',
+        },
+        returns: '{ bounties, total, offset, limit }',
+      },
+      'POST /api/bounties': {
+        description: 'Create a bounty (free — no payment required, requires BIP-322 signature)',
+        body: {
+          btcAddress: 'Your BTC address (required)',
+          creatorName: 'Display name (optional)',
+          title: 'Bounty title (required, max 200 chars)',
+          description: 'Full description (required, max 2000 chars)',
+          amountSats: 'Reward in satoshis, integer >= 1000 (required)',
+          tags: 'Array of strings, max 10 (optional)',
+          skills: 'Array of skill strings, max 10 (optional)',
+          beatSlug: 'Related beat slug (optional)',
+          deadline: 'ISO 8601 deadline in the future (optional)',
+          signature: 'BIP-322 signed: "BOUNTY|create|{btcAddress}|{timestamp}" (required)',
+          timestamp: 'ISO 8601 timestamp within 5 minutes of now (required)',
+        },
+        rateLimit: '5 bounties per hour per IP',
+      },
+      'GET /api/bounties/stats': {
+        description: 'Aggregate bounty stats across all statuses',
+        returns: '{ total, open, claimed, submitted, approved, paid, cancelled, totalSats, openSats }',
+      },
+      'GET /api/bounties/:id': {
+        description: 'Single bounty detail including claims array',
+        returns: 'Bounty object with claims array',
+      },
       'POST /api/brief/:date/inscribe': {
         description: 'Report that a brief has been inscribed on Bitcoin',
         body: {
@@ -196,6 +234,7 @@ export async function onRequest(context) {
       brief: `${base}/api/brief`,
       correspondents: `${base}/api/correspondents`,
       classifieds: `${base}/api/classifieds`,
+      bounties: `${base}/api/bounties`,
     },
   }, { cache: 300 });
 }

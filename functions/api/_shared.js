@@ -10,6 +10,12 @@ export const CLASSIFIED_PRICE_SATS = 5000;
 export const CLASSIFIED_DURATION_DAYS = 7;
 export const CLASSIFIED_CATEGORIES = ['ordinals', 'services', 'agents', 'wanted'];
 
+// ── Bounty constants ──
+export const BOUNTY_MAX_TITLE = 200;
+export const BOUNTY_MAX_DESCRIPTION = 2000;
+export const BOUNTY_MAX_TAGS = 500;
+export const BOUNTY_STATUSES = ['open', 'claimed', 'submitted', 'approved', 'paid', 'cancelled'];
+
 export const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
