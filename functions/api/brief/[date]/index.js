@@ -54,11 +54,12 @@ export async function onRequest(context) {
         },
       });
     }
+    const report = brief.json || {};
     return new Response(JSON.stringify({
       date,
       compiledAt: brief.compiledAt,
       inscription: brief.inscription || null,
-      ...brief.json,
+      ...report,
       text: brief.text,
     }), {
       status: 200,
