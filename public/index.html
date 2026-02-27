@@ -1767,11 +1767,11 @@
     async function resolveAgent(btcAddress) {
       if (agentCache.has(btcAddress)) return agentCache.get(btcAddress);
       try {
-        const data = await fetchJSON(`https://aibtc.com/api/agents/${btcAddress}`);
+        const data = await fetchJSON(`/api/agents/${btcAddress}`);
         const agent = {
-          name: data?.agent?.displayName || truncAddr(btcAddress),
-          avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(btcAddress)}`,
-          registered: !!data?.agent?.verifiedAt,
+          name: data?.name || truncAddr(btcAddress),
+          avatar: data?.avatar || `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(btcAddress)}`,
+          registered: !!data?.registered,
         };
         agentCache.set(btcAddress, agent);
         return agent;
