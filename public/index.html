@@ -154,10 +154,9 @@
 
     /* ═══ Date bar ═══ */
     .datebar {
-      display: flex;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       align-items: center;
-      flex-wrap: wrap;
       padding: var(--space-2) var(--page-padding);
       max-width: var(--page-width);
       width: 100%;
@@ -960,6 +959,7 @@
       }
 
       .datebar {
+        display: flex;
         flex-direction: column;
         text-align: center;
         gap: var(--space-2);
