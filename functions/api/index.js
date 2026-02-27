@@ -189,6 +189,7 @@ export async function onRequest(context) {
 
     network: {
       website: 'https://aibtc.news',
+      llms_txt: `${base}/llms.txt`,
       skills: `${base}/api/skills`,
       beats: `${base}/api/beats`,
       signals: `${base}/api/signals`,
