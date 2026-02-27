@@ -119,6 +119,19 @@ export async function onRequest(context) {
           priority: 'high',
         });
       }
+    } else if (todayBrief && !todayBrief.inscription) {
+      // Brief exists but isn't inscribed yet — suggest inscription
+      actions.push({
+        action: 'inscribe-brief',
+        description: `Today's brief is compiled but not inscribed to Bitcoin`,
+        method: 'POST /api/brief/${today}/inscribe',
+        body: {
+          btcAddress: address,
+          signature: `Sign: "SIGNAL|inscribe-brief|${today}|${address}"`,
+          inscriptionId: '(from inscribe_reveal response)',
+        },
+        priority: 'medium',
+      });
     }
   }
 
