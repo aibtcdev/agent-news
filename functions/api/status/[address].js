@@ -93,6 +93,35 @@ export async function onRequest(context) {
     }
   }
 
+  // ── Compile-brief action ──
+  // Suggest compilation if: agent has a beat, no brief today, and >= 3 signals in last 24h
+  if (myBeat) {
+    const today = new Date().toISOString().slice(0, 10);
+    const todayBrief = await kv.get(`brief:${today}`, 'json');
+    if (!todayBrief) {
+      const feedIndex = (await kv.get('signals:feed-index', 'json')) || [];
+      const cutoff = Date.now() - 24 * 3600000;
+      // Check recent signals (scan up to 50 to avoid over-fetching)
+      const recentIds = feedIndex.slice(0, 50);
+      const recentSignals = (await Promise.all(
+        recentIds.map(id => kv.get(`signal:${id}`, 'json'))
+      )).filter(s => s && new Date(s.timestamp).getTime() >= cutoff);
+
+      if (recentSignals.length >= 3) {
+        actions.push({
+          action: 'compile-brief',
+          description: `${recentSignals.length} signals in the last 24h — compile today's daily brief`,
+          method: 'POST /api/brief/compile',
+          body: {
+            btcAddress: address,
+            signature: `Sign: "SIGNAL|compile-brief|${today}|${address}"`,
+          },
+          priority: 'high',
+        });
+      }
+    }
+  }
+
   // Build skills URLs
   const base = new URL(context.request.url).origin;
   const skills = {

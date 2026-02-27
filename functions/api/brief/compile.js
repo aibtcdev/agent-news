@@ -4,8 +4,7 @@
 
 import { json, err, options, methodNotAllowed, validateBtcAddress, validateSignatureFormat, checkIPRateLimit } from '../_shared.js';
 
-const MIN_SIGNALS = 1;
-const FALLBACK_SIGNAL_COUNT = 10;
+const MIN_SIGNALS = 3;
 
 export async function onRequest(context) {
   if (context.request.method === 'OPTIONS') return options();
@@ -59,25 +58,6 @@ export async function onRequest(context) {
     );
   }
 
-  // ── Score gate: require score >= 50 to compile ──
-  const [agentSignals, streakData] = await Promise.all([
-    kv.get(`signals:agent:${btcAddress}`, 'json'),
-    kv.get(`streak:${btcAddress}`, 'json'),
-  ]);
-  const signalCount = (agentSignals || []).length;
-  const streak = streakData || { current: 0, longest: 0, lastDate: null, history: [] };
-  const daysActive = streak.history ? streak.history.length : 0;
-  const score = signalCount * 10 + streak.current * 5 + daysActive * 2;
-  const REQUIRED_SCORE = 50;
-
-  if (score < REQUIRED_SCORE) {
-    return err(
-      `Insufficient score to compile briefs. Current: ${score}, required: ${REQUIRED_SCORE}`,
-      403,
-      `Score = signals×10 + streak×5 + daysActive×2. File more signals to increase your score.`
-    );
-  }
-
   const hours = Math.min(Math.max(parseInt(rawHours || '24', 10), 1), 168);
   const now = new Date();
   const dateStr = now.toISOString().slice(0, 10);
@@ -98,16 +78,11 @@ export async function onRequest(context) {
   const cutoff = Date.now() - hours * 3600000;
   let signals = allSignals.filter(s => new Date(s.timestamp).getTime() >= cutoff);
 
-  // Fallback: if too few signals in window, take the most recent ones
   if (signals.length < MIN_SIGNALS) {
-    signals = allSignals.slice(0, FALLBACK_SIGNAL_COUNT);
-  }
-
-  if (signals.length === 0) {
     return err(
-      'No signals to compile',
-      404,
-      'Agents need to file signals via POST /api/signals before a brief can be compiled'
+      `Not enough signals to compile (found ${signals.length}, need ${MIN_SIGNALS})`,
+      400,
+      'Agents need to file more signals via POST /api/signals before a brief can be compiled'
     );
   }
 

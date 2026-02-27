@@ -1502,34 +1502,7 @@
 
       const brief = briefRes.status === 'fulfilled' ? briefRes.value : null;
 
-      if (brief && brief.preview) {
-        // Brief exists but is behind paywall — show preview summary + signal feed
-        if (brief.summary) {
-          el('stat-correspondents').textContent = brief.summary.correspondents || 0;
-          el('stat-beats').textContent = brief.summary.beats || 0;
-          el('stat-signals').textContent = brief.summary.signals || 0;
-          el('summary-line').style.display = '';
-        }
-        setDate(brief.date);
-        await renderSignalFeed();
-        // Add paywall banner below summary
-        const summaryEl = el('summary-line');
-        if (summaryEl && !document.getElementById('paywall-banner')) {
-          const banner = document.createElement('div');
-          banner.id = 'paywall-banner';
-          banner.className = 'paywall-banner';
-          banner.innerHTML = '<strong>Full Daily Brief Available</strong><span class="paywall-price">1,000 sats sBTC</span><span class="paywall-protocol">via x402</span>';
-          summaryEl.parentNode.insertBefore(banner, summaryEl.nextSibling);
-
-          // Preview beat pills
-          if (brief.beats && brief.beats.length > 0) {
-            const beatsDiv = document.createElement('div');
-            beatsDiv.className = 'preview-beats';
-            beatsDiv.innerHTML = brief.beats.map(b => `<span class="preview-beat-pill">${esc(b)}</span>`).join('');
-            banner.parentNode.insertBefore(beatsDiv, banner.nextSibling);
-          }
-        }
-      } else if (brief && brief.sections && brief.sections.length > 0) {
+      if (brief && brief.sections && brief.sections.length > 0) {
         renderBrief(brief);
       } else {
         // No brief — render raw signal feed
@@ -1614,8 +1587,7 @@
     async function fetchJSON(url) {
       try {
         const res = await fetch(url);
-        // Also parse 402 responses (x402 previews)
-        if (!res.ok && res.status !== 402) return null;
+        if (!res.ok) return null;
         return await res.json();
       } catch { return null; }
     }
@@ -1956,16 +1928,7 @@
       </div>`;
 
       const brief = await fetchJSON(`/api/brief/${date}?format=json`);
-      if (brief && brief.preview) {
-        let archivePaywall = '<div class="paywall-banner"><strong>Brief Available</strong><span class="paywall-price">1,000 sats sBTC</span><span class="paywall-protocol">via x402</span></div>';
-        if (brief.beats && brief.beats.length > 0) {
-          archivePaywall += '<div class="preview-beats">' + brief.beats.map(b => `<span class="preview-beat-pill">${esc(b)}</span>`).join('') + '</div>';
-        }
-        main.innerHTML = archivePaywall;
-        document.querySelectorAll('.archive-pill').forEach(p =>
-          p.classList.toggle('active', p.dataset.date === date)
-        );
-      } else if (brief && brief.sections && brief.sections.length > 0) {
+      if (brief && brief.sections && brief.sections.length > 0) {
         renderBrief(brief);
         document.querySelectorAll('.archive-pill').forEach(p =>
           p.classList.toggle('active', p.dataset.date === date)
