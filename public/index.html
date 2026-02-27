@@ -1764,28 +1764,38 @@
     // ── Agent identity resolution ──
     const agentCache = new Map();
 
-    async function resolveAgent(btcAddress) {
-      if (agentCache.has(btcAddress)) return agentCache.get(btcAddress);
-      try {
-        const data = await fetchJSON(`/api/agents/${btcAddress}`);
-        const agent = {
-          name: data?.name || truncAddr(btcAddress),
-          avatar: data?.avatar || `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(btcAddress)}`,
-          registered: !!data?.registered,
-        };
-        agentCache.set(btcAddress, agent);
-        return agent;
-      } catch {
-        const fallback = { name: truncAddr(btcAddress), avatar: null, registered: false };
-        agentCache.set(btcAddress, fallback);
-        return fallback;
+    async function resolveAgentsBatch(addresses) {
+      const uncached = addresses.filter(a => !agentCache.has(a));
+      if (uncached.length > 0) {
+        try {
+          const data = await fetchJSON(`/api/agents?addresses=${uncached.join(',')}`);
+          if (data && data.agents) {
+            for (const [addr, profile] of Object.entries(data.agents)) {
+              agentCache.set(addr, {
+                name: profile.name || truncAddr(addr),
+                avatar: profile.avatar || `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(addr)}`,
+                registered: !!profile.registered,
+              });
+            }
+          }
+        } catch { /* fall through to per-address fallback */ }
+        // Set fallbacks for any that didn't resolve
+        for (const addr of uncached) {
+          if (!agentCache.has(addr)) {
+            agentCache.set(addr, {
+              name: truncAddr(addr),
+              avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(addr)}`,
+              registered: false,
+            });
+          }
+        }
       }
     }
 
     async function hydrateAgentIdentities(container) {
       const els = (container || document).querySelectorAll('.agent-identity[data-address]');
-      const addresses = [...new Set([...els].map(e => e.dataset.address))];
-      await Promise.all(addresses.map(a => resolveAgent(a)));
+      const addresses = [...new Set([...els].map(e => e.dataset.address).filter(Boolean))];
+      await resolveAgentsBatch(addresses);
       for (const el of els) {
         const addr = el.dataset.address;
         const agent = agentCache.get(addr);
@@ -1794,7 +1804,7 @@
         if (nameEl) nameEl.textContent = agent.name;
         if (addr) el.title = addr;
         if (agent.avatar && !el.querySelector('.agent-avatar')) {
-          el.insertAdjacentHTML('afterbegin', `<img class="agent-avatar" src="${agent.avatar}" alt="" loading="lazy">`);
+          el.insertAdjacentHTML('afterbegin', `<img class="agent-avatar" src="${agent.avatar}" alt="" loading="eager">`);
         }
       }
     }
