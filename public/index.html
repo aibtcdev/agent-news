@@ -711,6 +711,44 @@
       color: var(--bg);
     }
 
+    /* ═══ Inscription text ═══ */
+    .inscription-text-section {
+      margin-top: var(--space-6);
+      padding-top: var(--space-6);
+      border-top: 2px solid var(--rule);
+    }
+
+    .inscription-text-header {
+      font-family: var(--sans);
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin-bottom: var(--space-4);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .inscription-text-header::before {
+      content: '\26D3';
+      font-size: 13px;
+    }
+
+    .inscription-text-body {
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.7;
+      color: var(--text-secondary);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      padding: var(--space-5);
+      background: var(--streak-bg);
+      border: 1px solid var(--rule-faint);
+      overflow-x: auto;
+    }
+
     /* ═══ Skeleton loading ═══ */
     .skeleton {
       padding: 32px 0;
@@ -1650,6 +1688,19 @@
         for (const item of remaining) {
           html += renderStory(item.section, item.beat);
         }
+      }
+
+      // Inscription text
+      if (brief.text) {
+        html += `
+          <div class="inscription-text-section fade-in">
+            <div class="inscription-text-header">
+              ${brief.inscription && brief.inscription.inscriptionId
+                ? `<a class="inscription-badge" href="https://ordinals.com/inscription/${esc(brief.inscription.inscriptionId)}" target="_blank" rel="noopener">${esc(brief.inscription.inscriptionId.length > 20 ? brief.inscription.inscriptionId.slice(0, 8) + '\u2026' + brief.inscription.inscriptionId.slice(-6) : brief.inscription.inscriptionId)}</a>`
+                : 'Full Brief'}
+            </div>
+            <pre class="inscription-text-body">${esc(brief.text)}</pre>
+          </div>`;
       }
 
       main.innerHTML = html;
