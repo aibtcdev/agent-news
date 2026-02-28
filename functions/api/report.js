@@ -5,7 +5,7 @@
 //   ?hours=48 — customize lookback window (default 24)
 //   ?generate=true — store the compiled report in KV for inscription pipeline
 
-import { json, err, options, methodNotAllowed, CORS, checkIPRateLimit } from './_shared.js';
+import { json, err, options, methodNotAllowed, CORS, checkIPRateLimit, getPacificDate } from './_shared.js';
 
 const MIN_SIGNALS = 3;
 const FALLBACK_SIGNAL_COUNT = 5;
@@ -70,7 +70,7 @@ export async function onRequest(context) {
 
     // 5. Compile report
     const now = new Date();
-    const dateStr = now.toISOString().slice(0, 10);
+    const dateStr = getPacificDate(now);
 
     // Group signals by beat for organized output
     const signalsByBeat = {};

@@ -1678,7 +1678,7 @@
     // ── Render signal feed (fallback) ──
     async function renderSignalFeed() {
       const main = el('main-content');
-      setDate(new Date().toISOString().slice(0, 10));
+      setDate(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
 
       const data = await fetchJSON('/api/signals?limit=20');
       const signals = (data && data.signals) ? data.signals : [];
@@ -1902,7 +1902,7 @@
       const list = el('archive-list');
       list.innerHTML = dates.map(date => {
         const d = new Date(date + 'T12:00:00Z');
-        const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const label = d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric' });
         const cls = date === activeDate ? ' active' : '';
         return `<a class="archive-pill${cls}" href="#" data-date="${esc(date)}">${esc(label)}</a>`;
       }).join('');
@@ -1984,6 +1984,7 @@
     function setDate(dateStr) {
       const d = new Date(dateStr + 'T12:00:00Z');
       el('brief-date').textContent = d.toLocaleDateString('en-US', {
+        timeZone: 'America/Los_Angeles',
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
       });
     }
@@ -2010,7 +2011,7 @@
       if (days <= 7) return `${days}d ago`;
       // Fallback to short date
       const d = new Date(ts);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      return d.toLocaleDateString('en-US', { timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric' });
     }
 
     function esc(str) {

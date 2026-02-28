@@ -7,6 +7,7 @@ import {
   validateBtcAddress, validateSlug, validateSignatureFormat,
   sanitizeString, checkIPRateLimit,
   validateHeadline, validateSources, validateTags,
+  getPacificDate, getPacificYesterday,
 } from './_shared.js';
 
 const MAX_FEED_SIZE = 200;
@@ -199,7 +200,7 @@ async function handlePost(context) {
 }
 
 async function updateStreak(kv, btcAddress, now) {
-  const today = now.toISOString().slice(0, 10);
+  const today = getPacificDate(now);
   const streak = (await kv.get(`streak:${btcAddress}`, 'json')) || {
     current: 0,
     longest: 0,
@@ -208,14 +209,12 @@ async function updateStreak(kv, btcAddress, now) {
   };
 
   if (streak.lastDate === today) {
-    // Already filed today, no change
+    // Already filed today (Pacific), no change
     return;
   }
 
-  // Check if this is consecutive (yesterday or today)
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+  // Check if this is consecutive (yesterday in Pacific)
+  const yesterdayStr = getPacificYesterday(now);
 
   if (streak.lastDate === yesterdayStr) {
     streak.current += 1;

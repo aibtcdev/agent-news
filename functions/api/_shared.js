@@ -1,5 +1,25 @@
 // Shared utilities for Signal API endpoints
 
+// ── Pacific timezone helpers ──
+const PACIFIC_TZ = 'America/Los_Angeles';
+
+export function getPacificDate(now = new Date()) {
+  return now.toLocaleDateString('en-CA', { timeZone: PACIFIC_TZ });
+}
+
+export function getPacificYesterday(now = new Date()) {
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  return getPacificDate(yesterday);
+}
+
+export function formatPacificShort(isoStr) {
+  return new Date(isoStr).toLocaleString('en-US', {
+    timeZone: PACIFIC_TZ,
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+}
+
 // ── Payment constants ──
 export const TREASURY_STX_ADDRESS = 'SP236MA9EWHF1DN3X84EQAJEW7R6BDZZ93K3EMC3C';
 export const SBTC_CONTRACT_MAINNET = 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token';

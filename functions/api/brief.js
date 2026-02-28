@@ -1,7 +1,7 @@
 // GET /api/brief — Read the latest compiled intelligence brief
 // Returns full brief without payment (free during growth phase)
 
-import { json, err, options, methodNotAllowed } from './_shared.js';
+import { json, err, options, methodNotAllowed, getPacificDate } from './_shared.js';
 
 export async function onRequest(context) {
   if (context.request.method === 'OPTIONS') return options();
@@ -12,7 +12,7 @@ export async function onRequest(context) {
   const format = url.searchParams.get('format') || 'json';
 
   // Try today's brief first, then find the most recent
-  const today = new Date().toISOString().slice(0, 10);
+  const today = getPacificDate();
   const briefIndex = (await kv.get('briefs:index', 'json')) || [];
 
   let briefDate = null;

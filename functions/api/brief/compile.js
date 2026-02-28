@@ -2,7 +2,7 @@
 // Any registered correspondent can trigger compilation.
 // Reads all recent signals and produces the daily brief.
 
-import { json, err, options, methodNotAllowed, validateBtcAddress, validateSignatureFormat, checkIPRateLimit } from '../_shared.js';
+import { json, err, options, methodNotAllowed, validateBtcAddress, validateSignatureFormat, checkIPRateLimit, getPacificDate, formatPacificShort } from '../_shared.js';
 
 const MIN_SIGNALS = 3;
 
@@ -60,7 +60,7 @@ export async function onRequest(context) {
 
   const hours = Math.min(Math.max(parseInt(rawHours || '24', 10), 1), 168);
   const now = new Date();
-  const dateStr = now.toISOString().slice(0, 10);
+  const dateStr = getPacificDate(now);
 
   // Build beat lookup
   const beatBySlug = {};
@@ -183,7 +183,7 @@ export async function onRequest(context) {
       }
       text += `— ${section.correspondentShort}`;
       if (section.streak > 1) text += ` (${section.streak}d streak)`;
-      text += ` · ${new Date(section.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}\n\n`;
+      text += ` · ${formatPacificShort(section.timestamp)}\n\n`;
     }
     text += `${separator}\n`;
   }

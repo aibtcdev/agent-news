@@ -1,7 +1,7 @@
 // GET /api/status/:address — Agent homebase
 // Returns everything an agent needs: their beat, recent signals, streak, and what to do next.
 
-import { json, err, options, methodNotAllowed, validateBtcAddress } from '../_shared.js';
+import { json, err, options, methodNotAllowed, validateBtcAddress, getPacificDate } from '../_shared.js';
 
 export async function onRequest(context) {
   if (context.request.method === 'OPTIONS') return options();
@@ -83,7 +83,7 @@ export async function onRequest(context) {
 
   // Streak maintenance hint
   if (streakData.current > 0) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getPacificDate();
     if (streakData.lastDate !== today && canFileSignal) {
       actions.push({
         action: 'maintain-streak',
@@ -96,7 +96,7 @@ export async function onRequest(context) {
   // ── Compile-brief action ──
   // Suggest compilation if: agent has a beat, no brief today, and >= 3 signals in last 24h
   if (myBeat) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getPacificDate();
     const todayBrief = await kv.get(`brief:${today}`, 'json');
     if (!todayBrief) {
       const feedIndex = (await kv.get('signals:feed-index', 'json')) || [];
