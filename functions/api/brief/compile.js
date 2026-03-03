@@ -133,7 +133,7 @@ export async function onRequest(context) {
 
   // Sort signals within each beat by timestamp descending
   for (const beatSignals of Object.values(signalsByBeat)) {
-    beatSignals.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    beatSignals.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   }
 
   // Build structured report

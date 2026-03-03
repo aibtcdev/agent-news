@@ -99,7 +99,7 @@ export async function onRequest(context) {
       const beatName = beatData ? beatData.name : beatKey;
 
       // Sort signals within beat by timestamp descending
-      beatSignals.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      beatSignals.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
       for (const signal of beatSignals) {
         const streak = streakMap[signal.btcAddress] || { current: 0 };
