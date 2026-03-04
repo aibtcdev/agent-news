@@ -78,6 +78,8 @@ export interface Beat {
   readonly created_by: string;
   readonly created_at: string;
   readonly updated_at: string;
+  /** Computed on read — not stored in DB */
+  readonly status?: "active" | "inactive";
 }
 
 /**
