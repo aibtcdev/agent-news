@@ -130,22 +130,18 @@ app.get("/", (c) => {
 // 404 handler
 app.notFound((c) => {
   return c.json(
-    {
-      success: false,
-      error: "Not found",
-      details: `Route ${c.req.method} ${c.req.path} not found`,
-    },
+    { error: `Route ${c.req.method} ${c.req.path} not found` },
     404
   );
 });
 
 // Global error handler
 app.onError((err, c) => {
+  const isLocal = !c.env.ENVIRONMENT || c.env.ENVIRONMENT === "local";
   return c.json(
     {
-      success: false,
       error: "Internal server error",
-      details: err.message,
+      ...(isLocal ? { details: err.message } : {}),
     },
     500
   );
