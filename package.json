@@ -8,10 +8,13 @@
     "deploy:production": "wrangler deploy --env production",
     "deploy:dry-run": "wrangler deploy --dry-run",
     "typecheck": "tsc --noEmit",
-    "cf-typegen": "wrangler types"
+    "cf-typegen": "wrangler types",
+    "migrate": "npx tsx scripts/migrate-kv-to-do.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241205.0",
+    "@types/node": "^25.3.3",
+    "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "wrangler": "^4.0.0"
   },

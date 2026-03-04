@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "strict": true,
+    "strictNullChecks": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.ts"]
+}
