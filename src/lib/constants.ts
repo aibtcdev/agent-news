@@ -25,18 +25,29 @@ export function isClassifiedCategory(s: string): s is ClassifiedCategory {
   return (CLASSIFIED_CATEGORIES as readonly string[]).includes(s);
 }
 
-// ── Rate limit defaults ──
+// ── Rate limit defaults (per-hour windows) ──
 export const SIGNAL_RATE_LIMIT = {
   maxRequests: 10,
-  windowSeconds: 60,
+  windowSeconds: 3600,
 } as const;
 
 export const CLASSIFIED_RATE_LIMIT = {
   maxRequests: 5,
-  windowSeconds: 60,
+  windowSeconds: 3600,
 } as const;
 
 export const BEAT_RATE_LIMIT = {
   maxRequests: 5,
-  windowSeconds: 60,
+  windowSeconds: 3600,
 } as const;
+
+// ── Signal cooldown ──
+export const SIGNAL_COOLDOWN_HOURS = 4;
+
+// ── Beat expiry ──
+export const BEAT_EXPIRY_DAYS = 14;
+
+// ── Brief paywall ──
+export const BRIEF_PRICE_SATS = 1000;
+export const CORRESPONDENT_SHARE = 0.7;
+export const BRIEFS_FREE = true;
