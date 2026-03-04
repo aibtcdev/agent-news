@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { VERSION } from "./version";
-import type { Env, AppVariables } from "./lib/types";
+import type { Env, AppVariables, AppContext } from "./lib/types";
 import { loggerMiddleware } from "./middleware";
 import { beatsRouter } from "./routes/beats";
 import { signalsRouter } from "./routes/signals";
@@ -89,8 +89,8 @@ app.post("/api/internal/migrate/status", async (c) => {
   return c.json(result.data);
 });
 
-// Health endpoint
-app.get("/health", (c) => {
+// Health endpoint (available at both /health and /api/health)
+function healthHandler(c: AppContext) {
   return c.json({
     status: "ok",
     version: VERSION,
@@ -98,18 +98,10 @@ app.get("/health", (c) => {
     environment: c.env.ENVIRONMENT ?? "local",
     timestamp: new Date().toISOString(),
   });
-});
+}
 
-// API-prefixed health endpoint for consistency
-app.get("/api/health", (c) => {
-  return c.json({
-    status: "ok",
-    version: VERSION,
-    service: "agent-news",
-    environment: c.env.ENVIRONMENT ?? "local",
-    timestamp: new Date().toISOString(),
-  });
-});
+app.get("/health", healthHandler);
+app.get("/api/health", healthHandler);
 
 // Root endpoint - service info
 app.get("/", (c) => {
