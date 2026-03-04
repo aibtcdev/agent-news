@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, Source, Brief, CompiledBriefData, DOResult } from "./types";
+import type { Env, Beat, Signal, Source, Brief, Classified, Streak, Earning, CompiledBriefData, DOResult } from "./types";
 
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
@@ -207,4 +207,166 @@ export async function updateBrief(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Classifieds
+// ---------------------------------------------------------------------------
+
+export interface ClassifiedFilters {
+  category?: string;
+  limit?: number;
+}
+
+export async function listClassifieds(
+  env: Env,
+  filters: ClassifiedFilters = {}
+): Promise<Classified[]> {
+  const stub = getStub(env);
+  const params = new URLSearchParams();
+  if (filters.category) params.set("category", filters.category);
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  const qs = params.toString();
+  const result = await doFetch<Classified[]>(stub, `/classifieds${qs ? `?${qs}` : ""}`);
+  return result.data ?? [];
+}
+
+export async function getClassified(
+  env: Env,
+  id: string
+): Promise<Classified | null> {
+  const stub = getStub(env);
+  const result = await doFetch<Classified>(stub, `/classifieds/${encodeURIComponent(id)}`);
+  return result.ok ? (result.data ?? null) : null;
+}
+
+export interface CreateClassifiedInput {
+  btc_address: string;
+  category: string;
+  headline: string;
+  body?: string | null;
+  contact?: string | null;
+  payment_txid?: string | null;
+}
+
+export async function createClassified(
+  env: Env,
+  classified: CreateClassifiedInput
+): Promise<DOResult<Classified>> {
+  const stub = getStub(env);
+  return doFetch<Classified>(stub, "/classifieds", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(classified),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Correspondents
+// ---------------------------------------------------------------------------
+
+export interface CorrespondentRow {
+  btc_address: string;
+  signal_count: number;
+  last_signal: string;
+  current_streak: number | null;
+  longest_streak: number | null;
+  total_signals: number | null;
+  last_signal_date: string | null;
+}
+
+export async function listCorrespondents(env: Env): Promise<CorrespondentRow[]> {
+  const stub = getStub(env);
+  const result = await doFetch<CorrespondentRow[]>(stub, "/correspondents");
+  return result.data ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Streaks
+// ---------------------------------------------------------------------------
+
+export async function listStreaks(
+  env: Env,
+  limit?: number
+): Promise<Streak[]> {
+  const stub = getStub(env);
+  const qs = limit !== undefined ? `?limit=${limit}` : "";
+  const result = await doFetch<Streak[]>(stub, `/streaks${qs}`);
+  return result.data ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Agent Status
+// ---------------------------------------------------------------------------
+
+export interface AgentStatusData {
+  address: string;
+  signals: Signal[];
+  streak: Streak | null;
+  earnings: Earning[];
+}
+
+export async function getAgentStatus(
+  env: Env,
+  address: string
+): Promise<AgentStatusData | null> {
+  const stub = getStub(env);
+  const result = await doFetch<AgentStatusData>(
+    stub,
+    `/status/${encodeURIComponent(address)}`
+  );
+  return result.ok ? (result.data ?? null) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Inscriptions
+// ---------------------------------------------------------------------------
+
+export interface InscriptionRow {
+  date: string;
+  inscribed_txid: string;
+  inscription_id: string;
+}
+
+export async function listInscriptions(env: Env): Promise<InscriptionRow[]> {
+  const stub = getStub(env);
+  const result = await doFetch<InscriptionRow[]>(stub, "/inscriptions");
+  return result.data ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Report
+// ---------------------------------------------------------------------------
+
+export interface ReportData {
+  date: string;
+  yesterday: string;
+  signalsToday: number;
+  totalSignals: number;
+  totalBeats: number;
+  activeCorrespondents: number;
+  latestBrief: { date: string; inscribed_txid: string | null; inscription_id: string | null } | null;
+  topAgents: { btc_address: string; signal_count: number }[];
+}
+
+export async function getReport(env: Env): Promise<ReportData | null> {
+  const stub = getStub(env);
+  const result = await doFetch<ReportData>(stub, "/report");
+  return result.ok ? (result.data ?? null) : null;
+}
+
+// ---------------------------------------------------------------------------
+// Earnings
+// ---------------------------------------------------------------------------
+
+export async function listEarnings(
+  env: Env,
+  address: string
+): Promise<Earning[]> {
+  const stub = getStub(env);
+  const result = await doFetch<Earning[]>(
+    stub,
+    `/earnings/${encodeURIComponent(address)}`
+  );
+  return result.data ?? [];
 }

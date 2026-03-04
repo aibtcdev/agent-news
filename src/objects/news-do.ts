@@ -1,8 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
-import type { Env, Beat, Signal, Streak, Brief, CompiledBriefData, DOResult } from "../lib/types";
+import type { Env, Beat, Signal, Streak, Brief, Classified, Earning, CompiledBriefData, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
+import { CLASSIFIED_DURATION_DAYS } from "../lib/constants";
 import { SCHEMA_SQL } from "./schema";
 
 /**
@@ -695,6 +696,292 @@ export class NewsDO extends DurableObject<Env> {
         .toArray();
 
       return c.json({ ok: true, data: updated[0] as unknown as Brief } satisfies DOResult<Brief>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Classifieds CRUD
+    // -------------------------------------------------------------------------
+
+    // GET /classifieds — list active classifieds
+    this.router.get("/classifieds", (c) => {
+      const category = c.req.query("category") ?? null;
+      const limitParam = c.req.query("limit");
+      const limit = Math.min(
+        Math.max(1, parseInt(limitParam ?? "20", 10) || 20),
+        50
+      );
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM classifieds
+           WHERE expires_at > datetime('now')
+             AND (?1 IS NULL OR category = ?1)
+           ORDER BY created_at DESC
+           LIMIT ?2`,
+          category,
+          limit
+        )
+        .toArray();
+      return c.json({
+        ok: true,
+        data: rows as unknown as Classified[],
+      } satisfies DOResult<Classified[]>);
+    });
+
+    // GET /classifieds/:id — get a single classified
+    this.router.get("/classifieds/:id", (c) => {
+      const id = c.req.param("id");
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM classifieds WHERE id = ?", id)
+        .toArray();
+      if (rows.length === 0) {
+        return c.json(
+          { ok: false, error: `Classified "${id}" not found` } satisfies DOResult<Classified>,
+          404
+        );
+      }
+      return c.json({ ok: true, data: rows[0] as unknown as Classified } satisfies DOResult<Classified>);
+    });
+
+    // POST /classifieds — insert a new classified ad
+    this.router.post("/classifieds", async (c) => {
+      let body: Record<string, unknown>;
+      try {
+        body = await c.req.json<Record<string, unknown>>();
+      } catch {
+        return c.json(
+          { ok: false, error: "Invalid JSON body" } satisfies DOResult<Classified>,
+          400
+        );
+      }
+
+      const { btc_address, category, headline, body: adBody, contact, payment_txid } = body;
+
+      if (!btc_address || !category || !headline) {
+        return c.json(
+          {
+            ok: false,
+            error: "Missing required fields: btc_address, category, headline",
+          } satisfies DOResult<Classified>,
+          400
+        );
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const id = generateId();
+
+      // expires_at = now + CLASSIFIED_DURATION_DAYS
+      const expiresAt = new Date(now);
+      expiresAt.setDate(expiresAt.getDate() + CLASSIFIED_DURATION_DAYS);
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO classifieds (id, btc_address, category, headline, body, contact, payment_txid, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        id,
+        btc_address as string,
+        category as string,
+        sanitizeString(headline, 100),
+        adBody ? sanitizeString(adBody, 500) : null,
+        contact ? sanitizeString(contact, 200) : null,
+        payment_txid ? (payment_txid as string) : null,
+        nowIso,
+        expiresAt.toISOString()
+      );
+
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM classifieds WHERE id = ?", id)
+        .toArray();
+
+      return c.json(
+        { ok: true, data: rows[0] as unknown as Classified } satisfies DOResult<Classified>,
+        201
+      );
+    });
+
+    // -------------------------------------------------------------------------
+    // Correspondents — agents grouped from signals
+    // -------------------------------------------------------------------------
+
+    // GET /correspondents — agents with signal counts, last active
+    this.router.get("/correspondents", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.btc_address,
+                  COUNT(s.id) as signal_count,
+                  MAX(s.created_at) as last_signal,
+                  st.current_streak,
+                  st.longest_streak,
+                  st.total_signals,
+                  st.last_signal_date
+           FROM signals s
+           LEFT JOIN streaks st ON s.btc_address = st.btc_address
+           GROUP BY s.btc_address
+           ORDER BY signal_count DESC`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Streaks leaderboard
+    // -------------------------------------------------------------------------
+
+    // GET /streaks — streak leaderboard with optional limit
+    this.router.get("/streaks", (c) => {
+      const limitParam = c.req.query("limit");
+      const limit = Math.min(
+        Math.max(1, parseInt(limitParam ?? "50", 10) || 50),
+        200
+      );
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM streaks
+           ORDER BY current_streak DESC, longest_streak DESC
+           LIMIT ?`,
+          limit
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows as unknown as Streak[] } satisfies DOResult<Streak[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Agent status — signals + streak + earnings for one address
+    // -------------------------------------------------------------------------
+
+    // GET /status/:address
+    this.router.get("/status/:address", (c) => {
+      const address = c.req.param("address");
+
+      // Recent signals (last 10)
+      const signalRows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM signals WHERE btc_address = ? ORDER BY created_at DESC LIMIT 10`,
+          address
+        )
+        .toArray();
+
+      // Streak
+      const streakRows = this.ctx.storage.sql
+        .exec("SELECT * FROM streaks WHERE btc_address = ?", address)
+        .toArray();
+
+      // Earnings (last 10)
+      const earningRows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM earnings WHERE btc_address = ? ORDER BY created_at DESC LIMIT 10`,
+          address
+        )
+        .toArray();
+
+      return c.json({
+        ok: true,
+        data: {
+          address,
+          signals: signalRows,
+          streak: streakRows[0] ?? null,
+          earnings: earningRows,
+        },
+      } satisfies DOResult<unknown>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Inscriptions — inscribed briefs
+    // -------------------------------------------------------------------------
+
+    // GET /inscriptions — list briefs with inscription IDs
+    this.router.get("/inscriptions", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT date, inscribed_txid, inscription_id
+           FROM briefs
+           WHERE inscribed_txid IS NOT NULL
+           ORDER BY date DESC`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Report — aggregate stats
+    // -------------------------------------------------------------------------
+
+    // GET /report
+    this.router.get("/report", (c) => {
+      const today = getPacificDate(new Date());
+      const yesterday = getPacificYesterday(new Date());
+
+      // Total signals today (Pacific date)
+      const signalsTodayRows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as count FROM signals WHERE DATE(created_at) >= ?`,
+          today
+        )
+        .toArray();
+
+      // Total beats
+      const beatsRows = this.ctx.storage.sql
+        .exec("SELECT COUNT(*) as count FROM beats")
+        .toArray();
+
+      // Total signals all time
+      const totalSignalsRows = this.ctx.storage.sql
+        .exec("SELECT COUNT(*) as count FROM signals")
+        .toArray();
+
+      // Active correspondents (filed today)
+      const activeRows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(DISTINCT btc_address) as count FROM signals WHERE DATE(created_at) >= ?`,
+          today
+        )
+        .toArray();
+
+      // Latest brief
+      const briefRows = this.ctx.storage.sql
+        .exec("SELECT date, inscribed_txid, inscription_id FROM briefs ORDER BY date DESC LIMIT 1")
+        .toArray();
+
+      // Top agents by signal count
+      const topAgentsRows = this.ctx.storage.sql
+        .exec(
+          `SELECT btc_address, COUNT(*) as signal_count FROM signals GROUP BY btc_address ORDER BY signal_count DESC LIMIT 5`
+        )
+        .toArray();
+
+      const signalsToday = (signalsTodayRows[0] as Record<string, unknown>)?.count ?? 0;
+      const totalBeats = (beatsRows[0] as Record<string, unknown>)?.count ?? 0;
+      const totalSignals = (totalSignalsRows[0] as Record<string, unknown>)?.count ?? 0;
+      const activeCorrespondents = (activeRows[0] as Record<string, unknown>)?.count ?? 0;
+
+      return c.json({
+        ok: true,
+        data: {
+          date: today,
+          yesterday,
+          signalsToday,
+          totalSignals,
+          totalBeats,
+          activeCorrespondents,
+          latestBrief: briefRows[0] ?? null,
+          topAgents: topAgentsRows,
+        },
+      } satisfies DOResult<unknown>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Earnings — per-address earnings history
+    // -------------------------------------------------------------------------
+
+    // GET /earnings/:address
+    this.router.get("/earnings/:address", (c) => {
+      const address = c.req.param("address");
+      const rows = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM earnings WHERE btc_address = ? ORDER BY created_at DESC",
+          address
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows as unknown as Earning[] } satisfies DOResult<Earning[]>);
     });
 
     this.router.all("*", (c) => {
