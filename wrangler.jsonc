@@ -40,6 +40,11 @@
   // Static frontend assets
   "assets": { "directory": "./public" },
 
+  // Local dev vars (secrets in staging/production are set via `wrangler secret put`)
+  "vars": {
+    "MIGRATION_KEY": "local-dev-migration-key"
+  },
+
   /**
    * Environments
    * Note: durable_objects, kv_namespaces, services, migrations are NOT inherited.
@@ -74,7 +79,9 @@
       // RPC service binding to staging worker-logs
       "services": [
         { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" }
-      ]
+      ],
+      // Static frontend assets — not inherited from top level
+      "assets": { "directory": "./public" }
     },
     "production": {
       "name": "agent-news-production",
@@ -101,7 +108,9 @@
       // RPC service binding to production worker-logs
       "services": [
         { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
-      ]
+      ],
+      // Static frontend assets — not inherited from top level
+      "assets": { "directory": "./public" }
     }
   }
 }
