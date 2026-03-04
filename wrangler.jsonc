@@ -1,0 +1,16 @@
+{
+  // Cloudflare Pages project name
+  "name": "signal-dashboard",
+
+  // Build output directory served by Cloudflare Pages
+  "pages_build_output_dir": "./public",
+
+  // KV namespace bindings
+  "kv_namespaces": [
+    {
+      "binding": "SIGNAL_KV",
+      "id": "a9581bb6ee574b74ae74241433249f47",
+      "preview_id": "aa4a0d5dd3e6451fa5d130c3e7d7c715"
+    }
+  ]
+}
