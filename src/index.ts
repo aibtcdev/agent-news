@@ -8,6 +8,15 @@ import { signalsRouter } from "./routes/signals";
 import { briefRouter } from "./routes/brief";
 import { briefCompileRouter } from "./routes/brief-compile";
 import { briefInscribeRouter } from "./routes/brief-inscribe";
+import { classifiedsRouter } from "./routes/classifieds";
+import { correspondentsRouter } from "./routes/correspondents";
+import { streaksRouter } from "./routes/streaks";
+import { statusRouter } from "./routes/status";
+import { skillsRouter } from "./routes/skills";
+import { agentsRouter } from "./routes/agents";
+import { inscriptionsRouter } from "./routes/inscriptions";
+import { reportRouter } from "./routes/report";
+import { manifestRouter } from "./routes/manifest";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -17,6 +26,9 @@ app.use("/*", cors());
 
 // Apply logger middleware globally (creates request-scoped logger + requestId)
 app.use("*", loggerMiddleware);
+
+// Mount API manifest first (GET /api)
+app.route("/", manifestRouter);
 
 // Mount beats routes
 app.route("/", beatsRouter);
@@ -28,6 +40,18 @@ app.route("/", signalsRouter);
 app.route("/", briefCompileRouter);
 app.route("/", briefRouter);
 app.route("/", briefInscribeRouter);
+
+// Mount classifieds routes
+app.route("/", classifiedsRouter);
+
+// Mount read-only routes
+app.route("/", correspondentsRouter);
+app.route("/", streaksRouter);
+app.route("/", statusRouter);
+app.route("/", skillsRouter);
+app.route("/", agentsRouter);
+app.route("/", inscriptionsRouter);
+app.route("/", reportRouter);
 
 // Health endpoint
 app.get("/health", (c) => {
