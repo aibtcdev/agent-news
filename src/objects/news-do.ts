@@ -361,10 +361,9 @@ export class NewsDO extends DurableObject<Env> {
       if (currentStreakRecord) {
         totalSignals = (currentStreakRecord.total_signals ?? 0) + 1;
         if (currentStreakRecord.last_signal_date === today) {
-          // Already filed today (Pacific) — no streak change
+          // Already filed today (Pacific) — no streak change, but always count the new signal
           currentStreak = currentStreakRecord.current_streak ?? 1;
           longestStreak = currentStreakRecord.longest_streak ?? 1;
-          totalSignals = currentStreakRecord.total_signals ?? 1; // don't double-count
         } else if (currentStreakRecord.last_signal_date === yesterday) {
           // Consecutive day — increment streak
           currentStreak = (currentStreakRecord.current_streak ?? 0) + 1;
@@ -797,6 +796,7 @@ export class NewsDO extends DurableObject<Env> {
                   st.last_signal_date
            FROM signals s
            LEFT JOIN streaks st ON s.btc_address = st.btc_address
+           WHERE s.correction_of IS NULL
            GROUP BY s.btc_address
            ORDER BY signal_count DESC`
         )
@@ -889,14 +889,17 @@ export class NewsDO extends DurableObject<Env> {
 
     // GET /report
     this.router.get("/report", (c) => {
-      const today = getPacificDate(new Date());
-      const yesterday = getPacificYesterday(new Date());
+      const now = new Date();
+      const today = getPacificDate(now);
+      const yesterday = getPacificYesterday(now);
+      // Use UTC timestamp for today's Pacific day start to avoid DATE() timezone mismatch
+      const todayUTCStart = getPacificDayStartUTC(today);
 
-      // Total signals today (Pacific date)
+      // Total signals today (Pacific day, UTC comparison, excluding corrections)
       const signalsTodayRows = this.ctx.storage.sql
         .exec(
-          `SELECT COUNT(*) as count FROM signals WHERE DATE(created_at) >= ?`,
-          today
+          `SELECT COUNT(*) as count FROM signals WHERE correction_of IS NULL AND created_at >= ?`,
+          todayUTCStart
         )
         .toArray();
 
@@ -905,16 +908,16 @@ export class NewsDO extends DurableObject<Env> {
         .exec("SELECT COUNT(*) as count FROM beats")
         .toArray();
 
-      // Total signals all time
+      // Total signals all time (excluding corrections)
       const totalSignalsRows = this.ctx.storage.sql
-        .exec("SELECT COUNT(*) as count FROM signals")
+        .exec("SELECT COUNT(*) as count FROM signals WHERE correction_of IS NULL")
         .toArray();
 
-      // Active correspondents (filed today)
+      // Active correspondents today (Pacific day, UTC comparison, excluding corrections)
       const activeRows = this.ctx.storage.sql
         .exec(
-          `SELECT COUNT(DISTINCT btc_address) as count FROM signals WHERE DATE(created_at) >= ?`,
-          today
+          `SELECT COUNT(DISTINCT btc_address) as count FROM signals WHERE correction_of IS NULL AND created_at >= ?`,
+          todayUTCStart
         )
         .toArray();
 
@@ -923,10 +926,10 @@ export class NewsDO extends DurableObject<Env> {
         .exec("SELECT date, inscribed_txid, inscription_id FROM briefs ORDER BY date DESC LIMIT 1")
         .toArray();
 
-      // Top agents by signal count
+      // Top agents by signal count (excluding corrections)
       const topAgentsRows = this.ctx.storage.sql
         .exec(
-          `SELECT btc_address, COUNT(*) as signal_count FROM signals GROUP BY btc_address ORDER BY signal_count DESC LIMIT 5`
+          `SELECT btc_address, COUNT(*) as signal_count FROM signals WHERE correction_of IS NULL GROUP BY btc_address ORDER BY signal_count DESC LIMIT 5`
         )
         .toArray();
 
