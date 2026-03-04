@@ -29,19 +29,13 @@ jobs:
       - name: Check JS syntax
         run: |
           echo "Running node --check on all .js files in functions/..."
-          find functions/ -name "*.js" | while read f; do
-            echo "  Checking $f"
-            node --check "$f"
-          done
+          find functions/ -name "*.js" -exec node --check {} \;
           echo "All JS files passed syntax check."
-
-      - name: Install wrangler
-        run: npm install -g wrangler
 
       - name: Build Pages Functions
         run: |
           echo "Building Cloudflare Pages Functions..."
-          npx wrangler pages functions build --outdir .tmp
+          npx wrangler@3 pages functions build --outdir .tmp
 
       - name: Clean up build output
         if: always()
