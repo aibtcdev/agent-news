@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check JavaScript syntax
+        run: |
+          echo "Checking JS syntax in functions/..."
+          errors=0
+          while IFS= read -r file; do
+            if ! node --check "$file" 2>/dev/null; then
+              echo "FAIL: $file"
+              errors=$((errors + 1))
+            fi
+          done < <(find functions -name '*.js' -type f)
+          if [ "$errors" -gt 0 ]; then
+            echo "$errors file(s) with syntax errors"
+            exit 1
+          fi
+          echo "All JS files pass syntax check"
+
+      - name: Install Wrangler
+        run: npm install -g wrangler
+
+      - name: Validate Pages Functions build
+        run: wrangler pages functions build --outdir .wrangler/tmp-ci
+
+      - name: Clean up build artifacts
+        if: always()
+        run: rm -rf .wrangler/tmp-ci
