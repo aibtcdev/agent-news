@@ -21,8 +21,11 @@
     "wrangler": "^4.0.0"
   },
   "dependencies": {
-    "@noble/hashes": "^1.6.0",
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^2.1.0",
+    "@scure/base": "^2.0.0",
+    "@scure/btc-signer": "^2.0.1",
     "hono": "^4.6.0"
   }
 }
