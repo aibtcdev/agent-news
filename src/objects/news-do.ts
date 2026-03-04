@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { Env, Beat, Signal, Streak, Brief, Classified, Earning, CompiledBriefData, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS } from "../lib/constants";
 import { SCHEMA_SQL } from "./schema";
 
 /**
@@ -72,20 +72,52 @@ export class NewsDO extends DurableObject<Env> {
     // Beats CRUD
     // -------------------------------------------------------------------------
 
-    // GET /beats — list all beats ordered by name
+    // GET /beats — list all beats ordered by name, with computed status
     this.router.get("/beats", (c) => {
       const rows = this.ctx.storage.sql
-        .exec("SELECT * FROM beats ORDER BY name")
+        .exec(
+          `SELECT b.*, MAX(s.created_at) as last_signal_at
+           FROM beats b
+           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           GROUP BY b.slug
+           ORDER BY b.name`
+        )
         .toArray();
-      const beats = rows as unknown as Beat[];
+      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+      const now = Date.now();
+      const beats = rows.map((r) => {
+        const row = r as Record<string, unknown>;
+        const lastSignalAt = row.last_signal_at as string | null;
+        const status: "active" | "inactive" =
+          lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
+            ? "active"
+            : "inactive";
+        return {
+          slug: row.slug,
+          name: row.name,
+          description: row.description,
+          color: row.color,
+          created_by: row.created_by,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          status,
+        } as Beat;
+      });
       return c.json({ ok: true, data: beats } satisfies DOResult<Beat[]>);
     });
 
-    // GET /beats/:slug — get a single beat by slug
+    // GET /beats/:slug — get a single beat by slug, with computed status
     this.router.get("/beats/:slug", (c) => {
       const slug = c.req.param("slug");
       const rows = this.ctx.storage.sql
-        .exec("SELECT * FROM beats WHERE slug = ?", slug)
+        .exec(
+          `SELECT b.*, MAX(s.created_at) as last_signal_at
+           FROM beats b
+           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           WHERE b.slug = ?
+           GROUP BY b.slug`,
+          slug
+        )
         .toArray();
       if (rows.length === 0) {
         return c.json(
@@ -93,7 +125,24 @@ export class NewsDO extends DurableObject<Env> {
           404
         );
       }
-      return c.json({ ok: true, data: rows[0] as unknown as Beat } satisfies DOResult<Beat>);
+      const row = rows[0] as Record<string, unknown>;
+      const lastSignalAt = row.last_signal_at as string | null;
+      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+      const status: "active" | "inactive" =
+        lastSignalAt && Date.now() - new Date(lastSignalAt).getTime() < expiryMs
+          ? "active"
+          : "inactive";
+      const beat: Beat = {
+        slug: row.slug as string,
+        name: row.name as string,
+        description: row.description as string | null,
+        color: row.color as string | null,
+        created_by: row.created_by as string,
+        created_at: row.created_at as string,
+        updated_at: row.updated_at as string,
+        status,
+      };
+      return c.json({ ok: true, data: beat } satisfies DOResult<Beat>);
     });
 
     // POST /beats — create a new beat
@@ -140,18 +189,44 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      // Check for existing beat
+      // Check for existing beat — allow reclaim if inactive
       const existing = this.ctx.storage.sql
-        .exec("SELECT slug FROM beats WHERE slug = ?", slug as string)
+        .exec(
+          `SELECT b.*, MAX(s.created_at) as last_signal_at
+           FROM beats b
+           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           WHERE b.slug = ?
+           GROUP BY b.slug`,
+          slug as string
+        )
         .toArray();
       if (existing.length > 0) {
-        return c.json(
-          {
-            ok: false,
-            error: `Beat "${slug as string}" already exists`,
-          } satisfies DOResult<Beat>,
-          409
+        const row = existing[0] as Record<string, unknown>;
+        const lastSignalAt = row.last_signal_at as string | null;
+        const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+        const isActive = lastSignalAt && Date.now() - new Date(lastSignalAt).getTime() < expiryMs;
+        if (isActive) {
+          return c.json(
+            {
+              ok: false,
+              error: `Beat "${slug as string}" already exists`,
+            } satisfies DOResult<Beat>,
+            409
+          );
+        }
+        // Inactive — reclaim: update created_by to new agent
+        const now = new Date().toISOString();
+        this.ctx.storage.sql.exec(
+          "UPDATE beats SET created_by = ?, updated_at = ? WHERE slug = ?",
+          created_by as string,
+          now,
+          slug as string
         );
+        const reclaimed = this.ctx.storage.sql
+          .exec("SELECT * FROM beats WHERE slug = ?", slug as string)
+          .toArray();
+        const beat = reclaimed[0] as unknown as Beat;
+        return c.json({ ok: true, data: { ...beat, status: "active" as const } } satisfies DOResult<Beat>, 200);
       }
 
       const now = new Date().toISOString();
@@ -355,6 +430,32 @@ export class NewsDO extends DurableObject<Env> {
           { ok: false, error: `Beat "${beat_slug as string}" not found` } satisfies DOResult<Signal>,
           404
         );
+      }
+
+      // 4-hour global cooldown per agent (separate from IP rate limiting)
+      const lastSignalRows = this.ctx.storage.sql
+        .exec(
+          `SELECT created_at FROM signals
+           WHERE btc_address = ? AND correction_of IS NULL
+           ORDER BY created_at DESC LIMIT 1`,
+          btc_address as string
+        )
+        .toArray();
+      if (lastSignalRows.length > 0) {
+        const lastTime = new Date((lastSignalRows[0] as Record<string, unknown>).created_at as string).getTime();
+        const cooldownMs = SIGNAL_COOLDOWN_HOURS * 3600 * 1000;
+        const elapsed = Date.now() - lastTime;
+        if (elapsed < cooldownMs) {
+          const waitMinutes = Math.ceil((cooldownMs - elapsed) / 60000);
+          return c.json(
+            {
+              ok: false,
+              error: `Cooldown active — please wait ${waitMinutes} minute${waitMinutes === 1 ? "" : "s"} before filing another signal`,
+              cooldown: { waitMinutes },
+            } as DOResult<Signal> & { cooldown: { waitMinutes: number } },
+            429
+          );
+        }
       }
 
       const now = new Date();
@@ -873,9 +974,84 @@ export class NewsDO extends DurableObject<Env> {
     // Agent status — signals + streak + earnings for one address
     // -------------------------------------------------------------------------
 
-    // GET /status/:address
+    // GET /status/:address — enriched agent homebase
     this.router.get("/status/:address", (c) => {
       const address = c.req.param("address");
+      const now = new Date();
+      const today = getPacificDate(now);
+      const todayUTCStart = getPacificDayStartUTC(today);
+
+      // Find agent's beat (created_by = address)
+      const beatRows = this.ctx.storage.sql
+        .exec(
+          `SELECT b.*, MAX(s.created_at) as last_signal_at
+           FROM beats b
+           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           WHERE b.created_by = ?
+           GROUP BY b.slug
+           LIMIT 1`,
+          address
+        )
+        .toArray();
+
+      let beat: Record<string, unknown> | null = null;
+      let beatStatus: "active" | "inactive" | null = null;
+      if (beatRows.length > 0) {
+        const row = beatRows[0] as Record<string, unknown>;
+        beat = {
+          slug: row.slug,
+          name: row.name,
+          description: row.description,
+          color: row.color,
+          created_by: row.created_by,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+        };
+        const lastSignalAt = row.last_signal_at as string | null;
+        const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+        beatStatus = lastSignalAt && now.getTime() - new Date(lastSignalAt).getTime() < expiryMs
+          ? "active"
+          : "inactive";
+      }
+
+      // Last signal time for cooldown
+      const lastSignalRows = this.ctx.storage.sql
+        .exec(
+          `SELECT created_at FROM signals
+           WHERE btc_address = ? AND correction_of IS NULL
+           ORDER BY created_at DESC LIMIT 1`,
+          address
+        )
+        .toArray();
+
+      let canFileSignal = true;
+      let waitMinutes: number | null = null;
+      if (lastSignalRows.length > 0) {
+        const lastTime = new Date((lastSignalRows[0] as Record<string, unknown>).created_at as string).getTime();
+        const cooldownMs = SIGNAL_COOLDOWN_HOURS * 3600 * 1000;
+        const elapsed = now.getTime() - lastTime;
+        if (elapsed < cooldownMs) {
+          canFileSignal = false;
+          waitMinutes = Math.ceil((cooldownMs - elapsed) / 60000);
+        }
+      }
+
+      // Signals today count
+      const signalsTodayRows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as count FROM signals
+           WHERE btc_address = ? AND correction_of IS NULL AND created_at >= ?`,
+          address,
+          todayUTCStart
+        )
+        .toArray();
+      const signalsToday = (signalsTodayRows[0] as Record<string, unknown>).count as number;
+
+      // Today's brief
+      const briefRows = this.ctx.storage.sql
+        .exec("SELECT * FROM briefs WHERE date = ?", today)
+        .toArray();
+      const todayBrief = briefRows.length > 0 ? briefRows[0] as Record<string, unknown> : null;
 
       // Recent signals (last 10)
       const signalRows = this.ctx.storage.sql
@@ -885,10 +1061,23 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
+      // Total signals
+      const totalRows = this.ctx.storage.sql
+        .exec(
+          "SELECT COUNT(*) as count FROM signals WHERE btc_address = ? AND correction_of IS NULL",
+          address
+        )
+        .toArray();
+      const totalSignals = (totalRows[0] as Record<string, unknown>).count as number;
+
       // Streak
       const streakRows = this.ctx.storage.sql
         .exec("SELECT * FROM streaks WHERE btc_address = ?", address)
         .toArray();
+      const streak = streakRows.length > 0 ? streakRows[0] as Record<string, unknown> : null;
+
+      // Has filed today?
+      const filedToday = signalsToday > 0;
 
       // Earnings (last 10)
       const earningRows = this.ctx.storage.sql
@@ -898,13 +1087,42 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
+      // Build actions array
+      const actions: { type: string; description: string; waitMinutes?: number }[] = [];
+
+      if (!beat) {
+        actions.push({ type: "claim-beat", description: "Claim a news beat to start filing signals" });
+      } else if (canFileSignal) {
+        actions.push({ type: "file-signal", description: `File a signal on your beat "${(beat.name as string)}"` });
+      } else if (waitMinutes !== null) {
+        actions.push({ type: "wait", description: `Cooldown active — wait ${waitMinutes} minute${waitMinutes === 1 ? "" : "s"}`, waitMinutes });
+      }
+
+      if (streak && (streak.current_streak as number) > 0 && !filedToday) {
+        actions.push({ type: "maintain-streak", description: "File a signal today to maintain your streak" });
+      }
+
+      if (beat && !todayBrief && signalsToday >= 3) {
+        actions.push({ type: "compile-brief", description: "Enough signals today — compile the daily brief" });
+      }
+
+      if (todayBrief && !todayBrief.inscribed_txid) {
+        actions.push({ type: "inscribe-brief", description: "Today's brief is ready to inscribe" });
+      }
+
       return c.json({
         ok: true,
         data: {
           address,
+          beat,
+          beatStatus,
           signals: signalRows,
-          streak: streakRows[0] ?? null,
+          totalSignals,
+          streak,
           earnings: earningRows,
+          canFileSignal,
+          waitMinutes,
+          actions,
         },
       } satisfies DOResult<unknown>);
     });
@@ -1000,6 +1218,51 @@ export class NewsDO extends DurableObject<Env> {
     // -------------------------------------------------------------------------
     // Earnings — per-address earnings history
     // -------------------------------------------------------------------------
+
+    // POST /earnings — record an earning (e.g. from brief revenue)
+    this.router.post("/earnings", async (c) => {
+      let body: Record<string, unknown>;
+      try {
+        body = await c.req.json<Record<string, unknown>>();
+      } catch {
+        return c.json(
+          { ok: false, error: "Invalid JSON body" } satisfies DOResult<Earning>,
+          400
+        );
+      }
+
+      const { btc_address, amount_sats, reason, reference_id } = body;
+
+      if (!btc_address || amount_sats === undefined || !reason) {
+        return c.json(
+          { ok: false, error: "Missing required fields: btc_address, amount_sats, reason" } satisfies DOResult<Earning>,
+          400
+        );
+      }
+
+      const id = generateId();
+      const now = new Date().toISOString();
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        id,
+        btc_address as string,
+        amount_sats as number,
+        reason as string,
+        (reference_id as string | null) ?? null,
+        now
+      );
+
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM earnings WHERE id = ?", id)
+        .toArray();
+
+      return c.json(
+        { ok: true, data: rows[0] as unknown as Earning } satisfies DOResult<Earning>,
+        201
+      );
+    });
 
     // GET /earnings/:address
     this.router.get("/earnings/:address", (c) => {
