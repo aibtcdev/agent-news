@@ -378,17 +378,15 @@ export class NewsDO extends DurableObject<Env> {
 
       const earningId = generateId();
 
-      // Execute everything atomically
+      // Execute everything atomically — DO SQLite exec() is already atomic for multi-statement calls
       this.ctx.storage.sql.exec(
-        `BEGIN;
-         INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL);
          ${tagInserts}
          INSERT OR REPLACE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
            VALUES (?, ?, ?, ?, ?);
          INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, 0, 'signal', ?, ?);
-         COMMIT;`,
+           VALUES (?, ?, 0, 'signal', ?, ?);`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -478,11 +476,9 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       this.ctx.storage.sql.exec(
-        `BEGIN;
-         INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-         ${tagInserts}
-         COMMIT;`,
+         ${tagInserts}`,
         newId,
         original.beat_slug as string,
         btc_address as string,
