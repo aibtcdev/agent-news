@@ -1,6 +1,8 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getLatestBrief, getBriefByDate } from "../lib/do-client";
+import { getLatestBrief, getBriefByDate, recordEarning } from "../lib/do-client";
+import { BRIEFS_FREE, BRIEF_PRICE_SATS, CORRESPONDENT_SHARE } from "../lib/constants";
+import { buildPaymentRequired, verifyPayment } from "../services/x402";
 
 const briefRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -41,7 +43,7 @@ briefRouter.get("/api/brief", async (c) => {
   });
 });
 
-// GET /api/brief/:date — get a specific brief by date
+// GET /api/brief/:date — get a specific brief by date (with optional x402 paywall)
 briefRouter.get("/api/brief/:date", async (c) => {
   const date = c.req.param("date");
 
@@ -53,12 +55,42 @@ briefRouter.get("/api/brief/:date", async (c) => {
     );
   }
 
-  const format = c.req.query("format") ?? "json";
   const brief = await getBriefByDate(c.env, date);
 
   if (!brief) {
     return c.json({ error: `No brief found for ${date}` }, 404);
   }
+
+  // x402 paywall for past briefs (when not free)
+  if (!BRIEFS_FREE) {
+    const paymentHeader =
+      c.req.header("X-PAYMENT") ?? c.req.header("payment-signature");
+
+    if (!paymentHeader) {
+      return buildPaymentRequired({
+        amount: BRIEF_PRICE_SATS,
+        description: `Access to aibtc.news daily brief for ${date}`,
+      });
+    }
+
+    const verification = await verifyPayment(paymentHeader, BRIEF_PRICE_SATS);
+    if (!verification.valid) {
+      return c.json({ error: "Payment verification failed" }, 402);
+    }
+
+    // Record earnings split: correspondent share + treasury remainder
+    const correspondentShare = Math.floor(BRIEF_PRICE_SATS * CORRESPONDENT_SHARE);
+    if (verification.payer) {
+      await recordEarning(c.env, {
+        btc_address: verification.payer,
+        amount_sats: correspondentShare,
+        reason: "brief-revenue",
+        reference_id: verification.txid ?? null,
+      });
+    }
+  }
+
+  const format = c.req.query("format") ?? "json";
 
   if (format === "text") {
     return new Response(brief.text, {
