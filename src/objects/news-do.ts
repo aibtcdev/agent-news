@@ -404,15 +404,12 @@ export class NewsDO extends DurableObject<Env> {
 
       const earningId = generateId();
 
-      // Execute everything atomically — DO SQLite exec() is already atomic for multi-statement calls
+      // Insert signal, tags, streak, and earning as individual statements.
+      // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
+      // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
       this.ctx.storage.sql.exec(
         `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL);
-         ${tagInserts}
-         INSERT OR REPLACE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
-           VALUES (?, ?, ?, ?, ?);
-         INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, 0, 'signal', ?, ?);`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -420,13 +417,30 @@ export class NewsDO extends DurableObject<Env> {
         sanitizedBody,
         sourcesJson,
         nowIso,
-        nowIso,
-        ...tagParams,
+        nowIso
+      );
+
+      for (const t of signalTags) {
+        this.ctx.storage.sql.exec(
+          "INSERT INTO signal_tags (signal_id, tag) VALUES (?, ?)",
+          signalId,
+          t
+        );
+      }
+
+      this.ctx.storage.sql.exec(
+        `INSERT OR REPLACE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
+           VALUES (?, ?, ?, ?, ?)`,
         btc_address as string,
         currentStreak,
         longestStreak,
         today,
-        totalSignals,
+        totalSignals
+      );
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
+           VALUES (?, ?, 0, 'signal', ?, ?)`,
         earningId,
         btc_address as string,
         signalId,
@@ -493,18 +507,9 @@ export class NewsDO extends DurableObject<Env> {
       const sanitizedBody = signalBody ? sanitizeString(signalBody, 1000) : null;
       const correctionTags = (tags as string[]) ?? [];
 
-      const tagInserts = correctionTags
-        .map(() => `INSERT INTO signal_tags (signal_id, tag) VALUES (?, ?);`)
-        .join("\n");
-      const tagParams: unknown[] = [];
-      for (const t of correctionTags) {
-        tagParams.push(newId, t);
-      }
-
       this.ctx.storage.sql.exec(
         `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-         ${tagInserts}`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         newId,
         original.beat_slug as string,
         btc_address as string,
@@ -513,9 +518,16 @@ export class NewsDO extends DurableObject<Env> {
         sourcesJson,
         nowIso,
         nowIso,
-        originalId,
-        ...tagParams
+        originalId
       );
+
+      for (const t of correctionTags) {
+        this.ctx.storage.sql.exec(
+          "INSERT INTO signal_tags (signal_id, tag) VALUES (?, ?)",
+          newId,
+          t
+        );
+      }
 
       // Fetch the created correction with tags
       const created = this.ctx.storage.sql
