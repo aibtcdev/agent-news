@@ -1,10 +1,18 @@
 /**
- * BIP-322 simple signature verification service.
+ * Bitcoin signature verification service.
  *
- * Implements endpoint authentication using Bitcoin message signing:
- * - BIP-137 compatible 65-byte signatures (header + r + s) for all address types
- * - P2WPKH (bc1q) address derivation: RIPEMD160(SHA256(pubkey)) + bech32 encoding
- * - Timestamp window: +/- 5 minutes (300 seconds) for replay protection
+ * Supports two signature formats for P2WPKH (bc1q) authentication:
+ *
+ * 1. BIP-137 compact (65 bytes: header + r + s)
+ *    - Used by Electrum, some hardware wallets
+ *    - Recovery-based: pubkey recovered from signature
+ *
+ * 2. BIP-322 witness-serialized (variable length)
+ *    - Used by aibtc MCP, modern Bitcoin wallets
+ *    - Witness stack: [DER ECDSA sig + hashtype, compressed pubkey]
+ *    - Verified via virtual to_spend/to_sign transactions + BIP143 sighash
+ *
+ * Based on the battle-tested implementation from aibtcdev/landing-page.
  *
  * Message format: "{METHOD} {path}:{timestamp}"
  * e.g. "POST /api/signals:1709500000"
@@ -12,17 +20,24 @@
  * Headers: X-BTC-Address, X-BTC-Signature (base64), X-BTC-Timestamp (Unix seconds)
  *
  * KNOWN LIMITATION — P2WPKH (bc1q) addresses only:
- * This implementation derives addresses using P2WPKH (native SegWit, bc1q prefix).
- * Agents using Taproot (P2TR, bc1p prefix) addresses cannot authenticate because
- * Taproot uses a different address derivation scheme (tweaked Schnorr public key
- * hashed with bech32m encoding). Attempting to sign with a bc1p address will always
- * result in an ADDRESS_MISMATCH error. Agents must use a P2WPKH (bc1q) key pair
- * to interact with this API.
+ * Taproot (P2TR, bc1p) addresses cannot authenticate. Agents must use a
+ * P2WPKH (bc1q) key pair to interact with this API.
  */
 
-import { sha256 } from "@noble/hashes/sha256";
-import { ripemd160 } from "@noble/hashes/ripemd160";
-import { Signature } from "@noble/secp256k1";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { hex } from "@scure/base";
+import {
+  RawWitness,
+  RawTx,
+  Transaction,
+  p2wpkh,
+  p2pkh,
+  p2sh,
+  Script,
+  SigHash,
+  NETWORK as BTC_MAINNET,
+} from "@scure/btc-signer";
 
 // ── Types ──
 
@@ -40,74 +55,10 @@ export interface AuthResult {
 
 // ── Constants ──
 
-/** Default timestamp window: 5 minutes in seconds */
 const TIMESTAMP_WINDOW_SECONDS = 300;
+const BITCOIN_MSG_PREFIX = "\x18Bitcoin Signed Message:\n";
 
-/** Bitcoin message signing magic prefix (varint-prefixed) */
-const BITCOIN_MSG_PREFIX = "Bitcoin Signed Message:\n";
-
-// ── Bech32 encoder (minimal, P2WPKH only) ──
-
-const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-
-function bech32Polymod(values: number[]): number {
-  const GEN = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
-  let chk = 1;
-  for (const v of values) {
-    const top = chk >> 25;
-    chk = ((chk & 0x1ffffff) << 5) ^ v;
-    for (let i = 0; i < 5; i++) {
-      if ((top >> i) & 1) chk ^= GEN[i];
-    }
-  }
-  return chk;
-}
-
-function bech32HrpExpand(hrp: string): number[] {
-  const ret: number[] = [];
-  for (let i = 0; i < hrp.length; i++) ret.push(hrp.charCodeAt(i) >> 5);
-  ret.push(0);
-  for (let i = 0; i < hrp.length; i++) ret.push(hrp.charCodeAt(i) & 31);
-  return ret;
-}
-
-function convertBits(data: Uint8Array, fromBits: number, toBits: number, pad: boolean): number[] {
-  let acc = 0;
-  let bits = 0;
-  const result: number[] = [];
-  const maxv = (1 << toBits) - 1;
-  for (const value of data) {
-    acc = (acc << fromBits) | value;
-    bits += fromBits;
-    while (bits >= toBits) {
-      bits -= toBits;
-      result.push((acc >> bits) & maxv);
-    }
-  }
-  if (pad && bits > 0) {
-    result.push((acc << (toBits - bits)) & maxv);
-  }
-  return result;
-}
-
-/**
- * Encode a P2WPKH address from a 20-byte hash160 value using bech32.
- * Adds witness version 0 prefix and checksum.
- */
-function bech32Encode(hrp: string, data: number[]): string {
-  const combined = [0, ...data]; // prepend witness version 0
-  const hrpExpanded = bech32HrpExpand(hrp);
-  const checksumInput = [...hrpExpanded, ...combined, 0, 0, 0, 0, 0, 0];
-  const polymod = bech32Polymod(checksumInput) ^ 1;
-  const checksum: number[] = [];
-  for (let i = 0; i < 6; i++) {
-    checksum.push((polymod >> (5 * (5 - i))) & 31);
-  }
-  const allData = [...combined, ...checksum];
-  return hrp + "1" + allData.map((d) => BECH32_CHARSET[d]).join("");
-}
-
-// ── Low-level helpers ──
+// ── Shared helpers ──
 
 function concatBytes(...arrays: Uint8Array[]): Uint8Array {
   const total = arrays.reduce((sum, a) => sum + a.length, 0);
@@ -123,48 +74,200 @@ function concatBytes(...arrays: Uint8Array[]): Uint8Array {
 function encodeVarInt(n: number): Uint8Array {
   if (n < 0xfd) return new Uint8Array([n]);
   if (n <= 0xffff) {
-    return new Uint8Array([0xfd, n & 0xff, (n >> 8) & 0xff]);
+    const buf = new Uint8Array(3);
+    buf[0] = 0xfd;
+    buf[1] = n & 0xff;
+    buf[2] = (n >> 8) & 0xff;
+    return buf;
   }
-  return new Uint8Array([0xfe, n & 0xff, (n >> 8) & 0xff, (n >> 16) & 0xff, (n >> 24) & 0xff]);
+  if (n <= 0xffffffff) {
+    const buf = new Uint8Array(5);
+    buf[0] = 0xfe;
+    buf[1] = n & 0xff;
+    buf[2] = (n >> 8) & 0xff;
+    buf[3] = (n >> 16) & 0xff;
+    buf[4] = (n >> 24) & 0xff;
+    return buf;
+  }
+  throw new Error("Message too long");
 }
 
-/**
- * Double SHA-256: Bitcoin standard hash for message signing.
- */
 function doubleSha256(data: Uint8Array): Uint8Array {
   return sha256(sha256(data));
 }
 
+function base64ToBytes(b64: string): Uint8Array {
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+}
+
+// ── BIP-137 helpers ──
+
+function formatBitcoinMessage(message: string): Uint8Array {
+  const prefixBytes = new TextEncoder().encode(BITCOIN_MSG_PREFIX);
+  const messageBytes = new TextEncoder().encode(message);
+  const lengthBytes = encodeVarInt(messageBytes.length);
+  const result = new Uint8Array(prefixBytes.length + lengthBytes.length + messageBytes.length);
+  result.set(prefixBytes, 0);
+  result.set(lengthBytes, prefixBytes.length);
+  result.set(messageBytes, prefixBytes.length + lengthBytes.length);
+  return result;
+}
+
+function isBip137Signature(sigBytes: Uint8Array): boolean {
+  return sigBytes.length === 65 && sigBytes[0] >= 27 && sigBytes[0] <= 42;
+}
+
+function getRecoveryIdFromHeader(header: number): number {
+  if (header >= 27 && header <= 30) return header - 27;
+  if (header >= 31 && header <= 34) return header - 31;
+  if (header >= 35 && header <= 38) return header - 35;
+  if (header >= 39 && header <= 42) return header - 39;
+  throw new Error(`Invalid BIP-137 header byte: ${header}`);
+}
+
+// ── BIP-322 helpers ──
+
 /**
- * Build the Bitcoin message hash (BIP-137 style).
- * Hash = SHA256(SHA256(prefix || varint(len) || message))
+ * Convert a DER-encoded ECDSA signature to compact (64-byte r||s) format.
  */
-function bitcoinMessageHash(message: string): Uint8Array {
-  const enc = new TextEncoder();
-  const prefixBytes = enc.encode(BITCOIN_MSG_PREFIX);
-  const msgBytes = enc.encode(message);
-  const lenBytes = encodeVarInt(msgBytes.length);
-  const prefixLen = encodeVarInt(prefixBytes.length);
-  const payload = concatBytes(prefixLen, prefixBytes, lenBytes, msgBytes);
-  return doubleSha256(payload);
+function parseDERSignature(der: Uint8Array): Uint8Array {
+  if (der[0] !== 0x30) throw new Error("parseDERSignature: expected 0x30 header");
+  let pos = 2;
+  if (der[pos] !== 0x02) throw new Error("parseDERSignature: expected 0x02 for r");
+  pos++;
+  const rLen = der[pos++];
+  if (pos + rLen > der.length) throw new Error("parseDERSignature: r extends beyond signature");
+  const rBytes = der.slice(rLen === 33 ? pos + 1 : pos, pos + rLen);
+  pos += rLen;
+  if (der[pos] !== 0x02) throw new Error("parseDERSignature: expected 0x02 for s");
+  pos++;
+  const sLen = der[pos++];
+  if (pos + sLen > der.length) throw new Error("parseDERSignature: s extends beyond signature");
+  const sBytes = der.slice(sLen === 33 ? pos + 1 : pos, pos + sLen);
+
+  const compact = new Uint8Array(64);
+  compact.set(rBytes, 32 - rBytes.length);
+  compact.set(sBytes, 64 - sBytes.length);
+  return compact;
 }
 
 /**
- * Derive a P2WPKH bc1q address from a compressed public key.
- * address = bech32("bc", witness_v0, RIPEMD160(SHA256(pubkey)))
+ * BIP-322 tagged hash (spec-compliant): SHA256(SHA256(tag) || SHA256(tag) || msg)
  */
-function pubkeyToP2WPKHAddress(pubkey: Uint8Array): string {
-  const hash160 = ripemd160(sha256(pubkey));
-  const converted = convertBits(hash160, 8, 5, true);
-  return bech32Encode("bc", converted);
+function bip322TaggedHash(message: string): Uint8Array {
+  const tagHash = sha256(new TextEncoder().encode("BIP0322-signed-message"));
+  const msgBytes = new TextEncoder().encode(message);
+  return sha256(concatBytes(tagHash, tagHash, msgBytes));
+}
+
+/**
+ * BIP-322 tagged hash (legacy): SHA256(SHA256(tag) || SHA256(tag) || varint(len) || msg)
+ * Kept for backward compatibility with agents using older signing tools.
+ */
+function bip322TaggedHashLegacy(message: string): Uint8Array {
+  const tagHash = sha256(new TextEncoder().encode("BIP0322-signed-message"));
+  const msgBytes = new TextEncoder().encode(message);
+  return sha256(concatBytes(tagHash, tagHash, encodeVarInt(msgBytes.length), msgBytes));
+}
+
+/**
+ * Build the BIP-322 to_spend virtual transaction and return its txid (LE).
+ */
+function bip322BuildToSpendTxId(message: string, scriptPubKey: Uint8Array, useLegacyHash = false): Uint8Array {
+  const msgHash = useLegacyHash ? bip322TaggedHashLegacy(message) : bip322TaggedHash(message);
+  const scriptSig = concatBytes(new Uint8Array([0x00, 0x20]), msgHash);
+
+  const rawTx = RawTx.encode({
+    version: 0,
+    inputs: [{
+      txid: new Uint8Array(32),
+      index: 0xffffffff,
+      finalScriptSig: scriptSig,
+      sequence: 0,
+    }],
+    outputs: [{
+      amount: 0n,
+      script: scriptPubKey,
+    }],
+    lockTime: 0,
+  });
+
+  return doubleSha256(rawTx).reverse();
+}
+
+// ── Signature verification ──
+
+/**
+ * BIP-137: 65-byte compact signature with recovery.
+ */
+function verifyBIP137(address: string, message: string, sigBytes: Uint8Array): boolean {
+  const header = sigBytes[0];
+  const rBytes = sigBytes.slice(1, 33);
+  const sBytes = sigBytes.slice(33, 65);
+  const recoveryId = getRecoveryIdFromHeader(header);
+
+  const msgHash = doubleSha256(formatBitcoinMessage(message));
+  const r = BigInt("0x" + hex.encode(rBytes));
+  const s = BigInt("0x" + hex.encode(sBytes));
+
+  const sig = new secp256k1.Signature(r, s).addRecoveryBit(recoveryId);
+  const recoveredPubKey = sig.recoverPublicKey(msgHash).toBytes(true);
+
+  // Derive address based on header byte range
+  let derivedAddress: string;
+  if (header >= 27 && header <= 34) {
+    derivedAddress = p2pkh(recoveredPubKey, BTC_MAINNET).address!;
+  } else if (header >= 35 && header <= 38) {
+    const inner = p2wpkh(recoveredPubKey, BTC_MAINNET);
+    derivedAddress = p2sh(inner, BTC_MAINNET).address!;
+  } else {
+    derivedAddress = p2wpkh(recoveredPubKey, BTC_MAINNET).address!;
+  }
+
+  return derivedAddress === address;
+}
+
+/**
+ * BIP-322 witness-serialized verification for P2WPKH.
+ * Tries spec-compliant hash first, falls back to legacy hash for older signers.
+ */
+function verifyBIP322Witness(address: string, message: string, sigBytes: Uint8Array): boolean {
+  const witnessItems = RawWitness.decode(sigBytes);
+  if (witnessItems.length !== 2) return false;
+
+  const ecdsaSigWithHashtype = witnessItems[0];
+  const pubkeyBytes = witnessItems[1];
+  if (pubkeyBytes.length !== 33) return false;
+
+  const scriptPubKey = p2wpkh(pubkeyBytes, BTC_MAINNET).script;
+  const scriptCode = p2pkh(pubkeyBytes).script;
+
+  // Strip hashtype byte, parse DER to compact
+  const derSig = ecdsaSigWithHashtype.slice(0, -1);
+  const compactSig = parseDERSignature(derSig);
+
+  const verifySighash = (txid: Uint8Array): boolean => {
+    const tx = new Transaction({ version: 0, lockTime: 0, allowUnknownOutputs: true });
+    tx.addInput({ txid, index: 0, sequence: 0, witnessUtxo: { amount: 0n, script: scriptPubKey } });
+    tx.addOutput({ script: Script.encode(["RETURN"]), amount: 0n });
+    const sighash = tx.preimageWitnessV0(0, scriptCode, SigHash.ALL, 0n);
+    return secp256k1.verify(compactSig, sighash, pubkeyBytes, { prehash: false });
+  };
+
+  // Try spec-compliant hash first
+  const toSpendTxid = bip322BuildToSpendTxId(message, scriptPubKey);
+  if (!verifySighash(toSpendTxid)) {
+    // Fall back to legacy tagged hash for older signing tools
+    const toSpendTxidLegacy = bip322BuildToSpendTxId(message, scriptPubKey, true);
+    if (!verifySighash(toSpendTxidLegacy)) return false;
+  }
+
+  // Confirm derived address matches claimed address
+  return p2wpkh(pubkeyBytes, BTC_MAINNET).address === address;
 }
 
 // ── Public API ──
 
-/**
- * Extract BIP-322 auth headers from a request.
- * Returns null if any required header is missing.
- */
 export function extractAuthHeaders(headers: Headers): AuthHeaders | null {
   const address = headers.get("X-BTC-Address");
   const signature = headers.get("X-BTC-Signature");
@@ -173,11 +276,6 @@ export function extractAuthHeaders(headers: Headers): AuthHeaders | null {
   return { address, signature, timestamp };
 }
 
-/**
- * Verify the timestamp is within the allowed window.
- * @param timestamp Unix seconds as string
- * @param windowSeconds Allowed window (default 300 = 5 minutes)
- */
 export function verifyTimestamp(
   timestamp: string,
   windowSeconds: number = TIMESTAMP_WINDOW_SECONDS
@@ -189,21 +287,8 @@ export function verifyTimestamp(
 }
 
 /**
- * Verify a BIP-137-compatible Bitcoin signature for a P2WPKH (bc1q) address.
- *
- * The signature is a base64-encoded 65-byte blob: [header, r(32), s(32)].
- * The header byte encodes the address type and recovery ID.
- *   27-30: P2PKH uncompressed
- *   31-34: P2PKH compressed
- *   35-38: P2SH-P2WPKH
- *   39-42: P2WPKH (native SegWit, bc1q)
- *
- * Algorithm:
- * 1. Decode base64 -> 65 bytes
- * 2. Compute message hash: SHA256(SHA256(prefix || varint(len) || message))
- * 3. Recover pubkey from (r, s, recoveryId)
- * 4. Derive P2WPKH address from recovered pubkey
- * 5. Compare derived address to claimed address
+ * Verify a Bitcoin message signature for a P2WPKH (bc1q) address.
+ * Auto-detects BIP-137 (65-byte compact) vs BIP-322 (witness-serialized) format.
  */
 export function verifyBIP322Simple(
   address: string,
@@ -211,67 +296,24 @@ export function verifyBIP322Simple(
   signatureBase64: string
 ): boolean {
   try {
-    // Decode base64 signature
-    const sigBytes = Uint8Array.from(atob(signatureBase64), (c) => c.charCodeAt(0));
-    if (sigBytes.length !== 65) return false;
+    const sigBytes = base64ToBytes(signatureBase64);
 
-    const header = sigBytes[0];
-    // Only accept headers for P2WPKH (39-42) and P2PKH compressed (31-34)
-    // Reject others since we only support bc1q addresses
-    if (header < 31 || header > 42) return false;
-
-    // Recovery ID: extracted from header
-    let recoveryId: number;
-    if (header >= 39 && header <= 42) {
-      recoveryId = header - 39; // P2WPKH
-    } else if (header >= 35 && header <= 38) {
-      recoveryId = header - 35; // P2SH-P2WPKH
-    } else {
-      recoveryId = header - 31; // P2PKH compressed
+    if (isBip137Signature(sigBytes)) {
+      return verifyBIP137(address, message, sigBytes);
     }
 
-    // Extract r and s as big integers
-    const rHex = Array.from(sigBytes.slice(1, 33))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-    const sHex = Array.from(sigBytes.slice(33, 65))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
-
-    const r = BigInt("0x" + rHex);
-    const s = BigInt("0x" + sHex);
-
-    // Compute message hash
-    const msgHash = bitcoinMessageHash(message);
-
-    // Recover public key
-    const sig = new Signature(r, s, recoveryId);
-    const recoveredPoint = sig.recoverPublicKey(msgHash);
-    const recoveredPubkey = recoveredPoint.toBytes(true); // compressed
-
-    // Derive P2WPKH address and compare
-    const derivedAddress = pubkeyToP2WPKHAddress(recoveredPubkey);
-    return derivedAddress === address;
+    return verifyBIP322Witness(address, message, sigBytes);
   } catch {
     return false;
   }
 }
 
-/**
- * Orchestrate full authentication verification for a request.
- *
- * @param headers Request headers containing auth info
- * @param expectedAddress BTC address from the request body (claimed identity)
- * @param method HTTP method (e.g. "POST")
- * @param path Request path (e.g. "/api/signals")
- */
 export function verifyAuth(
   headers: Headers,
   expectedAddress: string,
   method: string,
   path: string
 ): AuthResult {
-  // 1. Extract auth headers
   const authHeaders = extractAuthHeaders(headers);
   if (!authHeaders) {
     return {
@@ -281,7 +323,6 @@ export function verifyAuth(
     };
   }
 
-  // 2. Verify timestamp window
   if (!verifyTimestamp(authHeaders.timestamp)) {
     return {
       valid: false,
@@ -290,7 +331,6 @@ export function verifyAuth(
     };
   }
 
-  // 3. Verify address matches expected address from body
   if (authHeaders.address.toLowerCase() !== expectedAddress.toLowerCase()) {
     return {
       valid: false,
@@ -299,12 +339,11 @@ export function verifyAuth(
     };
   }
 
-  // 4. Build and verify the message signature
   const message = `${method} ${path}:${authHeaders.timestamp}`;
   if (!verifyBIP322Simple(authHeaders.address, message, authHeaders.signature)) {
     return {
       valid: false,
-      error: "Invalid BIP-322 signature. Sign the message: \"METHOD /path:timestamp\"",
+      error: "Invalid signature. Sign the message: \"METHOD /path:timestamp\" using BIP-137 or BIP-322.",
       code: "INVALID_SIGNATURE",
     };
   }
