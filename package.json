@@ -8,10 +8,12 @@
     "deploy:production": "wrangler deploy --env production",
     "deploy:dry-run": "wrangler deploy --dry-run",
     "typecheck": "tsc --noEmit",
+    "lint": "biome lint src/",
     "cf-typegen": "wrangler types",
     "migrate": "npx tsx scripts/migrate-kv-to-do.ts"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.5",
     "@cloudflare/workers-types": "^4.20241205.0",
     "@types/node": "^25.3.3",
     "tsx": "^4.19.2",
