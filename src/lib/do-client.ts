@@ -401,9 +401,5 @@ export async function getMigrationStatus(
   env: Env
 ): Promise<DOResult<Record<string, number>>> {
   const stub = getStub(env);
-  return doFetch<Record<string, number>>(stub, "/migrate/status", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({}),
-  });
+  return doFetch<Record<string, number>>(stub, "/migrate/status");
 }

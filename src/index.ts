@@ -89,8 +89,8 @@ app.post("/api/internal/migrate", async (c) => {
   return c.json(result.data);
 });
 
-// POST /api/internal/migrate/status — get row counts from the DO
-app.post("/api/internal/migrate/status", async (c) => {
+// GET /api/internal/migrate/status — get row counts from the DO (read-only)
+app.get("/api/internal/migrate/status", async (c) => {
   const migrationKey = c.env.MIGRATION_KEY;
   if (!migrationKey) {
     return c.json({ error: "Migration not configured" }, 503);

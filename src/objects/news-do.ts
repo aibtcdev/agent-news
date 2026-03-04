@@ -973,8 +973,8 @@ export class NewsDO extends DurableObject<Env> {
     // Migration endpoints — bulk import from old KV system
     // -------------------------------------------------------------------------
 
-    // POST /migrate/status — return row counts for each table
-    this.router.post("/migrate/status", (c) => {
+    // GET /migrate/status — return row counts for each table (read-only)
+    this.router.get("/migrate/status", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT 'beats' as entity, COUNT(*) as count FROM beats
