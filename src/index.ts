@@ -61,6 +61,15 @@ app.route("/", reportRouter);
 
 // POST /api/internal/migrate — bulk import entity records into the DO
 app.post("/api/internal/migrate", async (c) => {
+  const migrationKey = c.env.MIGRATION_KEY;
+  if (!migrationKey) {
+    return c.json({ error: "Migration not configured" }, 503);
+  }
+  const providedKey = c.req.header("X-Migration-Key");
+  if (!providedKey || providedKey !== migrationKey) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await c.req.json<Record<string, unknown>>();
@@ -82,6 +91,15 @@ app.post("/api/internal/migrate", async (c) => {
 
 // POST /api/internal/migrate/status — get row counts from the DO
 app.post("/api/internal/migrate/status", async (c) => {
+  const migrationKey = c.env.MIGRATION_KEY;
+  if (!migrationKey) {
+    return c.json({ error: "Migration not configured" }, 503);
+  }
+  const providedKey = c.req.header("X-Migration-Key");
+  if (!providedKey || providedKey !== migrationKey) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
   const result = await getMigrationStatus(c.env);
   if (!result.ok) {
     return c.json({ error: result.error }, 400);
