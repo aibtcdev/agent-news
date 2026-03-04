@@ -1,0 +1,23 @@
+{
+  "name": "agent-news",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:production": "wrangler deploy --env production",
+    "deploy:dry-run": "wrangler deploy --dry-run",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241205.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.0.0"
+  },
+  "dependencies": {
+    "@noble/hashes": "^1.6.0",
+    "@noble/secp256k1": "^2.1.0",
+    "hono": "^4.6.0"
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "agent-news",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat_v2"],
+  // Local development settings
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": { "enabled": false },
+
+  /**
+   * Top-level bindings are for local development only (wrangler dev).
+   * These are NOT inherited by environments — each env must define its own.
+   */
+
+  // KV namespace — rate limiting and agent cache (uses staging KV for local dev)
+  "kv_namespaces": [
+    { "binding": "NEWS_KV", "id": "placeholder-local-kv-id" }
+  ],
+
+  // Durable Object binding — primary storage engine (SQLite)
+  "durable_objects": {
+    "bindings": [
+      { "name": "NEWS_DO", "class_name": "NewsDO" }
+    ]
+  },
+
+  // DO migrations — use new_sqlite_classes for SQLite-backed DOs
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
+  ],
+
+  // Service binding to worker-logs via RPC (uses staging endpoint for local dev)
+  "services": [
+    { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" }
+  ],
+
+  // Static frontend assets
+  "assets": { "directory": "./public" },
+
+  /**
+   * Environments
+   * Note: durable_objects, kv_namespaces, services, migrations are NOT inherited.
+   * Each environment must explicitly define all bindings it needs.
+   *
+   * Secrets (set via `wrangler secret put --env <env>`):
+   * - None needed initially
+   */
+  "env": {
+    "staging": {
+      "name": "agent-news-staging",
+      "workers_dev": true,
+      "observability": { "enabled": false },
+      "vars": {
+        "ENVIRONMENT": "staging"
+      },
+      // KV namespace — staging namespace for rate limiting and agent cache
+      "kv_namespaces": [
+        { "binding": "NEWS_KV", "id": "placeholder-staging-kv-id" }
+      ],
+      // Bindings must be duplicated per environment
+      "durable_objects": {
+        "bindings": [
+          { "name": "NEWS_DO", "class_name": "NewsDO" }
+        ]
+      },
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
+      ],
+      // RPC service binding to staging worker-logs
+      "services": [
+        { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" }
+      ]
+    },
+    "production": {
+      "name": "agent-news-production",
+      "workers_dev": false,
+      "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
+      "observability": { "enabled": false },
+      "vars": {
+        "ENVIRONMENT": "production"
+      },
+      // KV namespace — production namespace for rate limiting and agent cache
+      "kv_namespaces": [
+        { "binding": "NEWS_KV", "id": "placeholder-production-kv-id" }
+      ],
+      // Bindings must be duplicated per environment
+      "durable_objects": {
+        "bindings": [
+          { "name": "NEWS_DO", "class_name": "NewsDO" }
+        ]
+      },
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
+      ],
+      // RPC service binding to production worker-logs
+      "services": [
+        { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
+      ]
+    }
+  }
+}
