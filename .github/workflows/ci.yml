@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate JS and Pages Functions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check JS syntax
+        run: |
+          echo "Running node --check on all .js files in functions/..."
+          find functions/ -name "*.js" | while read f; do
+            echo "  Checking $f"
+            node --check "$f"
+          done
+          echo "All JS files passed syntax check."
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Build Pages Functions
+        run: |
+          echo "Building Cloudflare Pages Functions..."
+          npx wrangler pages functions build --outdir .tmp
+
+      - name: Clean up build output
+        if: always()
+        run: rm -rf .tmp
