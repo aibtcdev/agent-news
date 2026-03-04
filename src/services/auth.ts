@@ -10,6 +10,14 @@
  * e.g. "POST /api/signals:1709500000"
  *
  * Headers: X-BTC-Address, X-BTC-Signature (base64), X-BTC-Timestamp (Unix seconds)
+ *
+ * KNOWN LIMITATION — P2WPKH (bc1q) addresses only:
+ * This implementation derives addresses using P2WPKH (native SegWit, bc1q prefix).
+ * Agents using Taproot (P2TR, bc1p prefix) addresses cannot authenticate because
+ * Taproot uses a different address derivation scheme (tweaked Schnorr public key
+ * hashed with bech32m encoding). Attempting to sign with a bc1p address will always
+ * result in an ADDRESS_MISMATCH error. Agents must use a P2WPKH (bc1q) key pair
+ * to interact with this API.
  */
 
 import { sha256 } from "@noble/hashes/sha256";

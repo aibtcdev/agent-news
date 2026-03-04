@@ -7,15 +7,42 @@ import { CLASSIFIED_DURATION_DAYS } from "../lib/constants";
 import { SCHEMA_SQL } from "./schema";
 
 /**
+ * Raw SQL row returned by signal SELECT queries.
+ * All scalar columns come back as strings or null from SQLite.
+ * tags_csv is produced by GROUP_CONCAT in join queries.
+ */
+interface RawSignalRow {
+  id: string;
+  beat_slug: string;
+  btc_address: string;
+  headline: string;
+  body: string | null;
+  sources: string; // JSON-encoded Source[]
+  created_at: string;
+  updated_at: string;
+  correction_of: string | null;
+  tags_csv: string | null;
+}
+
+/**
  * Convert a raw SQL row (with tags_csv from GROUP_CONCAT) into a Signal object.
+ * Casting via RawSignalRow gives TypeScript visibility into the row shape and
+ * avoids the opaque `as unknown as Signal` double cast.
  */
 function rowToSignal(row: Record<string, unknown>): Signal {
+  const raw = row as unknown as RawSignalRow;
   return {
-    ...row,
-    sources: typeof row.sources === "string" ? JSON.parse(row.sources) : [],
-    tags: row.tags_csv ? String(row.tags_csv).split(",") : [],
-    tags_csv: undefined,
-  } as unknown as Signal;
+    id: raw.id,
+    beat_slug: raw.beat_slug,
+    btc_address: raw.btc_address,
+    headline: raw.headline,
+    body: raw.body,
+    sources: JSON.parse(raw.sources || "[]"),
+    tags: raw.tags_csv ? raw.tags_csv.split(",") : [],
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+    correction_of: raw.correction_of,
+  };
 }
 
 /**

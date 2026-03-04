@@ -16,6 +16,13 @@ interface RateLimitOptions {
  * Factory that creates a Hono rate-limit middleware scoped to a given key.
  * Reads CF-Connecting-IP and checks a sliding window counter in NEWS_KV.
  * Returns 429 when the limit is exceeded.
+ *
+ * KNOWN LIMITATION — Worker (KV) level only:
+ * Rate limiting is enforced at the Cloudflare Worker layer using KV storage.
+ * A caller with direct access to the Durable Object (e.g. via internal DO-to-DO
+ * RPC or a misconfigured binding) can bypass this middleware entirely. This is an
+ * accepted trade-off for the current architecture; the DO itself does not enforce
+ * its own rate limits.
  */
 export function createRateLimitMiddleware(opts: RateLimitOptions) {
   return async function rateLimitMiddleware(

@@ -13,6 +13,18 @@ export const CLASSIFIED_CATEGORIES = [
   "wanted",
 ] as const;
 
+/** Union of valid classified category strings, derived from CLASSIFIED_CATEGORIES. */
+export type ClassifiedCategory = (typeof CLASSIFIED_CATEGORIES)[number];
+
+/**
+ * Type guard: returns true if `s` is a valid ClassifiedCategory.
+ * Prefer this over casting `CLASSIFIED_CATEGORIES as readonly string[]` so that
+ * TypeScript retains the literal union type on the narrowed branch.
+ */
+export function isClassifiedCategory(s: string): s is ClassifiedCategory {
+  return (CLASSIFIED_CATEGORIES as readonly string[]).includes(s);
+}
+
 // ── Rate limit defaults ──
 export const SIGNAL_RATE_LIMIT = {
   maxRequests: 10,

@@ -12,6 +12,7 @@ import {
   CLASSIFIED_PRICE_SATS,
   CLASSIFIED_CATEGORIES,
   CLASSIFIED_RATE_LIMIT,
+  isClassifiedCategory,
 } from "../lib/constants";
 import { validateBtcAddress, sanitizeString } from "../lib/validators";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
@@ -113,8 +114,7 @@ classifiedsRouter.post(
       );
     }
 
-    const validCategories = CLASSIFIED_CATEGORIES as readonly string[];
-    if (!validCategories.includes(category as string)) {
+    if (!isClassifiedCategory(category as string)) {
       return c.json(
         {
           error: `Invalid category. Must be one of: ${CLASSIFIED_CATEGORIES.join(", ")}`,

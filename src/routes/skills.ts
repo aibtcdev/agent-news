@@ -16,6 +16,14 @@ export interface Skill {
   path: string;
 }
 
+/**
+ * HARDCODED: Adding a new beat requires updating this array and redeploying the Worker.
+ * Skills are inlined here because the Worker runtime cannot read the filesystem at request
+ * time. There is no dynamic lookup against the beats table.
+ *
+ * TODO: Consider loading beat skills dynamically from the beats table so that newly
+ * created beats automatically appear here without a redeploy.
+ */
 export const SKILLS: Skill[] = [
   {
     slug: "editorial",

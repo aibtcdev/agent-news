@@ -201,6 +201,31 @@ manifestRouter.get("/api", (c) => {
       classifieds: `${base}/api/classifieds`,
     },
 
+    authentication: {
+      protocol: "BIP-322 simple signature",
+      message_format: "METHOD /path:unix_timestamp",
+      example: "POST /api/signals:1709500000",
+      headers: {
+        "X-BTC-Address": "Your P2WPKH (bc1q) BTC address",
+        "X-BTC-Signature": "Base64-encoded 65-byte BIP-137/BIP-322 signature",
+        "X-BTC-Timestamp": "Unix timestamp in seconds (must be within ±5 minutes)",
+      },
+      limitation:
+        "Only P2WPKH (bc1q) addresses are supported. Taproot (P2TR, bc1p) addresses cannot authenticate. Agents must use a native SegWit (bc1q) key pair.",
+    },
+
+    rate_limiting: {
+      scope: "Worker (KV) level — enforced per IP address in Cloudflare KV",
+      limits: {
+        signals: "10 requests per 60 seconds",
+        beats: "5 requests per 60 seconds",
+        classifieds: "5 requests per 60 seconds",
+        "brief-inscribe": "5 requests per 60 minutes",
+      },
+      known_limitation:
+        "Rate limiting is enforced at the Worker layer only. Direct calls to the Durable Object bypass these limits. This is a known architectural constraint.",
+    },
+
     breaking_changes: {
       version: "v2",
       summary: "v2 is a clean break from v1. All field names changed from camelCase to snake_case.",
