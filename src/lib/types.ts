@@ -157,6 +157,38 @@ export interface Classified {
 }
 
 /**
+ * Valid bounty status values
+ */
+export type BountyStatus = "open" | "in_progress" | "completed" | "cancelled";
+
+/**
+ * A bounty posted by an agent (stored in local DO)
+ */
+export interface Bounty {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string;
+  readonly reward_sats: number;
+  readonly creator_btc_address: string;
+  readonly status: BountyStatus;
+  readonly payment_txid: string | null;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+/**
+ * A submission against a bounty
+ */
+export interface BountySubmission {
+  readonly id: string;
+  readonly bounty_id: string;
+  readonly submitter_btc_address: string;
+  readonly body: string;
+  readonly url: string | null;
+  readonly created_at: string;
+}
+
+/**
  * A compiled signal row returned by the brief compilation JOIN query
  */
 export interface CompiledSignalRow {

@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
-import type { Env, Beat, Signal, Streak, Brief, Classified, Earning, CompiledBriefData, DOResult } from "../lib/types";
+import type { Env, Beat, Signal, Streak, Brief, Classified, Earning, CompiledBriefData, Bounty, BountySubmission, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS } from "../lib/constants";
@@ -994,6 +994,199 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
       return c.json({ ok: true, data: rows as unknown as Earning[] } satisfies DOResult<Earning[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Bounties CRUD
+    // -------------------------------------------------------------------------
+
+    // GET /bounties — list bounties with optional status filter
+    this.router.get("/bounties", (c) => {
+      const status = c.req.query("status") ?? null;
+      const limitParam = c.req.query("limit");
+      const limit = Math.min(
+        Math.max(1, parseInt(limitParam ?? "50", 10) || 50),
+        200
+      );
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM bounties
+           WHERE (?1 IS NULL OR status = ?1)
+           ORDER BY created_at DESC
+           LIMIT ?2`,
+          status,
+          limit
+        )
+        .toArray();
+      return c.json({
+        ok: true,
+        data: rows as unknown as Bounty[],
+      } satisfies DOResult<Bounty[]>);
+    });
+
+    // GET /bounties/:id — get a single bounty
+    this.router.get("/bounties/:id", (c) => {
+      const id = c.req.param("id");
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM bounties WHERE id = ?", id)
+        .toArray();
+      if (rows.length === 0) {
+        return c.json(
+          { ok: false, error: `Bounty "${id}" not found` } satisfies DOResult<Bounty>,
+          404
+        );
+      }
+      return c.json({ ok: true, data: rows[0] as unknown as Bounty } satisfies DOResult<Bounty>);
+    });
+
+    // POST /bounties — create a new bounty
+    this.router.post("/bounties", async (c) => {
+      let body: Record<string, unknown>;
+      try {
+        body = await c.req.json<Record<string, unknown>>();
+      } catch {
+        return c.json(
+          { ok: false, error: "Invalid JSON body" } satisfies DOResult<Bounty>,
+          400
+        );
+      }
+
+      const { title, description, reward_sats, creator_btc_address, payment_txid } = body;
+
+      if (!title || !description || reward_sats === undefined || !creator_btc_address) {
+        return c.json(
+          {
+            ok: false,
+            error: "Missing required fields: title, description, reward_sats, creator_btc_address",
+          } satisfies DOResult<Bounty>,
+          400
+        );
+      }
+
+      if (typeof reward_sats !== "number" || !Number.isInteger(reward_sats) || reward_sats <= 0) {
+        return c.json(
+          { ok: false, error: "reward_sats must be a positive integer" } satisfies DOResult<Bounty>,
+          400
+        );
+      }
+
+      const now = new Date().toISOString();
+      const id = generateId();
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO bounties (id, title, description, reward_sats, creator_btc_address, status, payment_txid, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
+        id,
+        sanitizeString(title, 120),
+        sanitizeString(description, 2000),
+        reward_sats as number,
+        creator_btc_address as string,
+        payment_txid ? (payment_txid as string) : null,
+        now,
+        now
+      );
+
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM bounties WHERE id = ?", id)
+        .toArray();
+
+      return c.json(
+        { ok: true, data: rows[0] as unknown as Bounty } satisfies DOResult<Bounty>,
+        201
+      );
+    });
+
+    // GET /bounties/:id/submissions — list submissions for a bounty
+    this.router.get("/bounties/:id/submissions", (c) => {
+      const bountyId = c.req.param("id");
+      // Verify bounty exists
+      const bountyRows = this.ctx.storage.sql
+        .exec("SELECT id FROM bounties WHERE id = ?", bountyId)
+        .toArray();
+      if (bountyRows.length === 0) {
+        return c.json(
+          { ok: false, error: `Bounty "${bountyId}" not found` } satisfies DOResult<BountySubmission[]>,
+          404
+        );
+      }
+      const rows = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM bounty_submissions WHERE bounty_id = ? ORDER BY created_at ASC",
+          bountyId
+        )
+        .toArray();
+      return c.json({
+        ok: true,
+        data: rows as unknown as BountySubmission[],
+      } satisfies DOResult<BountySubmission[]>);
+    });
+
+    // POST /bounties/:id/submissions — submit work against a bounty
+    this.router.post("/bounties/:id/submissions", async (c) => {
+      const bountyId = c.req.param("id");
+
+      // Verify bounty exists and is open
+      const bountyRows = this.ctx.storage.sql
+        .exec("SELECT * FROM bounties WHERE id = ?", bountyId)
+        .toArray();
+      if (bountyRows.length === 0) {
+        return c.json(
+          { ok: false, error: `Bounty "${bountyId}" not found` } satisfies DOResult<BountySubmission>,
+          404
+        );
+      }
+      const bounty = bountyRows[0] as unknown as Bounty;
+      if (bounty.status !== "open" && bounty.status !== "in_progress") {
+        return c.json(
+          { ok: false, error: `Bounty is not accepting submissions (status: ${bounty.status})` } satisfies DOResult<BountySubmission>,
+          409
+        );
+      }
+
+      let body: Record<string, unknown>;
+      try {
+        body = await c.req.json<Record<string, unknown>>();
+      } catch {
+        return c.json(
+          { ok: false, error: "Invalid JSON body" } satisfies DOResult<BountySubmission>,
+          400
+        );
+      }
+
+      const { submitter_btc_address, body: submissionBody, url } = body;
+
+      if (!submitter_btc_address || !submissionBody) {
+        return c.json(
+          {
+            ok: false,
+            error: "Missing required fields: submitter_btc_address, body",
+          } satisfies DOResult<BountySubmission>,
+          400
+        );
+      }
+
+      const now = new Date().toISOString();
+      const id = generateId();
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO bounty_submissions (id, bounty_id, submitter_btc_address, body, url, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        id,
+        bountyId,
+        submitter_btc_address as string,
+        sanitizeString(submissionBody, 2000),
+        url ? sanitizeString(url, 500) : null,
+        now
+      );
+
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM bounty_submissions WHERE id = ?", id)
+        .toArray();
+
+      return c.json(
+        { ok: true, data: rows[0] as unknown as BountySubmission } satisfies DOResult<BountySubmission>,
+        201
+      );
     });
 
     // -------------------------------------------------------------------------

@@ -69,12 +69,36 @@ CREATE TABLE IF NOT EXISTS classifieds (
   expires_at   TEXT NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_signal_tags_tag          ON signal_tags(tag);
-CREATE INDEX IF NOT EXISTS idx_signals_beat_slug        ON signals(beat_slug);
-CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
-CREATE INDEX IF NOT EXISTS idx_signals_created_at       ON signals(created_at);
-CREATE INDEX IF NOT EXISTS idx_signals_correction_of    ON signals(correction_of);
-CREATE INDEX IF NOT EXISTS idx_earnings_btc_address     ON earnings(btc_address);
-CREATE INDEX IF NOT EXISTS idx_classifieds_expires_at   ON classifieds(expires_at);
-CREATE INDEX IF NOT EXISTS idx_classifieds_category     ON classifieds(category);
+CREATE TABLE IF NOT EXISTS bounties (
+  id                  TEXT PRIMARY KEY,
+  title               TEXT NOT NULL,
+  description         TEXT NOT NULL,
+  reward_sats         INTEGER NOT NULL,
+  creator_btc_address TEXT NOT NULL,
+  status              TEXT NOT NULL DEFAULT 'open',
+  payment_txid        TEXT,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bounty_submissions (
+  id                     TEXT PRIMARY KEY,
+  bounty_id              TEXT NOT NULL REFERENCES bounties(id),
+  submitter_btc_address  TEXT NOT NULL,
+  body                   TEXT NOT NULL,
+  url                    TEXT,
+  created_at             TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_signal_tags_tag               ON signal_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_signals_beat_slug             ON signals(beat_slug);
+CREATE INDEX IF NOT EXISTS idx_signals_btc_address           ON signals(btc_address);
+CREATE INDEX IF NOT EXISTS idx_signals_created_at            ON signals(created_at);
+CREATE INDEX IF NOT EXISTS idx_signals_correction_of         ON signals(correction_of);
+CREATE INDEX IF NOT EXISTS idx_earnings_btc_address          ON earnings(btc_address);
+CREATE INDEX IF NOT EXISTS idx_classifieds_expires_at        ON classifieds(expires_at);
+CREATE INDEX IF NOT EXISTS idx_classifieds_category          ON classifieds(category);
+CREATE INDEX IF NOT EXISTS idx_bounties_status               ON bounties(status);
+CREATE INDEX IF NOT EXISTS idx_bounties_creator              ON bounties(creator_btc_address);
+CREATE INDEX IF NOT EXISTS idx_bounty_submissions_bounty_id  ON bounty_submissions(bounty_id);
 `;

@@ -17,6 +17,7 @@ import { agentsRouter } from "./routes/agents";
 import { inscriptionsRouter } from "./routes/inscriptions";
 import { reportRouter } from "./routes/report";
 import { manifestRouter } from "./routes/manifest";
+import { bountiesRouter } from "./routes/bounties";
 import { migrateEntities, getMigrationStatus, type MigrateEntityType } from "./lib/do-client";
 
 // Create Hono app with type safety
@@ -44,6 +45,9 @@ app.route("/", briefInscribeRouter);
 
 // Mount classifieds routes
 app.route("/", classifiedsRouter);
+
+// Mount bounties routes
+app.route("/", bountiesRouter);
 
 // Mount read-only routes
 app.route("/", correspondentsRouter);

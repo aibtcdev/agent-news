@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, Source, Brief, Classified, Streak, Earning, CompiledBriefData, DOResult } from "./types";
+import type { Env, Beat, Signal, Source, Brief, Classified, Streak, Earning, CompiledBriefData, Bounty, BountySubmission, DOResult } from "./types";
 
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
@@ -369,6 +369,91 @@ export async function listEarnings(
     `/earnings/${encodeURIComponent(address)}`
   );
   return result.data ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Bounties
+// ---------------------------------------------------------------------------
+
+export interface BountyFilters {
+  status?: string;
+  limit?: number;
+}
+
+export async function listBounties(
+  env: Env,
+  filters: BountyFilters = {}
+): Promise<Bounty[]> {
+  const stub = getStub(env);
+  const params = new URLSearchParams();
+  if (filters.status) params.set("status", filters.status);
+  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  const qs = params.toString();
+  const result = await doFetch<Bounty[]>(stub, `/bounties${qs ? `?${qs}` : ""}`);
+  return result.data ?? [];
+}
+
+export async function getBounty(
+  env: Env,
+  id: string
+): Promise<Bounty | null> {
+  const stub = getStub(env);
+  const result = await doFetch<Bounty>(stub, `/bounties/${encodeURIComponent(id)}`);
+  return result.ok ? (result.data ?? null) : null;
+}
+
+export interface CreateBountyInput {
+  title: string;
+  description: string;
+  reward_sats: number;
+  creator_btc_address: string;
+  payment_txid?: string | null;
+}
+
+export async function createBounty(
+  env: Env,
+  bounty: CreateBountyInput
+): Promise<DOResult<Bounty>> {
+  const stub = getStub(env);
+  return doFetch<Bounty>(stub, "/bounties", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(bounty),
+  });
+}
+
+export async function listBountySubmissions(
+  env: Env,
+  bountyId: string
+): Promise<DOResult<BountySubmission[]>> {
+  const stub = getStub(env);
+  return doFetch<BountySubmission[]>(
+    stub,
+    `/bounties/${encodeURIComponent(bountyId)}/submissions`
+  );
+}
+
+export interface CreateBountySubmissionInput {
+  submitter_btc_address: string;
+  body: string;
+  url?: string | null;
+}
+
+export async function createBountySubmission(
+  env: Env,
+  bountyId: string,
+  submission: CreateBountySubmissionInput
+): Promise<DOResult<BountySubmission>> {
+  const stub = getStub(env);
+  return doFetch<BountySubmission>(
+    stub,
+    `/bounties/${encodeURIComponent(bountyId)}/submissions`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(submission),
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------
