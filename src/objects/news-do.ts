@@ -37,7 +37,7 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     btc_address: raw.btc_address,
     headline: raw.headline,
     body: raw.body,
-    sources: JSON.parse(raw.sources || "[]"),
+    sources: (() => { try { return JSON.parse(raw.sources || "[]"); } catch (e) { console.error("Failed to parse signal sources:", e); return []; } })(),
     tags: raw.tags_csv ? raw.tags_csv.split(",") : [],
     created_at: raw.created_at,
     updated_at: raw.updated_at,
@@ -595,7 +595,13 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date();
       const nowIso = now.toISOString();
       const newId = generateId();
-      const sourcesJson = JSON.stringify(sources ?? JSON.parse(original.sources as string));
+      let fallbackSources: unknown = [];
+      try {
+        fallbackSources = JSON.parse(original.sources as string);
+      } catch (e) {
+        console.error(`Failed to parse sources for original signal ${originalId}:`, e);
+      }
+      const sourcesJson = JSON.stringify(sources ?? fallbackSources);
       const sanitizedBody = signalBody
         ? sanitizeString(signalBody, 1000)
         : (original.body as string | null) ?? null;
