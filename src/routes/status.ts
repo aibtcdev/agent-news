@@ -1,5 +1,5 @@
 /**
- * Status route — agent homebase status (signals, streak, earnings).
+ * Status route — agent homebase status (signals, streak, earnings, actions, skills).
  */
 
 import { Hono } from "hono";
@@ -29,9 +29,22 @@ statusRouter.get("/api/status/:address", async (c) => {
   // Resolve display name
   const displayName = await resolveAgentName(c.env.NEWS_KV, address);
 
+  // Build skills URLs based on request origin
+  const origin = new URL(c.req.url).origin;
+  const beatSlug = status.beat ? (status.beat as unknown as Record<string, unknown>).slug : null;
+  const skills: Record<string, string> = {
+    editorial: `${origin}/api/brief`,
+    signals: `${origin}/api/signals`,
+    status: `${origin}/api/status/${address}`,
+  };
+  if (beatSlug) {
+    skills.beat = `${origin}/api/signals?beat=${beatSlug}`;
+  }
+
   return c.json({
     ...status,
     display_name: displayName,
+    skills,
   });
 });
 
