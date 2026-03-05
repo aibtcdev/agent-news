@@ -4,20 +4,19 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat_v2"],
-  // Local development settings
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": false },
+  // Custom domain — uncomment when DNS is pointed at this Cloudflare account
+  // "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
 
-  /**
-   * Top-level bindings are for local development only (wrangler dev).
-   * These are NOT inherited by environments — each env must define its own.
-   */
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
 
-  // KV namespace — rate limiting and agent cache (uses staging KV for local dev)
-  // TODO: replace ID with real value from: wrangler kv namespace create NEWS_KV
+  // KV namespace — rate limiting and agent cache
   "kv_namespaces": [
-    { "binding": "NEWS_KV", "id": "a9581bb6ee574b74ae74241433249f47", "preview_id": "aa4a0d5dd3e6451fa5d130c3e7d7c715" }
+    { "binding": "NEWS_KV", "id": "3b2ccbdc1fd5426ba72ed323e3407bdc" }
   ],
 
   // Durable Object binding — primary storage engine (SQLite)
@@ -32,80 +31,16 @@
     { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
   ],
 
-  // Service binding to worker-logs via RPC (uses staging endpoint for local dev)
+  // Service binding to worker-logs via RPC
   "services": [
-    { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" }
+    { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
   ],
 
   // Static frontend assets
-  "assets": { "directory": "./public" },
+  "assets": { "directory": "./public" }
 
   /**
-   * Environments
-   * Note: durable_objects, kv_namespaces, services, migrations are NOT inherited.
-   * Each environment must explicitly define all bindings it needs.
-   *
-   * Secrets (set via `wrangler secret put --env <env>`):
-   * - MIGRATION_KEY — shared secret for POST /api/internal/migrate endpoints.
-   *   Set via: `wrangler secret put MIGRATION_KEY --env staging` (and --env production)
+   * Secrets (set via `wrangler secret put`):
+   * - MIGRATION_KEY — shared secret for POST /api/internal/migrate endpoints
    */
-  "env": {
-    "staging": {
-      "name": "agent-news-staging",
-      "workers_dev": true,
-      "observability": { "enabled": false },
-      "vars": {
-        "ENVIRONMENT": "staging"
-      },
-      // KV namespace — staging namespace for rate limiting and agent cache
-      // TODO: replace ID with real value from: wrangler kv namespace create NEWS_KV --env staging
-      "kv_namespaces": [
-        { "binding": "NEWS_KV", "id": "TODO-replace-with-actual-kv-namespace-id" }
-      ],
-      // Bindings must be duplicated per environment
-      "durable_objects": {
-        "bindings": [
-          { "name": "NEWS_DO", "class_name": "NewsDO" }
-        ]
-      },
-      "migrations": [
-        { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
-      ],
-      // RPC service binding to staging worker-logs
-      "services": [
-        { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" }
-      ],
-      // Static frontend assets — not inherited from top level
-      "assets": { "directory": "./public" }
-    },
-    "production": {
-      "name": "agent-news-production",
-      "workers_dev": false,
-      "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
-      "observability": { "enabled": false },
-      "vars": {
-        "ENVIRONMENT": "production"
-      },
-      // KV namespace — production namespace for rate limiting and agent cache
-      // TODO: replace ID with real value from: wrangler kv namespace create NEWS_KV --env production
-      "kv_namespaces": [
-        { "binding": "NEWS_KV", "id": "TODO-replace-with-actual-kv-namespace-id" }
-      ],
-      // Bindings must be duplicated per environment
-      "durable_objects": {
-        "bindings": [
-          { "name": "NEWS_DO", "class_name": "NewsDO" }
-        ]
-      },
-      "migrations": [
-        { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
-      ],
-      // RPC service binding to production worker-logs
-      "services": [
-        { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
-      ],
-      // Static frontend assets — not inherited from top level
-      "assets": { "directory": "./public" }
-    }
-  }
 }

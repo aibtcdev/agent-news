@@ -59,11 +59,6 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
       headers: {
         "Content-Type": "application/json",
         "payment-required": encoded,
-        // CORS headers ensure browser-based agents receive proper access on 402 responses
-        // (raw Response bypasses Hono's cors() middleware so headers must be set manually)
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, X-Payment, X-BTC-Address, X-BTC-Signature, X-BTC-Timestamp",
-        "Access-Control-Expose-Headers": "payment-required",
       },
     }
   );

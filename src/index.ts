@@ -22,8 +22,28 @@ import { migrateEntities, getMigrationStatus, type MigrateEntityType } from "./l
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
-// Apply CORS globally
-app.use("/*", cors());
+// Apply CORS globally (matches x402-api pattern)
+app.use(
+	"*",
+	cors({
+		origin: "*",
+		allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+		allowHeaders: [
+			// x402 payment headers
+			"payment-signature",
+			"payment-required",
+			"X-PAYMENT",
+			// Auth headers
+			"X-BTC-Address",
+			"X-BTC-Signature",
+			"X-BTC-Timestamp",
+			"X-Migration-Key",
+			// Standard
+			"Content-Type",
+		],
+		exposeHeaders: ["payment-required", "payment-response"],
+	}),
+);
 
 // Apply logger middleware globally (creates request-scoped logger + requestId)
 app.use("*", loggerMiddleware);

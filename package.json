@@ -3,14 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy:staging": "wrangler deploy --env staging",
-    "deploy:production": "wrangler deploy --env production",
-    "deploy:dry-run": "wrangler deploy --dry-run",
+    "wrangler": "set -a && . ./.env && set +a && npx wrangler",
+    "dev": "npm run wrangler -- dev",
+    "deploy": "npm run wrangler -- deploy",
+    "deploy:dry-run": "npm run wrangler -- deploy --dry-run",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src/",
-    "cf-typegen": "wrangler types",
-    "migrate": "npx tsx scripts/migrate-kv-to-do.ts"
+    "cf-typegen": "npm run wrangler -- types",
+    "migrate": "set -a && . ./.env && set +a && npx tsx scripts/migrate-kv-to-do.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.5",
