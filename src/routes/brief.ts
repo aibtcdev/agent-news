@@ -31,7 +31,14 @@ briefRouter.get("/api/brief", async (c) => {
     });
   }
 
-  const jsonData = brief.json_data ? (JSON.parse(brief.json_data) as Record<string, unknown>) : {};
+  let jsonData: Record<string, unknown> = {};
+  if (brief.json_data) {
+    try {
+      jsonData = JSON.parse(brief.json_data) as Record<string, unknown>;
+    } catch (e) {
+      console.error(`Failed to parse json_data for latest brief:`, e);
+    }
+  }
 
   return c.json({
     date: brief.date,
@@ -102,7 +109,14 @@ briefRouter.get("/api/brief/:date", async (c) => {
     });
   }
 
-  const jsonData = brief.json_data ? (JSON.parse(brief.json_data) as Record<string, unknown>) : {};
+  let jsonData: Record<string, unknown> = {};
+  if (brief.json_data) {
+    try {
+      jsonData = JSON.parse(brief.json_data) as Record<string, unknown>;
+    } catch (e) {
+      console.error(`Failed to parse json_data for brief ${date}:`, e);
+    }
+  }
 
   return c.json({
     date: brief.date,

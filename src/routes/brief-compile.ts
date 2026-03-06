@@ -113,7 +113,8 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     let sources: Source[] | null = null;
     try {
       sources = JSON.parse(sig.sources) as Source[];
-    } catch {
+    } catch (e) {
+      console.error(`Failed to parse sources for signal ${sig.id}:`, e);
       sources = null;
     }
 
