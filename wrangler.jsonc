@@ -1,0 +1,19 @@
+{
+  // Project name — used as the Cloudflare Pages / Workers identifier
+  "name": "signal-dashboard",
+
+  // Directory that Cloudflare Pages will serve as the static site
+  "pages_build_output_dir": "./public",
+
+  // KV namespace bindings — key/value storage used at runtime
+  "kv_namespaces": [
+    {
+      // Name exposed to Worker functions as `env.SIGNAL_KV`
+      "binding": "SIGNAL_KV",
+      // Production namespace ID
+      "id": "a9581bb6ee574b74ae74241433249f47",
+      // Preview (local dev / staging) namespace ID
+      "preview_id": "aa4a0d5dd3e6451fa5d130c3e7d7c715"
+    }
+  ]
+}
