@@ -21,13 +21,14 @@ statusRouter.get("/api/status/:address", async (c) => {
     );
   }
 
-  const status = await getAgentStatus(c.env, address);
+  // Run DO status lookup and KV name resolution in parallel
+  const [status, agentInfo] = await Promise.all([
+    getAgentStatus(c.env, address),
+    resolveAgentName(c.env.NEWS_KV, address),
+  ]);
   if (!status) {
     return c.json({ error: `No status found for address ${address}` }, 404);
   }
-
-  // Resolve display name
-  const agentInfo = await resolveAgentName(c.env.NEWS_KV, address);
 
   // Build skills URLs based on request origin
   const origin = new URL(c.req.url).origin;
