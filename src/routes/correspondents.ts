@@ -47,6 +47,10 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     const longestStreak = Number(row.longest_streak) || 0;
     const daysActive = Number((row as unknown as Record<string, unknown>).days_active) || 0;
     const score = signalCount * 10 + streak * 5 + daysActive * 2;
+    const info = nameMap.get(row.btc_address);
+    // Use canonical segwit address for avatar (consistent Bitcoin Face),
+    // falling back to the signal address if resolution didn't return one
+    const avatarAddr = info?.btcAddress ?? row.btc_address;
 
     return {
       address: row.btc_address,
@@ -59,7 +63,9 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
       lastActive: row.last_signal_date ?? null,
       score,
       earnings: { total: 0, recentPayments: [] as unknown[] },
-      display_name: nameMap.get(row.btc_address)?.name ?? null,
+      display_name: info?.name ?? null,
+      avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
+      registered: info?.name !== null && info?.name !== undefined,
     };
   });
 
