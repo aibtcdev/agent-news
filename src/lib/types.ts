@@ -96,6 +96,8 @@ export interface Source {
 export interface Signal {
   readonly id: string;
   readonly beat_slug: string;
+  /** Populated when beat is JOIN-ed in the query; null when fetched without join */
+  readonly beat_name?: string | null;
   readonly btc_address: string;
   readonly headline: string;
   readonly body: string | null;

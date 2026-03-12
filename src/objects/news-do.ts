@@ -14,6 +14,7 @@ import { SCHEMA_SQL } from "./schema";
 interface RawSignalRow {
   id: string;
   beat_slug: string;
+  beat_name: string | null;
   btc_address: string;
   headline: string;
   body: string | null;
@@ -34,6 +35,7 @@ function rowToSignal(row: Record<string, unknown>): Signal {
   return {
     id: raw.id,
     beat_slug: raw.beat_slug,
+    beat_name: raw.beat_name ?? null,
     btc_address: raw.btc_address,
     headline: raw.headline,
     body: raw.body,
@@ -358,8 +360,9 @@ export class NewsDO extends DurableObject<Env> {
 
       const rows = this.ctx.storage.sql
         .exec(
-          `SELECT s.*, GROUP_CONCAT(st.tag) as tags_csv
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
            FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
            LEFT JOIN signal_tags st ON s.id = st.signal_id
            WHERE (?1 IS NULL OR s.beat_slug = ?1)
              AND (?2 IS NULL OR s.btc_address = ?2)
@@ -381,13 +384,14 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
     });
 
-    // GET /signals/:id — get a single signal with tags joined
+    // GET /signals/:id — get a single signal with tags and beat name joined
     this.router.get("/signals/:id", (c) => {
       const id = c.req.param("id");
       const rows = this.ctx.storage.sql
         .exec(
-          `SELECT s.*, GROUP_CONCAT(st.tag) as tags_csv
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
            FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
            LEFT JOIN signal_tags st ON s.id = st.signal_id
            WHERE s.id = ?1
            GROUP BY s.id`,
