@@ -260,29 +260,46 @@ interface OldBeat {
   name?: string;
   description?: string | null;
   color?: string | null;
-  created_by?: string;
-  created_at?: string;
+  // KV uses camelCase
+  claimedBy?: string;
+  claimedAt?: string;
+  created_by?: string; // fallback
+  created_at?: string; // fallback
   updated_at?: string;
+  signature?: string;
 }
 
 interface OldSignal {
   id?: string;
-  beat?: string; // old key name for beat_slug
-  beat_slug?: string;
-  address?: string; // old key name for btc_address
-  btc_address?: string;
+  // KV uses camelCase field names
+  beat?: string; // display name e.g. "DAO Watch"
+  beatSlug?: string;
+  beat_slug?: string; // fallback
+  btcAddress?: string;
+  btc_address?: string; // fallback
+  address?: string; // fallback
   headline?: string;
-  body?: string | null;
+  content?: string | null; // KV uses "content" not "body"
+  body?: string | null; // fallback
   sources?: unknown;
   tags?: string[];
-  created_at?: string;
+  timestamp?: string; // KV uses "timestamp" not "created_at"
+  created_at?: string; // fallback
   updated_at?: string;
   correction_of?: string | null;
+  inscriptionId?: string | null;
+  signature?: string;
 }
 
 interface OldStreak {
   address?: string;
   btc_address?: string;
+  // KV uses short names
+  current?: number;
+  longest?: number;
+  lastDate?: string | null;
+  history?: string[];
+  // fallbacks
   current_streak?: number;
   longest_streak?: number;
   last_signal_date?: string | null;
@@ -302,24 +319,42 @@ interface OldEarning {
 interface OldBrief {
   date?: string;
   text?: string;
-  json_data?: string | null;
-  compiled_at?: string;
-  inscribed_txid?: string | null;
-  inscription_id?: string | null;
+  // KV uses camelCase and different names
+  json?: unknown; // KV uses "json" not "json_data"
+  json_data?: string | null; // fallback
+  compiledAt?: string;
+  compiledBy?: string;
+  compiled_at?: string; // fallback
+  inscription?: {
+    inscriptionId?: string;
+    inscribedBy?: string;
+    inscribedAt?: string;
+  } | null;
+  inscribed_txid?: string | null; // fallback
+  inscription_id?: string | null; // fallback
 }
 
 interface OldClassified {
   id?: string;
-  address?: string;
-  btc_address?: string;
+  // KV uses camelCase
+  placedBy?: string;
+  btc_address?: string; // fallback
+  address?: string; // fallback
   category?: string;
-  headline?: string;
+  title?: string; // KV uses "title" not "headline"
+  headline?: string; // fallback
   body?: string | null;
   contact?: string | null;
-  payment_txid?: string | null;
-  created_at?: string;
-  expires_at?: string;
+  paymentTxid?: string | null;
+  payment_txid?: string | null; // fallback
+  createdAt?: string;
+  created_at?: string; // fallback
+  expiresAt?: string;
+  expires_at?: string; // fallback
 }
+
+/** Map from beat display name → slug, populated during migrateBeats(). */
+const beatNameToSlug = new Map<string, string>();
 
 async function migrateBeats(): Promise<{ kvCount: number; imported: number; skipped: number }> {
   console.log("\n[1/7] Migrating beats...");
@@ -343,14 +378,21 @@ async function migrateBeats(): Promise<{ kvCount: number; imported: number; skip
 
       const beat = value as OldBeat;
       const now = new Date().toISOString();
+      const beatSlug = beat.slug ?? slug;
+      const beatName = beat.name ?? slug;
+
+      // Build name→slug lookup for use during signal migration
+      beatNameToSlug.set(beatName, beatSlug);
+      beatNameToSlug.set(beatName.toLowerCase(), beatSlug);
+
       records.push({
-        slug: beat.slug ?? slug,
-        name: beat.name ?? slug,
+        slug: beatSlug,
+        name: beatName,
         description: beat.description ?? null,
         color: beat.color ?? null,
-        created_by: beat.created_by ?? "migration",
-        created_at: beat.created_at ?? now,
-        updated_at: beat.updated_at ?? now,
+        created_by: beat.claimedBy ?? beat.created_by ?? "migration",
+        created_at: beat.claimedAt ?? beat.created_at ?? now,
+        updated_at: beat.updated_at ?? beat.claimedAt ?? now,
       });
     } catch (err) {
       console.error(`  Failed to fetch beat:${slug}:`, err);
@@ -358,6 +400,7 @@ async function migrateBeats(): Promise<{ kvCount: number; imported: number; skip
   }
 
   console.log(`  Found ${kvCount} beat keys, prepared ${records.length} records.`);
+  console.log(`  Built name→slug map with ${beatNameToSlug.size} entries.`);
   const result = await migrateAll("beats", records);
   return { kvCount, ...result };
 }
@@ -389,8 +432,14 @@ async function migrateSignals(): Promise<{
       const now = new Date().toISOString();
 
       const signalId = signal.id ?? id;
-      const beatSlug = signal.beat_slug ?? signal.beat ?? "";
-      const btcAddress = signal.btc_address ?? signal.address ?? "";
+      // KV uses camelCase: beatSlug or beat (display name) — resolve to slug
+      const rawBeat = signal.beatSlug ?? signal.beat_slug ?? signal.beat ?? "";
+      const beatSlug =
+        beatNameToSlug.get(rawBeat) ??
+        beatNameToSlug.get(rawBeat.toLowerCase()) ??
+        rawBeat;
+      // KV uses camelCase: btcAddress
+      const btcAddress = signal.btcAddress ?? signal.btc_address ?? signal.address ?? "";
 
       const sourcesJson = signal.sources
         ? typeof signal.sources === "string"
@@ -398,15 +447,16 @@ async function migrateSignals(): Promise<{
           : JSON.stringify(signal.sources)
         : "[]";
 
+      // KV uses "content" not "body", "timestamp" not "created_at"
       signalRecords.push({
         id: signalId,
         beat_slug: beatSlug,
         btc_address: btcAddress,
         headline: signal.headline ?? "",
-        body: signal.body ?? null,
+        body: signal.content ?? signal.body ?? null,
         sources: sourcesJson,
-        created_at: signal.created_at ?? now,
-        updated_at: signal.updated_at ?? now,
+        created_at: signal.timestamp ?? signal.created_at ?? now,
+        updated_at: signal.updated_at ?? signal.timestamp ?? now,
         correction_of: signal.correction_of ?? null,
       });
 
@@ -455,10 +505,10 @@ async function migrateStreaks(): Promise<{ kvCount: number; imported: number; sk
       const streak = value as OldStreak;
       records.push({
         btc_address: streak.btc_address ?? streak.address ?? address,
-        current_streak: streak.current_streak ?? 0,
-        longest_streak: streak.longest_streak ?? 0,
-        last_signal_date: streak.last_signal_date ?? null,
-        total_signals: streak.total_signals ?? 0,
+        current_streak: streak.current ?? streak.current_streak ?? 0,
+        longest_streak: streak.longest ?? streak.longest_streak ?? 0,
+        last_signal_date: streak.lastDate ?? streak.last_signal_date ?? null,
+        total_signals: streak.history?.length ?? streak.total_signals ?? 0,
       });
     } catch (err) {
       console.error(`  Failed to fetch streak:${address}:`, err);
@@ -530,13 +580,20 @@ async function migrateBriefs(): Promise<{ kvCount: number; imported: number; ski
       // If text is not directly on the object, it might be nested
       const text = brief.text ?? (typeof value === "object" ? JSON.stringify(value) : String(value));
 
+      // KV "json" field is an object — serialize to string for json_data column
+      const jsonData = brief.json
+        ? typeof brief.json === "string"
+          ? brief.json
+          : JSON.stringify(brief.json)
+        : brief.json_data ?? null;
+
       records.push({
         date: brief.date ?? date,
         text,
-        json_data: brief.json_data ?? null,
-        compiled_at: brief.compiled_at ?? now,
+        json_data: jsonData,
+        compiled_at: brief.compiledAt ?? brief.compiled_at ?? now,
         inscribed_txid: brief.inscribed_txid ?? null,
-        inscription_id: brief.inscription_id ?? null,
+        inscription_id: brief.inscription?.inscriptionId ?? brief.inscription_id ?? null,
       });
     } catch (err) {
       console.error(`  Failed to fetch brief:${date}:`, err);
@@ -568,14 +625,14 @@ async function migrateClassifieds(): Promise<{ kvCount: number; imported: number
       const now = new Date().toISOString();
       records.push({
         id: classified.id ?? id,
-        btc_address: classified.btc_address ?? classified.address ?? "",
+        btc_address: classified.placedBy ?? classified.btc_address ?? classified.address ?? "",
         category: classified.category ?? "general",
-        headline: classified.headline ?? "",
+        headline: classified.title ?? classified.headline ?? "",
         body: classified.body ?? null,
         contact: classified.contact ?? null,
-        payment_txid: classified.payment_txid ?? null,
-        created_at: classified.created_at ?? now,
-        expires_at: classified.expires_at ?? now,
+        payment_txid: classified.paymentTxid ?? classified.payment_txid ?? null,
+        created_at: classified.createdAt ?? classified.created_at ?? now,
+        expires_at: classified.expiresAt ?? classified.expires_at ?? now,
       });
     } catch (err) {
       console.error(`  Failed to fetch classified:${id}:`, err);

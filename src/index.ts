@@ -17,7 +17,7 @@ import { agentsRouter } from "./routes/agents";
 import { inscriptionsRouter } from "./routes/inscriptions";
 import { reportRouter } from "./routes/report";
 import { manifestRouter } from "./routes/manifest";
-import { migrateEntities, getMigrationStatus, type MigrateEntityType } from "./lib/do-client";
+import { migrateEntities, getMigrationStatus, deleteMigrationSignal, type MigrateEntityType } from "./lib/do-client";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -121,6 +121,25 @@ app.get("/api/internal/migrate/status", async (c) => {
   }
 
   const result = await getMigrationStatus(c.env);
+  if (!result.ok) {
+    return c.json({ error: result.error }, 400);
+  }
+  return c.json(result.data);
+});
+
+// DELETE /api/internal/migrate/signal/:id — remove a test signal
+app.delete("/api/internal/migrate/signal/:id", async (c) => {
+  const migrationKey = c.env.MIGRATION_KEY;
+  if (!migrationKey) {
+    return c.json({ error: "Migration not configured" }, 503);
+  }
+  const providedKey = c.req.header("X-Migration-Key");
+  if (!providedKey || providedKey !== migrationKey) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const id = c.req.param("id");
+  const result = await deleteMigrationSignal(c.env, id);
   if (!result.ok) {
     return c.json({ error: result.error }, 400);
   }
