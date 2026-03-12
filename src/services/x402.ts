@@ -20,6 +20,13 @@ export interface PaymentVerifyResult {
   valid: boolean;
   txid?: string;
   payer?: string;
+  /**
+   * True when the failure is a transient relay error (network timeout, 5xx,
+   * parse failure) rather than the payment itself being invalid.
+   * Callers should return 503 instead of 402 in this case so that a user
+   * who already paid does not retry payment unnecessarily.
+   */
+  relayError?: boolean;
 }
 
 /**
@@ -67,16 +74,22 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
 /**
  * Verify an x402 payment via the relay's /settle endpoint.
  * The paymentHeader is the value of the X-PAYMENT or payment-signature header.
+ *
+ * Result semantics:
+ *   { valid: true }                    — payment verified, proceed
+ *   { valid: false }                   — payment invalid (bad sig, wrong amount, etc.)
+ *   { valid: false, relayError: true } — transient relay failure; caller should 503
  */
 export async function verifyPayment(
   paymentHeader: string,
   amount: number
 ): Promise<PaymentVerifyResult> {
+  let settleRes: Response;
+
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
-    let settleRes: Response;
     try {
       settleRes = await fetch(`${X402_RELAY_URL}/api/v1/settle`, {
         method: "POST",
@@ -96,30 +109,43 @@ export async function verifyPayment(
     } finally {
       clearTimeout(timeoutId);
     }
-
-    const result = (await settleRes.json()) as Record<string, unknown>;
-
-    if (!settleRes.ok || !result.success) {
-      return { valid: false };
-    }
-
-    // Decode payment header for payer info
-    let paymentData: Record<string, unknown> = {};
-    try {
-      paymentData = JSON.parse(atob(paymentHeader)) as Record<string, unknown>;
-    } catch {
-      // ignore decode errors
-    }
-
-    return {
-      valid: true,
-      txid: (result.txid as string | undefined) || (paymentData.txid as string | undefined),
-      payer:
-        (result.payer as string | undefined) ||
-        (paymentData.btcAddress as string | undefined) ||
-        (paymentData.from as string | undefined),
-    };
   } catch {
+    // Network error or timeout — relay unreachable, not a payment problem
+    return { valid: false, relayError: true };
+  }
+
+  // 5xx from relay = relay-side problem, not an invalid payment
+  if (settleRes.status >= 500) {
+    return { valid: false, relayError: true };
+  }
+
+  let result: Record<string, unknown>;
+  try {
+    result = (await settleRes.json()) as Record<string, unknown>;
+  } catch {
+    // Unexpected non-JSON body from relay = relay error
+    return { valid: false, relayError: true };
+  }
+
+  if (!settleRes.ok || !result.success) {
+    // 4xx or success:false = payment genuinely invalid
     return { valid: false };
   }
+
+  // Decode payment header for payer info
+  let paymentData: Record<string, unknown> = {};
+  try {
+    paymentData = JSON.parse(atob(paymentHeader)) as Record<string, unknown>;
+  } catch {
+    // ignore decode errors
+  }
+
+  return {
+    valid: true,
+    txid: (result.txid as string | undefined) || (paymentData.txid as string | undefined),
+    payer:
+      (result.payer as string | undefined) ||
+      (paymentData.btcAddress as string | undefined) ||
+      (paymentData.from as string | undefined),
+  };
 }

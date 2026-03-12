@@ -171,6 +171,15 @@ classifiedsRouter.post(
     const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS);
     if (!verification.valid) {
       const logger = c.get("logger");
+      if (verification.relayError) {
+        logger.error("relay error during payment verification for POST /api/classifieds", {
+          btc_address,
+        });
+        return c.json(
+          { error: "Payment relay unavailable. Your payment was not consumed — please retry shortly." },
+          503
+        );
+      }
       logger.warn("payment verification failed for POST /api/classifieds", {
         btc_address,
       });
