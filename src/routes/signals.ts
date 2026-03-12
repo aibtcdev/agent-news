@@ -12,7 +12,6 @@ import {
 } from "../lib/validators";
 import {
   listSignals,
-  listBeats,
   getSignal,
   createSignal,
   correctSignal,
@@ -38,20 +37,14 @@ signalsRouter.get("/api/signals", async (c) => {
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
     : undefined;
 
-  const [signals, beats] = await Promise.all([
-    listSignals(c.env, { beat, agent, tag, since, limit }),
-    listBeats(c.env),
-  ]);
-
-  // Build slug → display name map for beat resolution
-  const beatNames = new Map<string, string>();
-  for (const b of beats) beatNames.set(b.slug, b.name);
+  const signals = await listSignals(c.env, { beat, agent, tag, since, limit });
 
   // Transform snake_case → camelCase to match frontend expectations
+  // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
   const transformed = signals.map((s) => ({
     id: s.id,
     btcAddress: s.btc_address,
-    beat: beatNames.get(s.beat_slug) ?? s.beat_slug,
+    beat: s.beat_name ?? s.beat_slug,
     beatSlug: s.beat_slug,
     headline: s.headline || null,
     content: s.body,
@@ -68,21 +61,16 @@ signalsRouter.get("/api/signals", async (c) => {
 // GET /api/signals/:id — get a single signal
 signalsRouter.get("/api/signals/:id", async (c) => {
   const id = c.req.param("id");
-  const [s, beats] = await Promise.all([
-    getSignal(c.env, id),
-    listBeats(c.env),
-  ]);
+  const s = await getSignal(c.env, id);
   if (!s) {
     return c.json({ error: `Signal "${id}" not found` }, 404);
   }
-  const beatNames = new Map<string, string>();
-  for (const b of beats) beatNames.set(b.slug, b.name);
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     id: s.id,
     btcAddress: s.btc_address,
-    beat: beatNames.get(s.beat_slug) ?? s.beat_slug,
+    beat: s.beat_name ?? s.beat_slug,
     beatSlug: s.beat_slug,
     headline: s.headline || null,
     content: s.body,
