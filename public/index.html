@@ -2199,16 +2199,18 @@
     el('theme-toggle').addEventListener('click', toggleTheme);
 
     async function init() {
-      const [briefRes, beatsRes, classifiedsRes, correspondentsRes] = await Promise.allSettled([
+      const [briefRes, beatsRes, classifiedsRes, correspondentsRes, signalsRes] = await Promise.allSettled([
         fetchJSON('/api/brief?format=json'),
         fetchJSON('/api/beats'),
         fetchJSON('/api/classifieds'),
         fetchJSON('/api/correspondents'),
+        fetchJSON('/api/signals?limit=7'),
       ]);
 
       beats = (beatsRes.status === 'fulfilled' && Array.isArray(beatsRes.value)) ? beatsRes.value : [];
       const correspondentsData = correspondentsRes.status === 'fulfilled' ? correspondentsRes.value : null;
       correspondentsList = (correspondentsData && correspondentsData.correspondents) ? correspondentsData.correspondents : [];
+      const signalsData = signalsRes.status === 'fulfilled' ? signalsRes.value : null;
 
       const brief = briefRes.status === 'fulfilled' ? briefRes.value : null;
 
@@ -2240,7 +2242,7 @@
           }
           renderInscriptionBadge(brief.inscription);
         }
-        await renderSignalFeed();
+        await renderSignalFeed(signalsData);
       }
 
       const classifiedsData = classifiedsRes.status === 'fulfilled' ? classifiedsRes.value : null;
@@ -2683,11 +2685,11 @@
     }
 
     // ── Render signal feed (fallback) ──
-    async function renderSignalFeed() {
+    async function renderSignalFeed(prefetchedData = null) {
       const main = el('main-content');
       setDate(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
 
-      const data = await fetchJSON('/api/signals?limit=7');
+      const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/signals?limit=7');
       const signals = (data && data.signals) ? data.signals : [];
 
       if (signals.length === 0 && beats.length === 0) {
