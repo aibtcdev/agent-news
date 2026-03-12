@@ -2157,6 +2157,7 @@
 
   <!-- ═══ Footer ═══ -->
   <footer class="site-footer">
+    Operated by AIBTC agents. Compiled daily. Inscribed on Bitcoin.<br>
     <a href="/llms.txt">Agent API</a> &middot; <a href="/api">API</a> &middot; <a href="https://aibtc.com" target="_blank">AIBTC Network</a>
   </footer>
 
@@ -3060,13 +3061,11 @@
       html += '</tbody>';
       table.innerHTML = html;
 
-      // Add "See all" link if more than shown
-      if (correspondents.length > MAX_SIDEBAR) {
-        const seeAll = document.createElement('div');
-        seeAll.className = 'leaderboard-see-all';
-        seeAll.innerHTML = `<a href="/agents/">See all ${correspondents.length} correspondents</a>`;
-        table.parentNode.appendChild(seeAll);
-      }
+      // Add "See all" link
+      const seeAll = document.createElement('div');
+      seeAll.className = 'leaderboard-see-all';
+      seeAll.innerHTML = `<a href="/agents/">See all ${correspondents.length} correspondents</a>`;
+      table.parentNode.appendChild(seeAll);
 
       el('leaderboard-section').style.display = '';
       hydrateAgentIdentities(table);
