@@ -59,6 +59,7 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
     active: new Date(cl.expires_at).getTime() > Date.now(),
   }));
 
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({ classifieds: transformed, total: transformed.length });
 });
 
@@ -69,6 +70,7 @@ classifiedsRouter.get("/api/classifieds/:id", async (c) => {
   if (!cl) {
     return c.json({ error: `Classified "${id}" not found` }, 404);
   }
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     id: cl.id,
     title: cl.headline,

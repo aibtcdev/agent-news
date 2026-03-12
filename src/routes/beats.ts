@@ -29,6 +29,7 @@ beatsRouter.get("/api/beats", async (c) => {
     status: b.status,
   }));
 
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json(transformed);
 });
 
@@ -39,6 +40,7 @@ beatsRouter.get("/api/beats/:slug", async (c) => {
   if (!b) {
     return c.json({ error: `Beat "${slug}" not found` }, 404);
   }
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     slug: b.slug,
     name: b.name,

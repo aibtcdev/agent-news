@@ -61,6 +61,7 @@ signalsRouter.get("/api/signals", async (c) => {
     correction_of: s.correction_of,
   }));
 
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({ signals: transformed, total: transformed.length, filtered: transformed.length });
 });
 
@@ -77,6 +78,7 @@ signalsRouter.get("/api/signals/:id", async (c) => {
   const beatNames = new Map<string, string>();
   for (const b of beats) beatNames.set(b.slug, b.name);
 
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     id: s.id,
     btcAddress: s.btc_address,

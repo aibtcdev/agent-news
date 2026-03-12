@@ -69,6 +69,7 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     };
   });
 
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({ correspondents, total: correspondents.length });
 });
 

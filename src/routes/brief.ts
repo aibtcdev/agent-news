@@ -41,6 +41,7 @@ briefRouter.get("/api/brief", async (c) => {
     ? { inscriptionId: brief.inscription_id, inscribedTxid: brief.inscribed_txid }
     : (jsonData.inscription ?? null);
 
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     preview: false,
     date: brief.date,
@@ -119,6 +120,7 @@ briefRouter.get("/api/brief/:date", async (c) => {
     ? { inscriptionId: brief.inscription_id, inscribedTxid: brief.inscribed_txid }
     : (jsonData.inscription ?? null);
 
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     date: brief.date,
     compiledAt: brief.compiled_at,
