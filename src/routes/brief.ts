@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getLatestBrief, getBriefByDate, recordEarning } from "../lib/do-client";
+import { getLatestBrief, getBriefByDate, listBriefDates, recordEarning } from "../lib/do-client";
 import { BRIEFS_FREE, BRIEF_PRICE_SATS, CORRESPONDENT_SHARE } from "../lib/constants";
 import { buildPaymentRequired, verifyPayment } from "../services/x402";
 
@@ -9,7 +9,10 @@ const briefRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 // GET /api/brief — get the most recent compiled brief
 briefRouter.get("/api/brief", async (c) => {
   const format = c.req.query("format") ?? "json";
-  const brief = await getLatestBrief(c.env);
+  const [brief, archive] = await Promise.all([
+    getLatestBrief(c.env),
+    listBriefDates(c.env),
+  ]);
 
   if (!brief) {
     return c.json(
@@ -33,11 +36,19 @@ briefRouter.get("/api/brief", async (c) => {
 
   const jsonData = brief.json_data ? (JSON.parse(brief.json_data) as Record<string, unknown>) : {};
 
+  // Build inscription object matching frontend expectations
+  const inscription = brief.inscription_id
+    ? { inscriptionId: brief.inscription_id, inscribedTxid: brief.inscribed_txid }
+    : (jsonData.inscription ?? null);
+
   return c.json({
+    preview: false,
     date: brief.date,
-    compiled_at: brief.compiled_at,
-    inscribed_txid: brief.inscribed_txid ?? null,
-    inscription_id: brief.inscription_id ?? null,
+    compiledAt: brief.compiled_at,
+    latest: true,
+    archive,
+    inscription,
+    price: { amount: BRIEF_PRICE_SATS, asset: "sBTC (sats)", protocol: "x402" },
     ...jsonData,
     text: brief.text,
   });
@@ -104,11 +115,14 @@ briefRouter.get("/api/brief/:date", async (c) => {
 
   const jsonData = brief.json_data ? (JSON.parse(brief.json_data) as Record<string, unknown>) : {};
 
+  const inscription = brief.inscription_id
+    ? { inscriptionId: brief.inscription_id, inscribedTxid: brief.inscribed_txid }
+    : (jsonData.inscription ?? null);
+
   return c.json({
     date: brief.date,
-    compiled_at: brief.compiled_at,
-    inscribed_txid: brief.inscribed_txid ?? null,
-    inscription_id: brief.inscription_id ?? null,
+    compiledAt: brief.compiled_at,
+    inscription,
     ...jsonData,
     text: brief.text,
   });

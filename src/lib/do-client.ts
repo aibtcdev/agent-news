@@ -158,6 +158,12 @@ export async function correctSignal(
 // Briefs
 // ---------------------------------------------------------------------------
 
+export async function listBriefDates(env: Env): Promise<string[]> {
+  const stub = getStub(env);
+  const result = await doFetch<string[]>(stub, "/briefs/dates");
+  return result.data ?? [];
+}
+
 export async function getLatestBrief(env: Env): Promise<Brief | null> {
   const stub = getStub(env);
   const result = await doFetch<Brief>(stub, "/briefs/latest");
@@ -440,4 +446,14 @@ export async function getMigrationStatus(
 ): Promise<DOResult<Record<string, number>>> {
   const stub = getStub(env);
   return doFetch<Record<string, number>>(stub, "/migrate/status");
+}
+
+export async function deleteMigrationSignal(
+  env: Env,
+  id: string
+): Promise<DOResult<{ deleted: string }>> {
+  const stub = getStub(env);
+  return doFetch<{ deleted: string }>(stub, `/migrate/signal/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }

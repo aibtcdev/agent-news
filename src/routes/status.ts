@@ -27,7 +27,7 @@ statusRouter.get("/api/status/:address", async (c) => {
   }
 
   // Resolve display name
-  const displayName = await resolveAgentName(c.env.NEWS_KV, address);
+  const agentInfo = await resolveAgentName(c.env.NEWS_KV, address);
 
   // Build skills URLs based on request origin
   const origin = new URL(c.req.url).origin;
@@ -43,7 +43,7 @@ statusRouter.get("/api/status/:address", async (c) => {
 
   return c.json({
     ...status,
-    display_name: displayName,
+    display_name: agentInfo.name,
     skills,
   });
 });

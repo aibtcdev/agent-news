@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env, AppVariables, Source, CompiledSignalRow } from "../lib/types";
+import type { Env, AppVariables, Source } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { compileBriefData, saveBrief } from "../lib/do-client";
 import { resolveAgentNames } from "../services/agent-resolver";
@@ -109,7 +109,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   const sectionsByBeat = new Map<string, BriefSection[]>();
   for (const sig of signals) {
     const shortAddr = shortAddress(sig.btc_address);
-    const displayName = nameMap.get(sig.btc_address) ?? shortAddr;
+    const displayName = nameMap.get(sig.btc_address)?.name ?? shortAddr;
     let sources: Source[] | null = null;
     try {
       sources = JSON.parse(sig.sources) as Source[];

@@ -17,17 +17,37 @@ const beatRateLimit = createRateLimitMiddleware({
 // GET /api/beats — list all beats
 beatsRouter.get("/api/beats", async (c) => {
   const beats = await listBeats(c.env);
-  return c.json(beats);
+
+  // Transform snake_case → camelCase to match frontend expectations
+  const transformed = beats.map((b) => ({
+    slug: b.slug,
+    name: b.name,
+    description: b.description,
+    color: b.color,
+    claimedBy: b.created_by,
+    claimedAt: b.created_at,
+    status: b.status,
+  }));
+
+  return c.json(transformed);
 });
 
 // GET /api/beats/:slug — get a single beat by slug
 beatsRouter.get("/api/beats/:slug", async (c) => {
   const slug = c.req.param("slug");
-  const beat = await getBeat(c.env, slug);
-  if (!beat) {
+  const b = await getBeat(c.env, slug);
+  if (!b) {
     return c.json({ error: `Beat "${slug}" not found` }, 404);
   }
-  return c.json(beat);
+  return c.json({
+    slug: b.slug,
+    name: b.name,
+    description: b.description,
+    color: b.color,
+    claimedBy: b.created_by,
+    claimedAt: b.created_at,
+    status: b.status,
+  });
 });
 
 // POST /api/beats — create a new beat (rate limited, BIP-322 auth required)

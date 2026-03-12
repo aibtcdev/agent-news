@@ -10,20 +10,30 @@ const CACHE_TTL_SECONDS = 86400; // 24 hours
 const CACHE_KEY_PREFIX = "agent-name:";
 const AGENT_API_BASE = "https://aibtc.com/api/agents";
 
+export interface AgentInfo {
+  name: string | null;
+  btcAddress: string | null; // canonical segwit address from aibtc.com
+}
+
 /**
- * Resolves the display name for a single BTC address.
- * Returns the name string or null if not found.
+ * Resolves the display name and canonical BTC address for a single address.
+ * Returns { name, btcAddress } where btcAddress is the segwit address from aibtc.com.
  */
 export async function resolveAgentName(
   kv: KVNamespace,
   btcAddress: string
-): Promise<string | null> {
+): Promise<AgentInfo> {
   const cacheKey = `${CACHE_KEY_PREFIX}${btcAddress}`;
 
   // Check KV cache first
   const cached = await kv.get(cacheKey);
   if (cached !== null) {
-    return cached || null; // empty string in cache means "no name found"
+    // New JSON format
+    if (cached.startsWith("{")) {
+      return JSON.parse(cached) as AgentInfo;
+    }
+    // Legacy plain-string format: migrate by treating it as name-only
+    return { name: cached || null, btcAddress: null };
   }
 
   // Cache miss — fetch from external API
@@ -39,45 +49,48 @@ export async function resolveAgentName(
         (agent?.displayName as string | undefined) ||
         (agent?.name as string | undefined) ||
         null;
+      const canonicalBtc = (agent?.btcAddress as string | undefined) || null;
 
-      // Cache result (empty string signals "no name" to avoid repeated fetches)
-      await kv.put(cacheKey, displayName ?? "", {
+      const info: AgentInfo = { name: displayName, btcAddress: canonicalBtc };
+
+      // Cache result as JSON (empty name signals "no name" to avoid repeated fetches)
+      await kv.put(cacheKey, JSON.stringify(info), {
         expirationTtl: CACHE_TTL_SECONDS,
       });
 
-      return displayName;
+      return info;
     }
   } catch {
     // Network error — don't cache, use fallback
   }
 
-  return null;
+  return { name: null, btcAddress: null };
 }
 
 /**
- * Batch-resolves display names for an array of BTC addresses.
+ * Batch-resolves display names and canonical addresses for an array of BTC addresses.
  * Deduplicates addresses and uses Promise.allSettled for resilience.
- * Returns a Map<address, name> for addresses that have a name.
+ * Returns a Map<address, AgentInfo> for all resolved addresses.
  */
 export async function resolveAgentNames(
   kv: KVNamespace,
   addresses: string[]
-): Promise<Map<string, string>> {
+): Promise<Map<string, AgentInfo>> {
   const unique = [...new Set(addresses)];
-  const nameMap = new Map<string, string>();
+  const infoMap = new Map<string, AgentInfo>();
 
   const results = await Promise.allSettled(
     unique.map(async (addr) => {
-      const name = await resolveAgentName(kv, addr);
-      return { addr, name };
+      const info = await resolveAgentName(kv, addr);
+      return { addr, info };
     })
   );
 
   for (const result of results) {
-    if (result.status === "fulfilled" && result.value.name) {
-      nameMap.set(result.value.addr, result.value.name);
+    if (result.status === "fulfilled") {
+      infoMap.set(result.value.addr, result.value.info);
     }
   }
 
-  return nameMap;
+  return infoMap;
 }

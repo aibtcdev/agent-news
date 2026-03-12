@@ -1,5 +1,8 @@
 /**
- * Agents route — list all known agents (unique btc_addresses from signals) with resolved names.
+ * Agents route — resolve agent identities by address.
+ *
+ * The frontend calls /api/agents?addresses=addr1,addr2 and expects a keyed
+ * object: { agents: { addr: { name, avatar, registered } } }
  */
 
 import { Hono } from "hono";
@@ -9,22 +12,35 @@ import { resolveAgentNames } from "../services/agent-resolver";
 
 const agentsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
-// GET /api/agents — list all agents with resolved display names
+// GET /api/agents — resolve agent identities (keyed by address for frontend cache)
 agentsRouter.get("/api/agents", async (c) => {
-  // Re-use correspondents query (it already selects all unique btc_addresses from signals)
+  const addressesParam = c.req.query("addresses");
+
+  // Re-use correspondents query for all known agents
   const rows = await listCorrespondents(c.env);
 
-  const addresses = rows.map((r) => r.btc_address);
-  const nameMap = await resolveAgentNames(c.env.NEWS_KV, addresses);
+  // If ?addresses is provided, filter to those addresses
+  const requestedAddresses = addressesParam
+    ? addressesParam.split(",").map((a) => a.trim()).filter(Boolean)
+    : rows.map((r) => r.btc_address);
 
-  const agents = rows.map((row) => ({
-    btc_address: row.btc_address,
-    display_name: nameMap.get(row.btc_address) ?? null,
-    signal_count: row.signal_count,
-    last_signal: row.last_signal,
-  }));
+  const infoMap = await resolveAgentNames(c.env.NEWS_KV, requestedAddresses);
 
-  return c.json({ agents, total: agents.length });
+  // Build keyed object matching frontend expectations
+  const agents: Record<string, { name: string | null; avatar: string; registered: boolean }> = {};
+  for (const addr of requestedAddresses) {
+    const info = infoMap.get(addr);
+    // Use canonical segwit address for avatar (consistent Bitcoin Face),
+    // falling back to the signal address if resolution didn't return one
+    const avatarAddr = info?.btcAddress ?? addr;
+    agents[addr] = {
+      name: info?.name ?? null,
+      avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
+      registered: info?.name !== null && info?.name !== undefined,
+    };
+  }
+
+  return c.json({ agents });
 });
 
 export { agentsRouter };

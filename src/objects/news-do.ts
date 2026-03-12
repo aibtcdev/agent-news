@@ -650,6 +650,15 @@ export class NewsDO extends DurableObject<Env> {
     // Briefs CRUD
     // -------------------------------------------------------------------------
 
+    // GET /briefs/dates — list all brief dates (for archive page)
+    this.router.get("/briefs/dates", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec("SELECT date FROM briefs ORDER BY date DESC")
+        .toArray();
+      const dates = rows.map((r) => (r as { date: string }).date);
+      return c.json({ ok: true, data: dates } satisfies DOResult<string[]>);
+    });
+
     // GET /briefs/latest — get the most recent compiled brief
     this.router.get("/briefs/latest", (c) => {
       const rows = this.ctx.storage.sql
@@ -933,6 +942,7 @@ export class NewsDO extends DurableObject<Env> {
           `SELECT s.btc_address,
                   COUNT(s.id) as signal_count,
                   MAX(s.created_at) as last_signal,
+                  COUNT(DISTINCT date(s.created_at)) as days_active,
                   st.current_streak,
                   st.longest_streak,
                   st.total_signals,
@@ -1291,7 +1301,15 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: status } satisfies DOResult<Record<string, number>>);
     });
 
-    // POST /migrate — bulk import entity records (idempotent via INSERT OR IGNORE)
+    // DELETE /migrate/signal/:id — remove a single signal (for cleanup)
+    this.router.delete("/migrate/signal/:id", (c) => {
+      const id = c.req.param("id");
+      this.ctx.storage.sql.exec("DELETE FROM signal_tags WHERE signal_id = ?", id);
+      this.ctx.storage.sql.exec("DELETE FROM signals WHERE id = ?", id);
+      return c.json({ ok: true, data: { deleted: id } } satisfies DOResult<{ deleted: string }>);
+    });
+
+    // POST /migrate — bulk import entity records (idempotent via INSERT OR REPLACE)
     this.router.post("/migrate", async (c) => {
       let body: Record<string, unknown>;
       try {
@@ -1339,7 +1357,7 @@ export class NewsDO extends DurableObject<Env> {
           for (const rec of records as Record<string, unknown>[]) {
             const now = new Date().toISOString();
             this.ctx.storage.sql.exec(
-              `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at)
+              `INSERT OR REPLACE INTO beats (slug, name, description, color, created_by, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?)`,
               rec.slug as string,
               rec.name as string,
@@ -1357,7 +1375,7 @@ export class NewsDO extends DurableObject<Env> {
               ? rec.sources
               : JSON.stringify(rec.sources ?? []);
             this.ctx.storage.sql.exec(
-              `INSERT OR IGNORE INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
+              `INSERT OR REPLACE INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               rec.id as string,
               rec.beat_slug as string,
@@ -1373,7 +1391,7 @@ export class NewsDO extends DurableObject<Env> {
         } else if (entityType === "signal_tags") {
           for (const rec of records as Record<string, unknown>[]) {
             this.ctx.storage.sql.exec(
-              `INSERT OR IGNORE INTO signal_tags (signal_id, tag) VALUES (?, ?)`,
+              `INSERT OR REPLACE INTO signal_tags (signal_id, tag) VALUES (?, ?)`,
               rec.signal_id as string,
               rec.tag as string
             );
@@ -1381,7 +1399,7 @@ export class NewsDO extends DurableObject<Env> {
         } else if (entityType === "streaks") {
           for (const rec of records as Record<string, unknown>[]) {
             this.ctx.storage.sql.exec(
-              `INSERT OR IGNORE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
+              `INSERT OR REPLACE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
                VALUES (?, ?, ?, ?, ?)`,
               rec.btc_address as string,
               (rec.current_streak as number) ?? 0,
@@ -1394,7 +1412,7 @@ export class NewsDO extends DurableObject<Env> {
           for (const rec of records as Record<string, unknown>[]) {
             const now = new Date().toISOString();
             this.ctx.storage.sql.exec(
-              `INSERT OR IGNORE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
+              `INSERT OR REPLACE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
                VALUES (?, ?, ?, ?, ?, ?)`,
               rec.id as string,
               rec.btc_address as string,
@@ -1408,7 +1426,7 @@ export class NewsDO extends DurableObject<Env> {
           for (const rec of records as Record<string, unknown>[]) {
             const now = new Date().toISOString();
             this.ctx.storage.sql.exec(
-              `INSERT OR IGNORE INTO briefs (date, text, json_data, compiled_at, inscribed_txid, inscription_id)
+              `INSERT OR REPLACE INTO briefs (date, text, json_data, compiled_at, inscribed_txid, inscription_id)
                VALUES (?, ?, ?, ?, ?, ?)`,
               rec.date as string,
               rec.text as string,
@@ -1422,7 +1440,7 @@ export class NewsDO extends DurableObject<Env> {
           for (const rec of records as Record<string, unknown>[]) {
             const now = new Date().toISOString();
             this.ctx.storage.sql.exec(
-              `INSERT OR IGNORE INTO classifieds (id, btc_address, category, headline, body, contact, payment_txid, created_at, expires_at)
+              `INSERT OR REPLACE INTO classifieds (id, btc_address, category, headline, body, contact, payment_txid, created_at, expires_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               rec.id as string,
               rec.btc_address as string,

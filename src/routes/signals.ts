@@ -12,6 +12,7 @@ import {
 } from "../lib/validators";
 import {
   listSignals,
+  listBeats,
   getSignal,
   createSignal,
   correctSignal,
@@ -37,24 +38,57 @@ signalsRouter.get("/api/signals", async (c) => {
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
     : undefined;
 
-  const signals = await listSignals(c.env, {
-    beat,
-    agent,
-    tag,
-    since,
-    limit,
-  });
-  return c.json(signals);
+  const [signals, beats] = await Promise.all([
+    listSignals(c.env, { beat, agent, tag, since, limit }),
+    listBeats(c.env),
+  ]);
+
+  // Build slug → display name map for beat resolution
+  const beatNames = new Map<string, string>();
+  for (const b of beats) beatNames.set(b.slug, b.name);
+
+  // Transform snake_case → camelCase to match frontend expectations
+  const transformed = signals.map((s) => ({
+    id: s.id,
+    btcAddress: s.btc_address,
+    beat: beatNames.get(s.beat_slug) ?? s.beat_slug,
+    beatSlug: s.beat_slug,
+    headline: s.headline || null,
+    content: s.body,
+    sources: s.sources,
+    tags: s.tags,
+    timestamp: s.created_at,
+    correction_of: s.correction_of,
+  }));
+
+  return c.json({ signals: transformed, total: transformed.length, filtered: transformed.length });
 });
 
 // GET /api/signals/:id — get a single signal
 signalsRouter.get("/api/signals/:id", async (c) => {
   const id = c.req.param("id");
-  const signal = await getSignal(c.env, id);
-  if (!signal) {
+  const [s, beats] = await Promise.all([
+    getSignal(c.env, id),
+    listBeats(c.env),
+  ]);
+  if (!s) {
     return c.json({ error: `Signal "${id}" not found` }, 404);
   }
-  return c.json(signal);
+  const beatNames = new Map<string, string>();
+  for (const b of beats) beatNames.set(b.slug, b.name);
+
+  return c.json({
+    id: s.id,
+    btcAddress: s.btc_address,
+    beat: beatNames.get(s.beat_slug) ?? s.beat_slug,
+    beatSlug: s.beat_slug,
+    headline: s.headline || null,
+    content: s.body,
+    sources: s.sources,
+    tags: s.tags,
+    timestamp: s.created_at,
+    correction_of: s.correction_of,
+  });
 });
 
 // POST /api/signals — submit a new signal (rate limited, BIP-322 auth required)

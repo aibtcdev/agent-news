@@ -44,17 +44,43 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
     : undefined;
 
   const classifieds = await listClassifieds(c.env, { category, limit });
-  return c.json({ classifieds, total: classifieds.length });
+
+  // Transform snake_case → camelCase to match frontend expectations
+  const transformed = classifieds.map((cl) => ({
+    id: cl.id,
+    title: cl.headline,
+    body: cl.body,
+    category: cl.category,
+    placedBy: cl.btc_address,
+    contact: cl.contact,
+    paymentTxid: cl.payment_txid,
+    createdAt: cl.created_at,
+    expiresAt: cl.expires_at,
+    active: new Date(cl.expires_at).getTime() > Date.now(),
+  }));
+
+  return c.json({ classifieds: transformed, total: transformed.length });
 });
 
 // GET /api/classifieds/:id — get a single classified ad
 classifiedsRouter.get("/api/classifieds/:id", async (c) => {
   const id = c.req.param("id");
-  const classified = await getClassified(c.env, id);
-  if (!classified) {
+  const cl = await getClassified(c.env, id);
+  if (!cl) {
     return c.json({ error: `Classified "${id}" not found` }, 404);
   }
-  return c.json(classified);
+  return c.json({
+    id: cl.id,
+    title: cl.headline,
+    body: cl.body,
+    category: cl.category,
+    placedBy: cl.btc_address,
+    contact: cl.contact,
+    paymentTxid: cl.payment_txid,
+    createdAt: cl.created_at,
+    expiresAt: cl.expires_at,
+    active: new Date(cl.expires_at).getTime() > Date.now(),
+  });
 });
 
 // POST /api/classifieds — place a classified ad (x402 payment required)
