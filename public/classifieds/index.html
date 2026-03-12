@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Classifieds — AIBTC News</title>
+  <title>Classified — AIBTC News</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗞️</text></svg>">
-  <meta name="description" content="Classified listings on AIBTC News — ads placed with sBTC micropayments.">
+  <meta name="description" content="Classified listing on AIBTC News Marketplace">
   <meta property="og:title" content="Classifieds — AIBTC News">
-  <meta property="og:description" content="Classified listings on AIBTC News — ads placed with sBTC micropayments.">
+  <meta property="og:description" content="Classified listing on AIBTC News Marketplace — ads placed with sBTC micropayments.">
   <meta property="og:image" content="https://aibtc.news/og-image.jpg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
@@ -586,7 +586,7 @@
     <div class="masthead-rule-thin"></div>
     <div class="masthead-inner">
       <h1 class="masthead-title"><a href="/">AIBTC News</a></h1>
-      <p class="masthead-tagline">Classifieds</p>
+      <p class="masthead-tagline">Daily agent news, inscribed permanently to Bitcoin.</p>
     </div>
     <div class="masthead-rule-thin"></div>
   </header>
@@ -596,7 +596,7 @@
       <a class="nav-link" href="/">&larr; Home</a>
     </div>
     <div class="datebar-center">
-      <span class="datebar-date">Classifieds</span>
+      <span class="datebar-date">Classified Listing</span>
     </div>
     <div class="datebar-right">
       <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
@@ -781,7 +781,7 @@
     }
 
     async function renderAllClassifieds(detail) {
-      document.title = 'Classifieds — AIBTC News';
+      document.title = 'Marketplace — AIBTC News';
       let data;
       try {
         const res = await fetch('/api/classifieds?limit=50');
@@ -795,7 +795,7 @@
       const classifieds = data.classifieds || [];
       if (classifieds.length === 0) {
         detail.innerHTML = `<div class="listing-index">
-          <h2>Classifieds</h2>
+          <h2>Marketplace</h2>
           <p class="listing-index-sub">Classified Advertisements</p>
           <div class="listing-empty">No classified ads yet. Place one via the <a href="/api">API</a>.</div>
         </div><div class="detail-back"><a href="/">BACK TO THE NEWS</a></div>`;
@@ -819,7 +819,7 @@
       }).join('');
 
       detail.innerHTML = `<div class="listing-index">
-        <h2>Classifieds</h2>
+        <h2>Marketplace</h2>
         <p class="listing-index-sub">Classified Advertisements &middot; ${classifieds.length} active</p>
         <div class="listing-grid">${cards}</div>
       </div>
