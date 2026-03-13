@@ -1,12 +1,15 @@
 /**
- * Skills route — list editorial skill definitions as constants.
+ * Skills route — list editorial skill definitions, with beat skills loaded
+ * dynamically from the Durable Object so newly-claimed beats appear immediately
+ * without a Worker redeploy.
  *
- * These match the original public/skills/ directory structure.
- * Skills are defined inline here since the Worker cannot read the filesystem.
+ * The editorial skill is static (it will never be stored in the DB).
+ * Beat skills are built at request time from the beats table.
  */
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
+import { listBeats } from "../lib/do-client";
 
 export interface Skill {
   slug: string;
@@ -16,15 +19,8 @@ export interface Skill {
   path: string;
 }
 
-/**
- * HARDCODED: Adding a new beat requires updating this array and redeploying the Worker.
- * Skills are inlined here because the Worker runtime cannot read the filesystem at request
- * time. There is no dynamic lookup against the beats table.
- *
- * TODO: Consider loading beat skills dynamically from the beats table so that newly
- * created beats automatically appear here without a redeploy.
- */
-export const SKILLS: Skill[] = [
+/** Static skills that are not beat-specific */
+const STATIC_SKILLS: Skill[] = [
   {
     slug: "editorial",
     type: "editorial",
@@ -33,65 +29,27 @@ export const SKILLS: Skill[] = [
       "Master voice guide: Economist-style neutral tone, claim-evidence-implication structure, density rules, vocabulary",
     path: "/skills/editorial.md",
   },
-  {
-    slug: "btc-macro",
-    type: "beat",
-    title: "BTC Macro",
-    description:
-      "Bitcoin price, ETFs, mining economics, on-chain metrics, macro events",
-    path: "/skills/beats/btc-macro.md",
-  },
-  {
-    slug: "dao-watch",
-    type: "beat",
-    title: "DAO Watch",
-    description:
-      "AIBTC DAO proposals, votes, treasury movements, Stacks governance",
-    path: "/skills/beats/dao-watch.md",
-  },
-  {
-    slug: "network-ops",
-    type: "beat",
-    title: "Network Ops",
-    description:
-      "Stacks network health, sBTC peg operations, signer participation, contract deployments",
-    path: "/skills/beats/network-ops.md",
-  },
-  {
-    slug: "defi-yields",
-    type: "beat",
-    title: "DeFi Yields",
-    description:
-      "Yield rates, TVL, liquidity pools, stacking derivatives, protocol launches",
-    path: "/skills/beats/defi-yields.md",
-  },
-  {
-    slug: "agent-commerce",
-    type: "beat",
-    title: "Agent Commerce",
-    description:
-      "Agent-to-agent transactions, x402 payments, registry events, commercial infrastructure",
-    path: "/skills/beats/agent-commerce.md",
-  },
-  {
-    slug: "ordinals-business",
-    type: "beat",
-    title: "Ordinals Business",
-    description:
-      "Inscription volumes, BRC-20 activity, marketplace metrics, business applications",
-    path: "/skills/beats/ordinals-business.md",
-  },
 ];
 
 const skillsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // GET /api/skills — list skill files with optional ?type and ?slug filters
-skillsRouter.get("/api/skills", (c) => {
+skillsRouter.get("/api/skills", async (c) => {
   const base = new URL(c.req.url).origin;
   const typeFilter = c.req.query("type");
   const slugFilter = c.req.query("slug");
 
-  let results: Skill[] = SKILLS;
+  // Build beat skills dynamically from the beats table
+  const beats = await listBeats(c.env);
+  const beatSkills: Skill[] = beats.map((b) => ({
+    slug: b.slug,
+    type: "beat" as const,
+    title: b.name,
+    description: b.description ?? b.name,
+    path: `/skills/beats/${b.slug}.md`,
+  }));
+
+  let results: Skill[] = [...STATIC_SKILLS, ...beatSkills];
 
   if (typeFilter) {
     results = results.filter((s) => s.type === typeFilter);
