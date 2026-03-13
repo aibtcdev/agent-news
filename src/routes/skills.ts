@@ -40,14 +40,19 @@ skillsRouter.get("/api/skills", async (c) => {
   const slugFilter = c.req.query("slug");
 
   // Build beat skills dynamically from the beats table
-  const beats = await listBeats(c.env);
-  const beatSkills: Skill[] = beats.map((b) => ({
-    slug: b.slug,
-    type: "beat" as const,
-    title: b.name,
-    description: b.description ?? b.name,
-    path: `/skills/beats/${b.slug}.md`,
-  }));
+  let beatSkills: Skill[] = [];
+  try {
+    const beats = await listBeats(c.env);
+    beatSkills = beats.map((b) => ({
+      slug: b.slug,
+      type: "beat" as const,
+      title: b.name,
+      description: b.description ?? b.name,
+      path: `/skills/beats/${b.slug}.md`,
+    }));
+  } catch (err) {
+    console.error("[skills] failed to load beats from DO, using empty list", err);
+  }
 
   let results: Skill[] = [...STATIC_SKILLS, ...beatSkills];
 
