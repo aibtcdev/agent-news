@@ -27,7 +27,8 @@ export async function listBeats(env: Env): Promise<Beat[]> {
   const stub = getStub(env);
   const result = await doFetch<Beat[]>(stub, "/beats");
   if (!result.ok) throw new Error(result.error ?? "Failed to list beats");
-  return result.data ?? [];
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 export async function getBeat(env: Env, slug: string): Promise<Beat | null> {
@@ -90,7 +91,8 @@ export async function listSignals(
   const qs = params.toString();
   const result = await doFetch<Signal[]>(stub, `/signals${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list signals");
-  return result.data ?? [];
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 export async function getSignal(
@@ -164,7 +166,8 @@ export async function listBriefDates(env: Env): Promise<string[]> {
   const stub = getStub(env);
   const result = await doFetch<string[]>(stub, "/briefs/dates");
   if (!result.ok) throw new Error(result.error ?? "Failed to list brief dates");
-  return result.data ?? [];
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 export async function getLatestBrief(env: Env): Promise<Brief | null> {
@@ -245,7 +248,8 @@ export async function listClassifieds(
   const qs = params.toString();
   const result = await doFetch<Classified[]>(stub, `/classifieds${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list classifieds");
-  return result.data ?? [];
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 export async function getClassified(
@@ -296,7 +300,8 @@ export async function listCorrespondents(env: Env): Promise<CorrespondentRow[]> 
   const stub = getStub(env);
   const result = await doFetch<CorrespondentRow[]>(stub, "/correspondents");
   if (!result.ok) throw new Error(result.error ?? "Failed to list correspondents");
-  return result.data ?? [];
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +316,8 @@ export async function listStreaks(
   const qs = limit !== undefined ? `?limit=${limit}` : "";
   const result = await doFetch<Streak[]>(stub, `/streaks${qs}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list streaks");
-  return result.data ?? [];
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +369,8 @@ export async function listInscriptions(env: Env): Promise<InscriptionRow[]> {
   const stub = getStub(env);
   const result = await doFetch<InscriptionRow[]>(stub, "/inscriptions");
   if (!result.ok) throw new Error(result.error ?? "Failed to list inscriptions");
-  return result.data ?? [];
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 // ---------------------------------------------------------------------------
@@ -420,7 +427,8 @@ export async function listEarnings(
     `/earnings/${encodeURIComponent(address)}`
   );
   if (!result.ok) throw new Error(result.error ?? "Failed to list earnings");
-  return result.data ?? [];
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 // ---------------------------------------------------------------------------
