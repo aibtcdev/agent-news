@@ -1,10 +1,13 @@
 import { defineConfig } from "vitest/config";
-import { cloudflarePool } from "@cloudflare/vitest-pool-workers";
+import { cloudflareTest } from "@cloudflare/vitest-pool-workers";
 
 export default defineConfig({
-  test: {
-    // Run tests inside the Workers runtime using miniflare
-    pool: cloudflarePool({
+  plugins: [
+    // cloudflareTest registers the vite plugin that resolves cloudflare:test
+    // and sets the pool runner to cloudflare-pool automatically
+    cloudflareTest({
+      // Main entrypoint — required for SELF binding and DurableObject access in tests
+      main: "./src/index.ts",
       wrangler: {
         configPath: "./wrangler.jsonc",
       },
@@ -15,6 +18,8 @@ export default defineConfig({
         },
       },
     }),
+  ],
+  test: {
     include: ["src/__tests__/**/*.test.ts"],
   },
 });

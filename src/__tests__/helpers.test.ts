@@ -29,12 +29,7 @@ describe("getPacificDate", () => {
 describe("getPacificYesterday", () => {
   it("returns the day before the given date", () => {
     const result = getPacificYesterday(new Date("2024-06-15T20:00:00Z"));
-    // 2024-06-15 noon PT = 2024-06-14 yesterday
     const today = getPacificDate(new Date("2024-06-15T20:00:00Z"));
-    const [year, month, day] = today.split("-").map(Number);
-    const expected = new Date(Date.UTC(year, month - 1, day - 1))
-      .toISOString()
-      .slice(0, 10);
     // Just check format, actual value depends on timezone
     expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     // Should be one day before today
