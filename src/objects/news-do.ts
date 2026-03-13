@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { Env, Beat, Signal, Streak, Brief, Classified, Earning, CompiledBriefData, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
@@ -45,6 +46,21 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     updated_at: raw.updated_at,
     correction_of: raw.correction_of,
   };
+}
+
+/**
+ * Parse a required JSON body from a Hono context.
+ * Returns the parsed object, or null if the body is missing or malformed.
+ * Callers should return a 400 response when null is returned.
+ */
+async function parseRequiredJson<T = Record<string, unknown>>(
+  c: Context
+): Promise<T | null> {
+  try {
+    return await c.req.json<T>();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -149,10 +165,8 @@ export class NewsDO extends DurableObject<Env> {
 
     // POST /beats — create a new beat
     this.router.post("/beats", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<Beat>,
           400
@@ -274,10 +288,8 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<Beat>,
           400
@@ -413,10 +425,8 @@ export class NewsDO extends DurableObject<Env> {
 
     // POST /signals — atomic insert: signal + tags + streak + earning
     this.router.post("/signals", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<Signal>,
           400
@@ -564,10 +574,8 @@ export class NewsDO extends DurableObject<Env> {
     this.router.patch("/signals/:id", async (c) => {
       const originalId = c.req.param("id");
 
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<Signal>,
           400
@@ -694,11 +702,21 @@ export class NewsDO extends DurableObject<Env> {
 
     // POST /briefs/compile — compile brief data for a date via SQL JOIN
     this.router.post("/briefs/compile", async (c) => {
+      // Body is optional — only parse when the caller signals JSON is present.
+      // This distinguishes an intentionally empty body (no Content-Type) from a
+      // malformed JSON payload (Content-Type: application/json but invalid JSON).
       let body: Record<string, unknown> = {};
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
-        // Body is optional — use defaults
+      const contentType = c.req.header("Content-Type") ?? "";
+      const contentLength = parseInt(c.req.header("Content-Length") ?? "0", 10);
+      if (contentType.includes("application/json") || contentLength > 0) {
+        const parsed = await parseRequiredJson(c);
+        if (!parsed) {
+          return c.json(
+            { ok: false, error: "Invalid JSON body" } satisfies DOResult<CompiledBriefData>,
+            400
+          );
+        }
+        body = parsed;
       }
 
       const now = new Date();
@@ -739,10 +757,8 @@ export class NewsDO extends DurableObject<Env> {
 
     // POST /briefs — save a compiled brief (INSERT OR REPLACE for idempotency)
     this.router.post("/briefs", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<Brief>,
           400
@@ -792,10 +808,8 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<Brief>,
           400
@@ -881,10 +895,8 @@ export class NewsDO extends DurableObject<Env> {
 
     // POST /classifieds — insert a new classified ad
     this.router.post("/classifieds", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<Classified>,
           400
@@ -1235,10 +1247,8 @@ export class NewsDO extends DurableObject<Env> {
 
     // POST /earnings — record an earning (e.g. from brief revenue)
     this.router.post("/earnings", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<Earning>,
           400
@@ -1315,10 +1325,8 @@ export class NewsDO extends DurableObject<Env> {
 
     // POST /migrate — bulk import entity records (idempotent via INSERT OR REPLACE)
     this.router.post("/migrate", async (c) => {
-      let body: Record<string, unknown>;
-      try {
-        body = await c.req.json<Record<string, unknown>>();
-      } catch {
+      const body = await parseRequiredJson(c);
+      if (!body) {
         return c.json(
           { ok: false, error: "Invalid JSON body" } satisfies DOResult<{ imported: number; skipped: number }>,
           400
