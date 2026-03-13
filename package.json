@@ -9,15 +9,19 @@
     "deploy:dry-run": "npm run wrangler -- deploy --dry-run",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src/",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "cf-typegen": "npm run wrangler -- types",
     "migrate": "set -a && . ./.env && set +a && npx tsx scripts/migrate-kv-to-do.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.5",
+    "@cloudflare/vitest-pool-workers": "^0.13.0",
     "@cloudflare/workers-types": "^4.20241205.0",
     "@types/node": "^25.3.3",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
     "wrangler": "^4.0.0"
   },
   "dependencies": {
