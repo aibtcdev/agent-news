@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, Streak, Brief, Classified, Earning, CompiledBriefData, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY } from "../lib/constants";
 import { SCHEMA_SQL } from "./schema";
 
 /**
@@ -474,14 +474,38 @@ export class NewsDO extends DurableObject<Env> {
 
       const now = new Date();
       const nowIso = now.toISOString();
+
+      // Pacific-timezone date helpers (used for daily cap and streak)
+      const today = getPacificDate(now);
+      const yesterday = getPacificYesterday(now);
+      const todayStart = getPacificDayStartUTC(today);
+
+      // Daily signal cap per agent
+      const dailyCountRows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as count FROM signals
+           WHERE btc_address = ? AND correction_of IS NULL AND created_at >= ?`,
+          btc_address as string,
+          todayStart
+        )
+        .toArray();
+      const dailyCount = (dailyCountRows[0] as Record<string, unknown>).count as number;
+      if (dailyCount >= MAX_SIGNALS_PER_DAY) {
+        return c.json(
+          {
+            ok: false,
+            error: `Daily limit reached — maximum ${MAX_SIGNALS_PER_DAY} signals per day. Try again tomorrow.`,
+          } satisfies DOResult<Signal>,
+          429
+        );
+      }
+
       const signalId = generateId();
       const sourcesJson = JSON.stringify(sources ?? []);
       const sanitizedBody = signalBody ? sanitizeString(signalBody, 1000) : null;
       const signalTags = (tags as string[]) ?? [];
 
       // Streak calculation (Pacific timezone)
-      const today = getPacificDate(now);
-      const yesterday = getPacificYesterday(now);
       const streakRows = this.ctx.storage.sql
         .exec("SELECT * FROM streaks WHERE btc_address = ?", btc_address as string)
         .toArray();
@@ -1118,8 +1142,11 @@ export class NewsDO extends DurableObject<Env> {
 
       if (!beat) {
         actions.push({ type: "claim-beat", description: "Claim a news beat to start filing signals" });
+      } else if (signalsToday >= MAX_SIGNALS_PER_DAY) {
+        canFileSignal = false;
+        actions.push({ type: "daily-limit", description: `Daily limit reached (${MAX_SIGNALS_PER_DAY}/${MAX_SIGNALS_PER_DAY}). Try again tomorrow.` });
       } else if (canFileSignal) {
-        actions.push({ type: "file-signal", description: `File a signal on your beat "${(beat.name as string)}"` });
+        actions.push({ type: "file-signal", description: `File a signal on your beat "${(beat.name as string)}" (${signalsToday}/${MAX_SIGNALS_PER_DAY} today)` });
       } else if (waitMinutes !== null) {
         actions.push({ type: "wait", description: `Cooldown active — wait ${waitMinutes} minute${waitMinutes === 1 ? "" : "s"}`, waitMinutes });
       }
@@ -1148,6 +1175,8 @@ export class NewsDO extends DurableObject<Env> {
           earnings: earningRows,
           canFileSignal,
           waitMinutes,
+          signalsToday,
+          maxSignalsPerDay: MAX_SIGNALS_PER_DAY,
           actions,
         },
       } satisfies DOResult<unknown>);
