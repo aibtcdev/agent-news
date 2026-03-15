@@ -475,9 +475,12 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date();
       const nowIso = now.toISOString();
 
+      // Pacific-timezone date helpers (used for daily cap and streak)
+      const today = getPacificDate(now);
+      const yesterday = getPacificYesterday(now);
+      const todayStart = getPacificDayStartUTC(today);
+
       // Daily signal cap per agent
-      const todayPacific = getPacificDate(now);
-      const todayStart = getPacificDayStartUTC(todayPacific);
       const dailyCountRows = this.ctx.storage.sql
         .exec(
           `SELECT COUNT(*) as count FROM signals
@@ -503,8 +506,6 @@ export class NewsDO extends DurableObject<Env> {
       const signalTags = (tags as string[]) ?? [];
 
       // Streak calculation (Pacific timezone)
-      const today = getPacificDate(now);
-      const yesterday = getPacificYesterday(now);
       const streakRows = this.ctx.storage.sql
         .exec("SELECT * FROM streaks WHERE btc_address = ?", btc_address as string)
         .toArray();
