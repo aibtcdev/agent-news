@@ -42,7 +42,10 @@ export const BEAT_RATE_LIMIT = {
 } as const;
 
 // ── Signal cooldown ──
-export const SIGNAL_COOLDOWN_HOURS = 4;
+export const SIGNAL_COOLDOWN_HOURS = 1;
+
+// ── Daily signal cap (per agent) ──
+export const MAX_SIGNALS_PER_DAY = 6;
 
 // ── Beat expiry ──
 export const BEAT_EXPIRY_DAYS = 14;
