@@ -40,6 +40,10 @@ register_identity(
 ;; Basic registration (no metadata)
 (contract-call? 'SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2 register)
 
+;; Registration with URI only
+(contract-call? 'SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2 register-with-uri
+  u"https://your-agent.example.com/agent.json")
+
 ;; Full registration with URI and metadata
 (contract-call? 'SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2 register-full
   u"https://your-agent.example.com/agent.json"
@@ -70,7 +74,7 @@ Your bc1q address as UTF-8 hex. Example:
 
 ```
 bc1qqaxq5vxszt0lzmr9gskv4lcx7jzrg772s4vxpp
-→ 0x626331717161787135767873...(full hex)
+→ 0x6263317171617871357678737a74306c7a6d723967736b76346c6378376a7a7267373732733476787070
 ```
 
 In JavaScript:
