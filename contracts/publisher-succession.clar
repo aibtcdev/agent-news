@@ -26,8 +26,8 @@
 
 ;; ─── External contract references ───
 
-;; ERC-8004 identity registry — agents must own an NFT here
-(define-constant IDENTITY_REGISTRY 'SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2)
+;; Future: ERC-8004 identity check via SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2
+;; Blocked by lack of reverse lookup in registry. Off-chain voter registry verifies ERC-8004 ownership.
 
 ;; sBTC token — voters must hold a balance > 0
 (define-constant SBTC_CONTRACT 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token)
@@ -51,6 +51,7 @@
 (define-constant ERR_QUORUM_NOT_MET (err u1007))
 (define-constant ERR_COOLDOWN_ACTIVE (err u1008))
 (define-constant ERR_SELF_PROPOSAL (err u1009))
+(define-constant ERR_USE_FINALIZE (err u1010))
 
 ;; ─── State ───
 
@@ -121,6 +122,9 @@
 
     ;; Cannot propose yourself as publisher — prevents self-dealing
     ;; (the current publisher can be proposed by someone else)
+    ;; Note: candidate sBTC-holding is intentionally NOT checked. sBTC is a voter
+    ;; eligibility gate, not a publisher prerequisite. The publisher role is off-chain
+    ;; operational control — any principal can hold it.
     (asserts! (not (is-eq candidate caller)) ERR_SELF_PROPOSAL)
 
     ;; No active proposal
@@ -136,6 +140,14 @@
     (var-set proposal-start-block current-block)
     (var-set proposal-yes u0)
     (var-set proposal-no u0)
+
+    (print {
+      event: "proposal-created",
+      proposal-id: (var-get proposal-id),
+      candidate: candidate,
+      proposer: caller,
+      start-block: current-block
+    })
 
     (ok (var-get proposal-id))
   )
@@ -196,15 +208,32 @@
     ;; Using multiplication to avoid integer division rounding
     (asserts! (>= (* yes u100) (* total SUPERMAJORITY_THRESHOLD)) ERR_THRESHOLD_NOT_MET)
 
-    ;; Threshold met — transfer publisher role
-    (var-set publisher candidate)
+    ;; Threshold met — capture previous publisher before change
+    (let ((previous-publisher (var-get publisher)))
 
-    ;; Clean up proposal state
-    (var-set proposal-candidate none)
-    (var-set proposal-proposer none)
-    (var-set last-proposal-end current-block)
+      ;; Transfer publisher role
+      (var-set publisher candidate)
 
-    (ok candidate)
+      ;; Clean up proposal state
+      (var-set proposal-candidate none)
+      (var-set proposal-proposer none)
+      (var-set proposal-yes u0)
+      (var-set proposal-no u0)
+      (var-set proposal-start-block u0)
+      (var-set last-proposal-end current-block)
+
+      (print {
+        event: "publisher-changed",
+        previous-publisher: previous-publisher,
+        new-publisher: candidate,
+        proposal-id: (var-get proposal-id),
+        yes-votes: yes,
+        no-votes: no,
+        block: current-block
+      })
+
+      (ok candidate)
+    )
   )
 )
 
@@ -226,18 +255,21 @@
     (asserts! (> current-block (+ start VOTE_WINDOW)) ERR_VOTING_OPEN)
 
     ;; Either quorum not met OR threshold not met
-    ;; (if both are met, use finalize instead)
+    ;; (if both are met, use finalize instead — ERR_USE_FINALIZE guides callers)
     (asserts!
       (or
         (< total MIN_QUORUM)
         (< (* yes u100) (* total SUPERMAJORITY_THRESHOLD))
       )
-      ERR_THRESHOLD_NOT_MET
+      ERR_USE_FINALIZE
     )
 
     ;; Clean up
     (var-set proposal-candidate none)
     (var-set proposal-proposer none)
+    (var-set proposal-yes u0)
+    (var-set proposal-no u0)
+    (var-set proposal-start-block u0)
     (var-set last-proposal-end current-block)
 
     (ok true)
