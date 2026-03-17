@@ -7,7 +7,7 @@
 ;; - The publisher has full control over the DAO (off-chain treasury, operations).
 ;; - The ONLY on-chain governance action is replacing the publisher.
 ;; - Requires 95% supermajority of eligible voters to pass.
-;; - The 95% threshold is a constant — no function can change it.
+;; - The 95% threshold is a constant -- no function can change it.
 ;; - One agent = one vote (not proportional to sBTC holdings).
 ;;
 ;; Voter eligibility:
@@ -24,22 +24,22 @@
 ;; IMMUTABLE: This contract has no admin functions, no upgrade path,
 ;; and no way to modify the threshold. Deploy once, runs forever.
 
-;; ─── External contract references ───
+;; --- External contract references ---
 
 ;; Future: ERC-8004 identity check via SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2
 ;; Blocked by lack of reverse lookup in registry. Off-chain voter registry verifies ERC-8004 ownership.
 
-;; sBTC token — voters must hold a balance > 0
+;; sBTC token -- voters must hold a balance > 0
 (define-constant SBTC_CONTRACT 'SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token)
 
-;; ─── Immutable governance parameters ───
+;; --- Immutable governance parameters ---
 
 (define-constant SUPERMAJORITY_THRESHOLD u95)  ;; 95% yes-votes required
 (define-constant VOTE_WINDOW u432)             ;; ~3 days at 10-min blocks
 (define-constant MIN_QUORUM u3)                ;; minimum votes to finalize
 (define-constant PROPOSAL_COOLDOWN u1008)      ;; ~7 days between proposals
 
-;; ─── Error codes ───
+;; --- Error codes ---
 
 (define-constant ERR_NOT_ELIGIBLE (err u1000))
 (define-constant ERR_PROPOSAL_ACTIVE (err u1001))
@@ -53,7 +53,7 @@
 (define-constant ERR_SELF_PROPOSAL (err u1009))
 (define-constant ERR_USE_FINALIZE (err u1010))
 
-;; ─── State ───
+;; --- State ---
 
 (define-data-var publisher principal tx-sender)  ;; deployer is initial publisher
 (define-data-var proposal-id uint u0)
@@ -69,7 +69,7 @@
 ;; Track who has voted on current proposal
 (define-map votes { proposal-id: uint, voter: principal } bool)
 
-;; ─── Read-only functions ───
+;; --- Read-only functions ---
 
 (define-read-only (get-publisher)
   (var-get publisher)
@@ -96,7 +96,7 @@
   (default-to false (map-get? votes { proposal-id: (var-get proposal-id), voter: voter }))
 )
 
-(define-read-only (is-eligible (agent principal))
+(define-private (is-eligible (agent principal))
   (let
     (
       ;; Check if agent owns an ERC-8004 identity
@@ -108,23 +108,23 @@
   )
 )
 
-;; ─── Public functions ───
+;; --- Public functions ---
 
 ;; Propose a new publisher. Caller must be eligible.
 (define-public (propose-succession (candidate principal))
   (let
     (
       (caller tx-sender)
-      (current-block block-height)
+      (current-block stacks-block-height)
     )
     ;; Caller must be eligible (holds sBTC)
     (asserts! (is-eligible caller) ERR_NOT_ELIGIBLE)
 
-    ;; Cannot propose yourself as publisher — prevents self-dealing
+    ;; Cannot propose yourself as publisher -- prevents self-dealing
     ;; (the current publisher can be proposed by someone else)
     ;; Note: candidate sBTC-holding is intentionally NOT checked. sBTC is a voter
     ;; eligibility gate, not a publisher prerequisite. The publisher role is off-chain
-    ;; operational control — any principal can hold it.
+    ;; operational control -- any principal can hold it.
     (asserts! (not (is-eq candidate caller)) ERR_SELF_PROPOSAL)
 
     ;; No active proposal
@@ -158,7 +158,7 @@
   (let
     (
       (caller tx-sender)
-      (current-block block-height)
+      (current-block stacks-block-height)
       (pid (var-get proposal-id))
       (start (var-get proposal-start-block))
     )
@@ -187,11 +187,11 @@
 )
 
 ;; Finalize a proposal after the voting window closes.
-;; Anyone can call this — it just reads the tallies.
+;; Anyone can call this -- it just reads the tallies.
 (define-public (finalize)
   (let
     (
-      (current-block block-height)
+      (current-block stacks-block-height)
       (start (var-get proposal-start-block))
       (candidate (unwrap! (var-get proposal-candidate) ERR_NO_PROPOSAL))
       (yes (var-get proposal-yes))
@@ -208,7 +208,7 @@
     ;; Using multiplication to avoid integer division rounding
     (asserts! (>= (* yes u100) (* total SUPERMAJORITY_THRESHOLD)) ERR_THRESHOLD_NOT_MET)
 
-    ;; Threshold met — capture previous publisher before change
+    ;; Threshold met -- capture previous publisher before change
     (let ((previous-publisher (var-get publisher)))
 
       ;; Transfer publisher role
@@ -242,7 +242,7 @@
 (define-public (cancel-failed)
   (let
     (
-      (current-block block-height)
+      (current-block stacks-block-height)
       (start (var-get proposal-start-block))
       (yes (var-get proposal-yes))
       (no (var-get proposal-no))
@@ -255,7 +255,7 @@
     (asserts! (> current-block (+ start VOTE_WINDOW)) ERR_VOTING_OPEN)
 
     ;; Either quorum not met OR threshold not met
-    ;; (if both are met, use finalize instead — ERR_USE_FINALIZE guides callers)
+    ;; (if both are met, use finalize instead -- ERR_USE_FINALIZE guides callers)
     (asserts!
       (or
         (< total MIN_QUORUM)
