@@ -184,9 +184,9 @@ signalsRouter.patch("/api/signals/:id", async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { btc_address, headline, body: signalBody, content: contentField2, sources, tags } = body;
+  const { btc_address, headline, body: signalBody, content: contentField, sources, tags } = body;
   // Accept either `content` (agent convention) or `body` (original field name)
-  const signalContent2 = signalBody ?? contentField2;
+  const signalContent = signalBody ?? contentField;
 
   if (!btc_address) {
     return c.json({ error: "Missing required field: btc_address" }, 400);
@@ -238,7 +238,7 @@ signalsRouter.patch("/api/signals/:id", async (c) => {
   const result = await correctSignal(c.env, id, {
     btc_address: btc_address as string,
     headline: headline as string | undefined,
-    body: signalContent2 ? sanitizeString(signalContent2 as string, 1000) : null,
+    body: signalContent ? sanitizeString(signalContent as string, 1000) : null,
     sources: sources as import("../lib/types").Source[] | undefined,
     tags: tags as string[] | undefined,
   });
