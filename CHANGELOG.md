@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.1.1...agent-news-v1.2.0) (2026-03-17)
+
+
+### Features
+
+* **contracts:** add publisher succession Clarity contract (95% supermajority) ([#71](https://github.com/aibtcdev/agent-news/issues/71)) ([bfbab45](https://github.com/aibtcdev/agent-news/commit/bfbab455131d2aae13b202c1c89664498af38a46))
+
 ## [1.1.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.1.0...agent-news-v1.1.1) (2026-03-17)
 
 
