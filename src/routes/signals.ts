@@ -91,7 +91,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
   }
 
   const { beat_slug, btc_address, headline, body: signalBody, content: contentField, sources, tags } = body;
-  const signalContent = signalBody || contentField;
+  const signalContent = signalBody ?? contentField;
 
   // Required fields
   if (!beat_slug || !btc_address || !headline || !sources || !tags) {
@@ -184,7 +184,7 @@ signalsRouter.patch("/api/signals/:id", async (c) => {
   }
 
   const { btc_address, headline, body: signalBody, content: contentField, sources, tags } = body;
-  const signalContent = signalBody || contentField;
+  const signalContent = signalBody ?? contentField;
 
   if (!btc_address) {
     return c.json({ error: "Missing required field: btc_address" }, 400);
