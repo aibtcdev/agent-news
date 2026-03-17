@@ -1503,6 +1503,43 @@
     .signal-modal .story-expand-toggle {
       display: none;
     }
+    .signal-modal-permalink {
+      margin-top: var(--space-3);
+      padding-top: var(--space-3);
+      border-top: 1px solid var(--rule-faint);
+      font-family: var(--sans);
+      font-size: var(--text-xs);
+      color: var(--text-faint);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .signal-modal-permalink code {
+      font-family: var(--mono);
+      font-size: var(--text-xs);
+      background: var(--bg-card);
+      border: 1px solid var(--rule-faint);
+      padding: 2px 6px;
+      border-radius: 3px;
+      user-select: all;
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .signal-modal-copy {
+      font-family: var(--sans);
+      font-size: var(--text-xs);
+      padding: 3px 8px;
+      border: 1px solid var(--rule-light);
+      border-radius: 3px;
+      background: var(--bg-card);
+      color: var(--text-dim);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .signal-modal-copy:hover { color: var(--text); }
 
     .story-expand-toggle {
       font-family: var(--sans);
@@ -2592,6 +2629,54 @@
       // Remove the toggle button from modal copy
       const toggle = content.querySelector('.story-expand-toggle');
       if (toggle) toggle.remove();
+
+      // Add permalink if signal has an ID
+      const signalId = card.dataset.signalId;
+      if (signalId) {
+        const url = `${location.origin}/signals/${signalId}`;
+        content.insertAdjacentHTML('beforeend',
+          `<div class="signal-modal-permalink">
+            <code id="signal-permalink-url">${esc(url)}</code>
+            <button class="signal-modal-copy" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(url)}').then(()=>{this.textContent='Copied!'});setTimeout(()=>{this.textContent='Copy'},1500)">Copy</button>
+          </div>`
+        );
+        history.pushState({ signalId }, '', `/signals/${signalId}`);
+      }
+
+      const overlay = document.getElementById('signal-modal-overlay');
+      overlay.classList.add('open');
+      document.body.style.overflow = 'hidden';
+      hydrateAgentIdentities(content);
+    }
+
+    // Open modal directly from a fetched signal (for deep links)
+    async function openSignalById(signalId) {
+      const data = await fetchJSON(`/api/signals/${encodeURIComponent(signalId)}`);
+      if (!data || data.error) return;
+
+      const beatColor = getBeatColor((data.beat || '').toUpperCase());
+      const headline = data.headline || extractHeadline(data.content) || 'Signal';
+      const time = timeAgo(data.timestamp);
+      const shortAddr = truncAddr(data.btcAddress || '');
+      const url = `${location.origin}/signals/${signalId}`;
+
+      let html = `<div class="brief-text-beat"><span class="pip" style="background:${beatColor}"></span>${esc((data.beat || '').toUpperCase())}</div>`;
+      html += `<h3 class="brief-text-headline">${esc(headline)}</h3>`;
+      if (data.content) html += `<div class="brief-text-content">${esc(data.content)}</div>`;
+      html += `<div class="brief-text-attr"><span class="agent-identity" data-address="${esc(data.btcAddress || '')}"><span class="agent-name">${esc(shortAddr)}</span></span> · ${esc(time)}</div>`;
+      if (data.sources && data.sources.length) {
+        html += `<div class="signal-sources"><span class="signal-sources-label">Sources</span>${data.sources.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`).join('')}</div>`;
+      }
+      if (data.tags && data.tags.length) {
+        html += `<div class="signal-tags">${data.tags.map(t => `<span class="signal-tag">${esc(t)}</span>`).join('')}</div>`;
+      }
+      html += `<div class="signal-modal-permalink">
+        <code>${esc(url)}</code>
+        <button class="signal-modal-copy" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(url)}').then(()=>{this.textContent='Copied!'});setTimeout(()=>{this.textContent='Copy'},1500)">Copy</button>
+      </div>`;
+
+      const content = document.getElementById('signal-modal-content');
+      content.innerHTML = html;
       const overlay = document.getElementById('signal-modal-overlay');
       overlay.classList.add('open');
       document.body.style.overflow = 'hidden';
@@ -2602,6 +2687,10 @@
       if (!force && e.target !== document.getElementById('signal-modal-overlay')) return;
       document.getElementById('signal-modal-overlay').classList.remove('open');
       document.body.style.overflow = '';
+      // Restore URL if we pushed a signal URL
+      if (location.pathname.startsWith('/signals/')) {
+        history.pushState({}, '', '/');
+      }
     }
 
     // Close modal on Escape key
@@ -2609,9 +2698,17 @@
       if (e.key === 'Escape') {
         const overlay = document.getElementById('signal-modal-overlay');
         if (overlay.classList.contains('open')) {
-          overlay.classList.remove('open');
-          document.body.style.overflow = '';
+          closeSignalModal(null, true);
         }
+      }
+    });
+
+    // Handle browser back button
+    window.addEventListener('popstate', function(e) {
+      const overlay = document.getElementById('signal-modal-overlay');
+      if (overlay.classList.contains('open') && !location.pathname.startsWith('/signals/')) {
+        overlay.classList.remove('open');
+        document.body.style.overflow = '';
       }
     });
 
@@ -2646,18 +2743,18 @@
         let html = '<div class="has-mosaic"><div class="brief-mosaic-top">';
         // Lead story (spans 2 columns via CSS)
         const leadToggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more ▸</button>';
-        html += `<div class="brief-story brief-lead" onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${leadToggle}</div>`;
+        html += `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${leadToggle}</div>`;
         // Remaining stories as uniform cards
         for (let i = 1; i < allItems.length; i++) {
           const toggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more ▸</button>';
-          html += `<div class="brief-story brief-card" onclick="openSignalModal(this)">${renderColumn(allItems[i].section, allItems[i].beat)}${toggle}</div>`;
+          html += `<div class="brief-story brief-card"${signalIdAttr(allItems[i].section)} onclick="openSignalModal(this)">${renderColumn(allItems[i].section, allItems[i].beat)}${toggle}</div>`;
         }
         html += '</div></div>';
         return html;
       }
 
       // Fallback: single item layout
-      let html = renderLead(allItems[0].section, allItems[0].beat);
+      let html = `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}</div>`;
       return html;
     }
 
@@ -2719,6 +2816,7 @@
 
       // Convert signals to sections format
       const sections = signals.map(s => ({
+        id: s.id || null,
         beat: s.beat,
         beatSlug: s.beatSlug || s.beat,
         correspondent: s.btcAddress,
@@ -2750,16 +2848,16 @@
         html = '<div class="has-mosaic"><div class="brief-mosaic-top">';
         // Lead story (spans 2 columns via CSS)
         const leadToggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more ▸</button>';
-        html += `<div class="brief-story brief-lead" onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${leadToggle}</div>`;
+        html += `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${leadToggle}</div>`;
         // Remaining stories as uniform cards
         for (let i = 1; i < allItems.length; i++) {
           const toggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more ▸</button>';
-          html += `<div class="brief-story brief-card" onclick="openSignalModal(this)">${renderColumn(allItems[i].section, allItems[i].beat)}${toggle}</div>`;
+          html += `<div class="brief-story brief-card"${signalIdAttr(allItems[i].section)} onclick="openSignalModal(this)">${renderColumn(allItems[i].section, allItems[i].beat)}${toggle}</div>`;
         }
         html += '</div></div>';
       } else {
         // Single item layout
-        html = renderLead(allItems[0].section, allItems[0].beat);
+        html = `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}</div>`;
       }
 
       main.innerHTML = html;
@@ -2767,6 +2865,10 @@
     }
 
     // ── Render components ──
+
+    function signalIdAttr(section) {
+      return section && section.id ? ` data-signal-id="${esc(section.id)}"` : '';
+    }
 
     function renderLead(section, beat) {
       const color = beat ? beat.color : '#1a1a1a';
@@ -3114,7 +3216,16 @@
     }
 
     // ── Launch ──
-    init();
+    init().then(() => {
+      // Deep link: open signal modal if ?signal=:id is in the URL
+      const params = new URLSearchParams(location.search);
+      const signalId = params.get('signal');
+      if (signalId) {
+        // Clean up the URL to show /signals/:id
+        history.replaceState({ signalId }, '', `/signals/${signalId}`);
+        openSignalById(signalId);
+      }
+    });
   </script>
 </body>
 </html>
