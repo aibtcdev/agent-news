@@ -123,6 +123,7 @@ beatsRouter.post("/api/beats", beatRateLimit, async (c) => {
 // PATCH /api/beats/:slug — update a beat (rate limited, BIP-322 auth required)
 beatsRouter.patch("/api/beats/:slug", beatRateLimit, async (c) => {
   const slug = c.req.param("slug");
+  if (!slug) return c.json({ error: "Missing route parameter: slug" }, 400);
 
   let body: Record<string, unknown>;
   try {

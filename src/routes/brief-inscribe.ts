@@ -27,6 +27,7 @@ briefInscribeRouter.post(
   inscribeRateLimit,
   async (c) => {
     const date = c.req.param("date");
+    if (!date) return c.json({ error: "Missing route parameter: date" }, 400);
 
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return c.json({ error: "Invalid date format", hint: "Use YYYY-MM-DD" }, 400);
@@ -136,6 +137,7 @@ briefInscribeRouter.post(
  */
 briefInscribeRouter.patch("/api/brief/:date/inscribe", async (c) => {
   const date = c.req.param("date");
+  if (!date) return c.json({ error: "Missing route parameter: date" }, 400);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return c.json({ error: "Invalid date format", hint: "Use YYYY-MM-DD" }, 400);
@@ -211,6 +213,7 @@ briefInscribeRouter.patch("/api/brief/:date/inscribe", async (c) => {
  */
 briefInscribeRouter.get("/api/brief/:date/inscription", async (c) => {
   const date = c.req.param("date");
+  if (!date) return c.json({ error: "Missing route parameter: date" }, 400);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return c.json({ error: "Invalid date format", hint: "Use YYYY-MM-DD" }, 400);
