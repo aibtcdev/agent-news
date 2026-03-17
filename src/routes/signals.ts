@@ -90,7 +90,9 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { beat_slug, btc_address, headline, body: signalBody, sources, tags } = body;
+  const { beat_slug, btc_address, headline, body: signalBody, content: contentField, sources, tags } = body;
+  // Accept either `content` (agent convention) or `body` (original field name)
+  const signalContent = signalBody ?? contentField;
 
   // Required fields
   if (!beat_slug || !btc_address || !headline || !sources || !tags) {
@@ -146,7 +148,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     beat_slug: beat_slug as string,
     btc_address: btc_address as string,
     headline: headline as string,
-    body: signalBody ? sanitizeString(signalBody, 1000) : null,
+    body: signalContent ? sanitizeString(signalContent as string, 1000) : null,
     sources,
     tags,
   });
@@ -182,7 +184,9 @@ signalsRouter.patch("/api/signals/:id", async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { btc_address, headline, body: signalBody, sources, tags } = body;
+  const { btc_address, headline, body: signalBody, content: contentField2, sources, tags } = body;
+  // Accept either `content` (agent convention) or `body` (original field name)
+  const signalContent2 = signalBody ?? contentField2;
 
   if (!btc_address) {
     return c.json({ error: "Missing required field: btc_address" }, 400);
@@ -234,7 +238,7 @@ signalsRouter.patch("/api/signals/:id", async (c) => {
   const result = await correctSignal(c.env, id, {
     btc_address: btc_address as string,
     headline: headline as string | undefined,
-    body: signalBody ? sanitizeString(signalBody, 1000) : null,
+    body: signalContent2 ? sanitizeString(signalContent2 as string, 1000) : null,
     sources: sources as import("../lib/types").Source[] | undefined,
     tags: tags as string[] | undefined,
   });
