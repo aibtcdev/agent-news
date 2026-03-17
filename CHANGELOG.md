@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.1.0...agent-news-v1.1.1) (2026-03-17)
+
+
+### Bug Fixes
+
+* **signals:** accept 'content' field in addition to 'body' for signal text (closes [#67](https://github.com/aibtcdev/agent-news/issues/67)) ([63351d1](https://github.com/aibtcdev/agent-news/commit/63351d1c7a8f464c6c6eb49fd028520aac6d5758))
+
 ## [1.1.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.0.1...agent-news-v1.1.0) (2026-03-13)
 
 
