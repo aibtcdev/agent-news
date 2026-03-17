@@ -387,6 +387,14 @@
       text-wrap: balance;
     }
 
+    .signal-permalink {
+      color: inherit;
+      text-decoration: none;
+    }
+    .signal-permalink:hover {
+      color: var(--accent);
+    }
+
     .lead-content {
       font-size: var(--text-base);
       line-height: 1.7;
@@ -2719,6 +2727,7 @@
 
       // Convert signals to sections format
       const sections = signals.map(s => ({
+        id: s.id || null,
         beat: s.beat,
         beatSlug: s.beatSlug || s.beat,
         correspondent: s.btcAddress,
@@ -2768,6 +2777,11 @@
 
     // ── Render components ──
 
+    function signalLink(id, text) {
+      if (!id) return text;
+      return `<a href="/signals/${esc(id)}" class="signal-permalink">${text}</a>`;
+    }
+
     function renderLead(section, beat) {
       const color = beat ? beat.color : '#1a1a1a';
       const beatName = section.beat || 'Signal';
@@ -2782,7 +2796,7 @@
             <span class="pip" style="background:${esc(color)}"></span>
             ${esc(beatName)}
           </div>
-          <h2 class="lead-headline">${esc(headline)}</h2>
+          <h2 class="lead-headline">${signalLink(section.id, esc(headline))}</h2>
           <div class="lead-content">${esc(content)}</div>
           ${renderCorrection(section)}
           ${renderSources(section.sources)}
@@ -2809,7 +2823,7 @@
             <span class="pip" style="background:${esc(color)}"></span>
             ${esc(beatName)}
           </div>
-          <h3 class="column-headline">${esc(headline)}</h3>
+          <h3 class="column-headline">${signalLink(section.id, esc(headline))}</h3>
           <div class="column-content">${esc(section.content)}</div>
           ${renderCorrection(section)}
           ${renderSources(section.sources)}
@@ -2834,7 +2848,7 @@
             <span class="pip" style="background:${esc(color)}"></span>
             ${esc(beatName)}
           </div>
-          ${headline ? `<h3 class="story-headline">${esc(headline)}</h3>` : ''}
+          ${headline ? `<h3 class="story-headline">${signalLink(section.id, esc(headline))}</h3>` : ''}
           <div class="story-content">${esc(section.content)}</div>
           ${renderCorrection(section)}
           ${renderSources(section.sources)}
