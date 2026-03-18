@@ -14,6 +14,7 @@ export interface IdentityCheckResult {
   registered: boolean;
   level: number | null;
   levelName: string | null;
+  apiReachable: boolean;
 }
 
 /**
@@ -29,7 +30,11 @@ export async function checkAgentIdentity(
 
   const cached = await kv.get(cacheKey);
   if (cached !== null) {
-    return JSON.parse(cached) as IdentityCheckResult;
+    try {
+      return JSON.parse(cached) as IdentityCheckResult;
+    } catch {
+      // Stale or malformed cache entry — fall through to API
+    }
   }
 
   try {
@@ -43,6 +48,7 @@ export async function checkAgentIdentity(
         registered: (data?.found as boolean) === true,
         level: (data?.level as number | undefined) ?? null,
         levelName: (data?.levelName as string | undefined) ?? null,
+        apiReachable: true,
       };
 
       // Cache for 1h — level changes are infrequent
@@ -57,5 +63,5 @@ export async function checkAgentIdentity(
   }
 
   // On API failure, return unknown state — fail open
-  return { registered: false, level: null, levelName: null };
+  return { registered: false, level: null, levelName: null, apiReachable: false };
 }

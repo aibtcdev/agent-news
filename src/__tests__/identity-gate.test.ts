@@ -40,18 +40,18 @@ afterEach(() => {
 
 describe("checkAgentIdentity — cache hit", () => {
   it("returns cached result without fetching when cache is populated", async () => {
-    const cached = JSON.stringify({ registered: true, level: 3, levelName: "Pioneer" });
+    const cached = JSON.stringify({ registered: true, level: 3, levelName: "Pioneer", apiReachable: true });
     const kv = makeKV({ "agent-level:bc1qtest": cached });
 
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const result = await checkAgentIdentity(kv, "bc1qtest");
 
-    expect(result).toEqual({ registered: true, level: 3, levelName: "Pioneer" });
+    expect(result).toEqual({ registered: true, level: 3, levelName: "Pioneer", apiReachable: true });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("returns cached Level 1 result and does not call API", async () => {
-    const cached = JSON.stringify({ registered: true, level: 1, levelName: "Member" });
+    const cached = JSON.stringify({ registered: true, level: 1, levelName: "Member", apiReachable: true });
     const kv = makeKV({ "agent-level:bc1qlevel1": cached });
 
     const fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -78,6 +78,7 @@ describe("checkAgentIdentity — API success", () => {
     expect(result.registered).toBe(true);
     expect(result.level).toBe(2);
     expect(result.levelName).toBe("Genesis");
+    expect(result.apiReachable).toBe(true);
   });
 
   it("caches the result after a successful API call", async () => {
@@ -120,9 +121,10 @@ describe("checkAgentIdentity — fail open on API errors", () => {
 
     const result = await checkAgentIdentity(kv, "bc1qnetworkerror");
 
-    // Fail open: level is null, so the gate should not block the agent
+    // Fail open: apiReachable=false, so the gate should not block the agent
     expect(result.level).toBeNull();
     expect(result.registered).toBe(false);
+    expect(result.apiReachable).toBe(false);
   });
 
   it("returns level=null (fail open) on non-OK API response", async () => {
@@ -134,6 +136,7 @@ describe("checkAgentIdentity — fail open on API errors", () => {
     const result = await checkAgentIdentity(kv, "bc1qserviceerror");
 
     expect(result.level).toBeNull();
+    expect(result.apiReachable).toBe(false);
   });
 
   it("does not cache the result on API failure", async () => {
@@ -159,42 +162,41 @@ describe("checkAgentIdentity — fail open on API errors", () => {
 });
 
 describe("identity gate logic — level thresholds", () => {
-  it("gate allows when level is null (fail open)", () => {
+  it("gate allows when apiReachable is false (fail open on API error)", () => {
     // Replicates the gate condition from signals.ts:
-    // if (!identity.registered || (identity.level !== null && identity.level < 2))
-    const identity = { registered: false, level: null, levelName: null };
+    // if (identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2)))
+    const identity = { registered: false, level: null, levelName: null, apiReachable: false };
     const shouldBlock =
-      !identity.registered || (identity.level !== null && identity.level < 2);
-    // level is null → fail open (no block based on level), but registered=false → blocks
-    // This test documents that level=null alone is fail-open; registered still gates
-    expect(identity.level).toBeNull();
+      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
+    // apiReachable=false → gate fails open, never blocks regardless of registered/level
+    expect(shouldBlock).toBe(false);
   });
 
   it("gate blocks a Level 1 agent", () => {
-    const identity = { registered: true, level: 1, levelName: "Member" };
+    const identity = { registered: true, level: 1, levelName: "Member", apiReachable: true };
     const shouldBlock =
-      !identity.registered || (identity.level !== null && identity.level < 2);
+      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
     expect(shouldBlock).toBe(true);
   });
 
   it("gate allows a Level 2 (Genesis) agent", () => {
-    const identity = { registered: true, level: 2, levelName: "Genesis" };
+    const identity = { registered: true, level: 2, levelName: "Genesis", apiReachable: true };
     const shouldBlock =
-      !identity.registered || (identity.level !== null && identity.level < 2);
+      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
     expect(shouldBlock).toBe(false);
   });
 
   it("gate allows a Level 3+ agent", () => {
-    const identity = { registered: true, level: 3, levelName: "Pioneer" };
+    const identity = { registered: true, level: 3, levelName: "Pioneer", apiReachable: true };
     const shouldBlock =
-      !identity.registered || (identity.level !== null && identity.level < 2);
+      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
     expect(shouldBlock).toBe(false);
   });
 
-  it("gate blocks an unregistered address", () => {
-    const identity = { registered: false, level: null, levelName: null };
+  it("gate blocks an unregistered address when API is reachable", () => {
+    const identity = { registered: false, level: null, levelName: null, apiReachable: true };
     const shouldBlock =
-      !identity.registered || (identity.level !== null && identity.level < 2);
+      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
     expect(shouldBlock).toBe(true);
   });
 });

@@ -163,8 +163,9 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
   }
 
   // Identity gate: require Genesis level (level >= 2) registration
+  // Only block when API confirmed the identity level — fail open on API errors
   const identity = await checkAgentIdentity(c.env.NEWS_KV, btc_address as string);
-  if (!identity.registered || (identity.level !== null && identity.level < 2)) {
+  if (identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2))) {
     return c.json(
       {
         error:
