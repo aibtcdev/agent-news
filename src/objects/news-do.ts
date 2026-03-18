@@ -92,8 +92,10 @@ export class NewsDO extends DurableObject<Env> {
     for (const stmt of MIGRATION_PHASE0_SQL) {
       try {
         this.ctx.storage.sql.exec(stmt);
-      } catch {
-        // Column/index already exists — safe to ignore
+      } catch (e) {
+        // Column/index already exists — safe to ignore on re-run.
+        // Log in case the error is unexpected (e.g. malformed SQL introduced later).
+        console.error("Migration statement failed (likely already applied):", e);
       }
     }
 
