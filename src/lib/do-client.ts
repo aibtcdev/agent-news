@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, WelcomeQueueEntry, DOResult } from "./types";
 
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
@@ -611,3 +611,43 @@ export async function getLeaderboard(env: Env): Promise<LeaderboardEntry[]> {
   return result.data ?? [];
 }
 
+// ---------------------------------------------------------------------------
+// Welcome Queue (publisher welcome for new agents)
+// ---------------------------------------------------------------------------
+
+export async function listWelcomeQueue(
+  env: Env,
+  pendingOnly = true
+): Promise<WelcomeQueueEntry[]> {
+  const stub = getStub(env);
+  const qs = pendingOnly ? "?pending=true" : "?pending=false";
+  const result = await doFetch<WelcomeQueueEntry[]>(stub, `/welcome-queue${qs}`);
+  if (!result.ok) throw new Error(result.error ?? "Failed to list welcome queue");
+  return result.data ?? [];
+}
+
+export async function addToWelcomeQueue(
+  env: Env,
+  btcAddress: string,
+  registeredAt?: string
+): Promise<DOResult<WelcomeQueueEntry>> {
+  const stub = getStub(env);
+  return doFetch<WelcomeQueueEntry>(stub, "/welcome-queue", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ btc_address: btcAddress, registered_at: registeredAt }),
+  });
+}
+
+export async function markWelcomed(
+  env: Env,
+  btcAddress: string,
+  welcomedBy: string
+): Promise<DOResult<WelcomeQueueEntry>> {
+  const stub = getStub(env);
+  return doFetch<WelcomeQueueEntry>(stub, `/welcome-queue/${encodeURIComponent(btcAddress)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ welcomed_by: welcomedBy }),
+  });
+}

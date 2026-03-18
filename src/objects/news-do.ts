@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, WelcomeQueueEntry, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_KEY } from "../lib/constants";
@@ -1858,6 +1858,69 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Welcome Queue (publisher welcome for new agents)
+    // -------------------------------------------------------------------------
+
+    // GET /welcome-queue?pending=true — list agents awaiting welcome (or all)
+    this.router.get("/welcome-queue", (c) => {
+      const pendingOnly = c.req.query("pending") !== "false";
+      const sql = pendingOnly
+        ? "SELECT * FROM welcome_queue WHERE welcomed_at IS NULL ORDER BY registered_at ASC"
+        : "SELECT * FROM welcome_queue ORDER BY registered_at DESC LIMIT 200";
+      const rows = this.ctx.storage.sql.exec(sql).toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // POST /welcome-queue — add a new agent to the queue (idempotent)
+    this.router.post("/welcome-queue", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<null>, 400);
+      const { btc_address, registered_at } = body;
+      if (!btc_address || typeof btc_address !== "string") {
+        return c.json({ ok: false, error: "Missing required field: btc_address" } satisfies DOResult<null>, 400);
+      }
+      const ts = registered_at && typeof registered_at === "string"
+        ? registered_at
+        : new Date().toISOString();
+      // INSERT OR IGNORE — idempotent; a re-registration won't reset welcomed_at
+      this.ctx.storage.sql.exec(
+        "INSERT OR IGNORE INTO welcome_queue (btc_address, registered_at) VALUES (?, ?)",
+        btc_address,
+        ts
+      );
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM welcome_queue WHERE btc_address = ?", btc_address)
+        .toArray();
+      return c.json({ ok: true, data: rows[0] ?? null } satisfies DOResult<unknown>);
+    });
+
+    // PATCH /welcome-queue/:address — mark agent as welcomed
+    this.router.patch("/welcome-queue/:address", async (c) => {
+      const address = c.req.param("address");
+      const body = await parseRequiredJson(c);
+      if (!body) return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<null>, 400);
+      const { welcomed_by } = body;
+      if (!welcomed_by || typeof welcomed_by !== "string") {
+        return c.json({ ok: false, error: "Missing required field: welcomed_by" } satisfies DOResult<null>, 400);
+      }
+      const existing = this.ctx.storage.sql
+        .exec("SELECT btc_address FROM welcome_queue WHERE btc_address = ?", address)
+        .toArray();
+      if (existing.length === 0) {
+        return c.json({ ok: false, error: `Agent "${address}" not in welcome queue` } satisfies DOResult<null>, 404);
+      }
+      this.ctx.storage.sql.exec(
+        "UPDATE welcome_queue SET welcomed_at = datetime('now'), welcomed_by = ? WHERE btc_address = ?",
+        welcomed_by,
+        address
+      );
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM welcome_queue WHERE btc_address = ?", address)
+        .toArray();
+      return c.json({ ok: true, data: rows[0] ?? null } satisfies DOResult<unknown>);
     });
 
     this.router.all("*", (c) => {

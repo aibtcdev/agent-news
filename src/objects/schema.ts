@@ -110,6 +110,13 @@ CREATE TABLE IF NOT EXISTS referral_credits (
   created_at       TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS welcome_queue (
+  btc_address  TEXT PRIMARY KEY,
+  registered_at TEXT NOT NULL,
+  welcomed_at   TEXT,
+  welcomed_by   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_signal_tags_tag          ON signal_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_signals_beat_slug        ON signals(beat_slug);
 CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
@@ -138,4 +145,10 @@ export const MIGRATION_PHASE0_SQL = [
   "ALTER TABLE signals ADD COLUMN reviewed_at TEXT",
   "ALTER TABLE signals ADD COLUMN disclosure TEXT NOT NULL DEFAULT ''",
   "CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)",
+  `CREATE TABLE IF NOT EXISTS welcome_queue (
+    btc_address   TEXT PRIMARY KEY,
+    registered_at TEXT NOT NULL,
+    welcomed_at   TEXT,
+    welcomed_by   TEXT
+  )`,
 ] as const;

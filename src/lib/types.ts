@@ -49,6 +49,8 @@ export interface Env {
   ENVIRONMENT?: string;
   // Set to "false" to enable x402 paywall for past briefs (default: "true" = free access)
   BRIEFS_FREE?: string;
+  // Shared secret for webhook endpoints (e.g. agent-registered)
+  WEBHOOK_SECRET?: string;
 }
 
 /**
@@ -200,6 +202,16 @@ export interface Correction {
   readonly reviewed_by: string | null;
   readonly reviewed_at: string | null;
   readonly created_at: string;
+}
+
+/**
+ * A welcome queue entry — tracks new agents awaiting a publisher welcome message
+ */
+export interface WelcomeQueueEntry {
+  readonly btc_address: string;
+  readonly registered_at: string;
+  readonly welcomed_at: string | null;
+  readonly welcomed_by: string | null;
 }
 
 /**
