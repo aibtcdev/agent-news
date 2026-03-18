@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables, Source } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig } from "../lib/do-client";
-import { CONFIG_PUBLISHER_KEY } from "../lib/constants";
+import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
 import { getPacificDate, formatPacificShort } from "../lib/helpers";
 import { validateBtcAddress } from "../lib/validators";
@@ -55,7 +55,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   // Fail closed: if config lookup errors, deny the request rather than skipping the gate
   let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
   try {
-    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_KEY);
+    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
   } catch {
     return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
   }

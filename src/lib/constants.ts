@@ -92,6 +92,4 @@ export const REFERRAL_RATE_LIMIT = {
 } as const;
 
 // ── Config keys ──
-export const CONFIG_PUBLISHER_KEY = "publisher_btc_address" as const;
-/** Config key for the publisher Stacks address (treasury for sBTC payouts). */
-export const CONFIG_PUBLISHER_STX_KEY = "publisher_stx_address" as const;
+export const CONFIG_PUBLISHER_ADDRESS = "publisher_btc_address" as const;

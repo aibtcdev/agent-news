@@ -10,7 +10,7 @@ import type { Env, AppVariables } from "../lib/types";
 import { getLeaderboard, listBeats, recordWeeklyPayouts, getConfig } from "../lib/do-client";
 import { resolveAgentNames } from "../services/agent-resolver";
 import { verifyAuth } from "../services/auth";
-import { CONFIG_PUBLISHER_KEY, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
+import { CONFIG_PUBLISHER_ADDRESS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { validateBtcAddress } from "../lib/validators";
 
 function truncAddr(addr: string): string {
@@ -131,7 +131,7 @@ leaderboardRouter.post("/api/leaderboard/payout", async (c) => {
   // Publisher gate — fail closed if config lookup errors
   let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
   try {
-    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_KEY);
+    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
   } catch {
     return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
   }

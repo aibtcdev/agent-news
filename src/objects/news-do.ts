@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_KEY, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL } from "./schema";
 
 /**
@@ -178,7 +178,7 @@ export class NewsDO extends DurableObject<Env> {
 
       // Verify publisher designation
       const publisherRows = this.ctx.storage.sql
-        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_KEY)
+        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
         .toArray();
       if (publisherRows.length === 0) {
         return c.json({ ok: false, error: "Publisher not yet designated" } satisfies DOResult<Signal>, 403);
@@ -1817,7 +1817,7 @@ export class NewsDO extends DurableObject<Env> {
 
       // Verify publisher
       const publisherRows = this.ctx.storage.sql
-        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_KEY)
+        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
         .toArray();
       if (publisherRows.length === 0) {
         return c.json({ ok: false, error: "Publisher not yet designated" } satisfies DOResult<Correction>, 403);

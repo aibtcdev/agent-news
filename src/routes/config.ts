@@ -10,13 +10,13 @@ import type { Env, AppVariables } from "../lib/types";
 import { getConfig, setConfig } from "../lib/do-client";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
-import { CONFIG_PUBLISHER_KEY } from "../lib/constants";
+import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 
 const configRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // GET /api/config/publisher — get current Publisher address (public)
 configRouter.get("/api/config/publisher", async (c) => {
-  const config = await getConfig(c.env, CONFIG_PUBLISHER_KEY);
+  const config = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
   if (!config) {
     return c.json({ error: "Publisher not yet designated" }, 404);
   }
@@ -65,7 +65,7 @@ configRouter.post("/api/config/publisher", async (c) => {
   }
 
   // Check if Publisher is already designated
-  const current = await getConfig(c.env, CONFIG_PUBLISHER_KEY);
+  const current = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
   if (current && current.value !== btc_address) {
     return c.json(
       { error: "Only the current Publisher can re-designate" },
@@ -73,7 +73,7 @@ configRouter.post("/api/config/publisher", async (c) => {
     );
   }
 
-  const result = await setConfig(c.env, CONFIG_PUBLISHER_KEY, publisher_address as string);
+  const result = await setConfig(c.env, CONFIG_PUBLISHER_ADDRESS, publisher_address as string);
   if (!result.ok) {
     return c.json({ error: result.error ?? "Failed to set publisher" }, 500);
   }
