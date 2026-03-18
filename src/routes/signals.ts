@@ -32,12 +32,13 @@ signalsRouter.get("/api/signals", async (c) => {
   const agent = c.req.query("agent");
   const tag = c.req.query("tag");
   const since = c.req.query("since");
+  const status = c.req.query("status");
   const limitParam = c.req.query("limit");
   const limit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
     : undefined;
 
-  const signals = await listSignals(c.env, { beat, agent, tag, since, limit });
+  const signals = await listSignals(c.env, { beat, agent, tag, since, status, limit });
 
   // Transform snake_case → camelCase to match frontend expectations
   // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
@@ -52,6 +53,8 @@ signalsRouter.get("/api/signals", async (c) => {
     tags: s.tags,
     timestamp: s.created_at,
     correction_of: s.correction_of,
+    status: s.status,
+    disclosure: s.disclosure,
   }));
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
@@ -78,6 +81,10 @@ signalsRouter.get("/api/signals/:id", async (c) => {
     tags: s.tags,
     timestamp: s.created_at,
     correction_of: s.correction_of,
+    status: s.status,
+    publisherFeedback: s.publisher_feedback,
+    reviewedAt: s.reviewed_at,
+    disclosure: s.disclosure,
   });
 });
 
@@ -90,7 +97,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { beat_slug, btc_address, headline, body: signalBody, content: contentField, sources, tags } = body;
+  const { beat_slug, btc_address, headline, body: signalBody, content: contentField, sources, tags, disclosure } = body;
   const signalContent = signalBody ?? contentField;
 
   // Required fields
@@ -101,6 +108,11 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
       },
       400
     );
+  }
+
+  // Disclosure is required (can be empty string but must be present)
+  if (disclosure !== undefined && typeof disclosure !== "string") {
+    return c.json({ error: "disclosure must be a string" }, 400);
   }
 
   if (!validateSlug(beat_slug)) {
@@ -150,6 +162,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     body: signalContent ? sanitizeString(signalContent, 1000) : null,
     sources,
     tags,
+    disclosure: disclosure as string | undefined,
   });
 
   if (!result.ok) {

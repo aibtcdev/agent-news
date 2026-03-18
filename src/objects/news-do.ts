@@ -1,11 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, Streak, Brief, Classified, Earning, CompiledBriefData, DOResult } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, CompiledBriefData, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY } from "../lib/constants";
-import { SCHEMA_SQL } from "./schema";
+import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_KEY } from "../lib/constants";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL } from "./schema";
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -24,6 +24,10 @@ interface RawSignalRow {
   updated_at: string;
   correction_of: string | null;
   tags_csv: string | null;
+  status: SignalStatus;
+  publisher_feedback: string | null;
+  reviewed_at: string | null;
+  disclosure: string;
 }
 
 /**
@@ -45,6 +49,10 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     created_at: raw.created_at,
     updated_at: raw.updated_at,
     correction_of: raw.correction_of,
+    status: raw.status ?? "submitted",
+    publisher_feedback: raw.publisher_feedback ?? null,
+    reviewed_at: raw.reviewed_at ?? null,
+    disclosure: raw.disclosure ?? "",
   };
 }
 
@@ -79,11 +87,131 @@ export class NewsDO extends DurableObject<Env> {
     // sql.exec() is synchronous in DO SQLite, so no blockConcurrencyWhile needed.
     this.ctx.storage.sql.exec(SCHEMA_SQL);
 
+    // Run Phase 0 migrations for existing databases (safe to re-run — ALTER TABLE
+    // throws "duplicate column" which we catch and ignore).
+    for (const stmt of MIGRATION_PHASE0_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch {
+        // Column/index already exists — safe to ignore
+      }
+    }
+
     // Internal Hono router for DO-internal routing
     this.router = new Hono();
 
     this.router.get("/health", (c) => {
       return c.json({ ok: true, migrated: true });
+    });
+
+    // -------------------------------------------------------------------------
+    // Config (key-value store for publisher designation, etc.)
+    // -------------------------------------------------------------------------
+
+    // GET /config/:key — get a config value
+    this.router.get("/config/:key", (c) => {
+      const key = c.req.param("key");
+      const rows = this.ctx.storage.sql
+        .exec("SELECT value, updated_at FROM config WHERE key = ?", key)
+        .toArray();
+      if (rows.length === 0) {
+        return c.json({ ok: false, error: `Config key "${key}" not set` } satisfies DOResult<unknown>, 404);
+      }
+      const row = rows[0] as { value: string; updated_at: string };
+      return c.json({ ok: true, data: { key, value: row.value, updated_at: row.updated_at } } satisfies DOResult<unknown>);
+    });
+
+    // PUT /config/:key — set a config value
+    this.router.put("/config/:key", async (c) => {
+      const key = c.req.param("key");
+      const body = await parseRequiredJson(c);
+      if (!body || !body.value) {
+        return c.json({ ok: false, error: "Missing required field: value" } satisfies DOResult<unknown>, 400);
+      }
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        `INSERT INTO config (key, value, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+        key,
+        body.value as string,
+        now
+      );
+      return c.json({ ok: true, data: { key, value: body.value, updated_at: now } } satisfies DOResult<unknown>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Signal Review (Publisher-only editorial actions)
+    // -------------------------------------------------------------------------
+
+    // PATCH /signals/:id/review — Publisher sets status + optional feedback
+    this.router.patch("/signals/:id/review", async (c) => {
+      const id = c.req.param("id");
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Signal>, 400);
+      }
+
+      const { btc_address, status, feedback } = body;
+
+      // Verify publisher designation
+      const publisherRows = this.ctx.storage.sql
+        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_KEY)
+        .toArray();
+      if (publisherRows.length === 0) {
+        return c.json({ ok: false, error: "Publisher not yet designated" } satisfies DOResult<Signal>, 403);
+      }
+      const publisherAddress = (publisherRows[0] as { value: string }).value;
+      if (btc_address !== publisherAddress) {
+        return c.json({ ok: false, error: "Only the designated Publisher can perform this action" } satisfies DOResult<Signal>, 403);
+      }
+
+      // Validate status
+      if (!status || !(SIGNAL_STATUSES as readonly string[]).includes(status as string)) {
+        return c.json({
+          ok: false,
+          error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}`,
+        } satisfies DOResult<Signal>, 400);
+      }
+
+      // Rejection requires feedback
+      if (status === "rejected" && !feedback) {
+        return c.json({ ok: false, error: "Feedback is required when rejecting a signal" } satisfies DOResult<Signal>, 400);
+      }
+
+      // Verify signal exists
+      const signalRows = this.ctx.storage.sql
+        .exec("SELECT id FROM signals WHERE id = ?", id)
+        .toArray();
+      if (signalRows.length === 0) {
+        return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
+      }
+
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
+         WHERE id = ?`,
+        status as string,
+        feedback ? sanitizeString(feedback, 1000) : null,
+        now,
+        now,
+        id
+      );
+
+      // Re-fetch with tags
+      const updated = this.ctx.storage.sql
+        .exec(
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+           FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN signal_tags st ON s.id = st.signal_id
+           WHERE s.id = ?1
+           GROUP BY s.id`,
+          id
+        )
+        .toArray();
+
+      const signal = rowToSignal(updated[0] as Record<string, unknown>);
+      return c.json({ ok: true, data: signal } satisfies DOResult<Signal>);
     });
 
     // -------------------------------------------------------------------------
@@ -358,12 +486,13 @@ export class NewsDO extends DurableObject<Env> {
     // Signals CRUD
     // -------------------------------------------------------------------------
 
-    // GET /signals — list signals with optional filters (beat, agent, tag, since, limit)
+    // GET /signals — list signals with optional filters (beat, agent, tag, since, status, limit)
     this.router.get("/signals", (c) => {
       const beat = c.req.query("beat") ?? null;
       const agent = c.req.query("agent") ?? null;
       const since = c.req.query("since") ?? null;
       const tag = c.req.query("tag") ?? null;
+      const status = c.req.query("status") ?? null;
       const limitParam = c.req.query("limit");
       const limit = Math.min(
         Math.max(1, parseInt(limitParam ?? "50", 10) || 50),
@@ -380,13 +509,15 @@ export class NewsDO extends DurableObject<Env> {
              AND (?2 IS NULL OR s.btc_address = ?2)
              AND (?3 IS NULL OR s.created_at > ?3)
              AND (?4 IS NULL OR s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?4))
+             AND (?5 IS NULL OR s.status = ?5)
            GROUP BY s.id
            ORDER BY s.created_at DESC
-           LIMIT ?5`,
+           LIMIT ?6`,
           beat,
           agent,
           since,
           tag,
+          status,
           limit
         )
         .toArray();
@@ -504,6 +635,7 @@ export class NewsDO extends DurableObject<Env> {
       const sourcesJson = JSON.stringify(sources ?? []);
       const sanitizedBody = signalBody ? sanitizeString(signalBody, 1000) : null;
       const signalTags = (tags as string[]) ?? [];
+      const disclosure = body.disclosure ? sanitizeString(body.disclosure, 500) : "";
 
       // Streak calculation (Pacific timezone)
       const streakRows = this.ctx.storage.sql
@@ -538,8 +670,8 @@ export class NewsDO extends DurableObject<Env> {
       // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
       // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
       this.ctx.storage.sql.exec(
-        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -547,7 +679,8 @@ export class NewsDO extends DurableObject<Env> {
         sanitizedBody,
         sourcesJson,
         nowIso,
-        nowIso
+        nowIso,
+        disclosure
       );
 
       for (const t of signalTags) {

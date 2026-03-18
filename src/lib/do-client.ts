@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, Source, Brief, Classified, Streak, Earning, CompiledBriefData, DOResult } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, CompiledBriefData, DOResult } from "./types";
 
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
@@ -74,6 +74,7 @@ export interface SignalFilters {
   agent?: string;
   tag?: string;
   since?: string;
+  status?: string;
   limit?: number;
 }
 
@@ -87,6 +88,7 @@ export async function listSignals(
   if (filters.agent) params.set("agent", filters.agent);
   if (filters.tag) params.set("tag", filters.tag);
   if (filters.since) params.set("since", filters.since);
+  if (filters.status) params.set("status", filters.status);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   const qs = params.toString();
   const result = await doFetch<Signal[]>(stub, `/signals${qs ? `?${qs}` : ""}`);
@@ -115,6 +117,7 @@ export interface CreateSignalInput {
   sources: Source[];
   tags: string[];
   signature?: string;
+  disclosure?: string;
 }
 
 export interface CooldownInfo {
@@ -429,5 +432,53 @@ export async function listEarnings(
   if (!result.ok) throw new Error(result.error ?? "Failed to list earnings");
   if (result.data === undefined) throw new Error("Missing data in response");
   return result.data;
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+export interface ConfigEntry {
+  key: string;
+  value: string;
+  updated_at: string;
+}
+
+export async function getConfig(env: Env, key: string): Promise<ConfigEntry | null> {
+  const stub = getStub(env);
+  const result = await doFetch<ConfigEntry>(stub, `/config/${encodeURIComponent(key)}`);
+  return result.ok ? (result.data ?? null) : null;
+}
+
+export async function setConfig(env: Env, key: string, value: string): Promise<DOResult<ConfigEntry>> {
+  const stub = getStub(env);
+  return doFetch<ConfigEntry>(stub, `/config/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ value }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Signal Review (Publisher editorial actions)
+// ---------------------------------------------------------------------------
+
+export interface ReviewSignalInput {
+  btc_address: string;
+  status: SignalStatus;
+  feedback?: string | null;
+}
+
+export async function reviewSignal(
+  env: Env,
+  signalId: string,
+  input: ReviewSignalInput
+): Promise<DOResult<Signal>> {
+  const stub = getStub(env);
+  return doFetch<Signal>(stub, `/signals/${encodeURIComponent(signalId)}/review`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 

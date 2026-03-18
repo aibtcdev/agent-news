@@ -3,6 +3,12 @@
  * All tables use CREATE TABLE IF NOT EXISTS for safe re-initialization.
  */
 export const SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS config (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS beats (
   slug        TEXT PRIMARY KEY,
   name        TEXT NOT NULL,
@@ -14,15 +20,19 @@ CREATE TABLE IF NOT EXISTS beats (
 );
 
 CREATE TABLE IF NOT EXISTS signals (
-  id           TEXT PRIMARY KEY,
-  beat_slug    TEXT NOT NULL REFERENCES beats(slug),
-  btc_address  TEXT NOT NULL,
-  headline     TEXT NOT NULL,
-  body         TEXT,
-  sources      TEXT NOT NULL,
-  created_at   TEXT NOT NULL,
-  updated_at   TEXT NOT NULL,
-  correction_of TEXT
+  id                TEXT PRIMARY KEY,
+  beat_slug         TEXT NOT NULL REFERENCES beats(slug),
+  btc_address       TEXT NOT NULL,
+  headline          TEXT NOT NULL,
+  body              TEXT,
+  sources           TEXT NOT NULL,
+  created_at        TEXT NOT NULL,
+  updated_at        TEXT NOT NULL,
+  correction_of     TEXT,
+  status            TEXT NOT NULL DEFAULT 'submitted',
+  publisher_feedback TEXT,
+  reviewed_at       TEXT,
+  disclosure        TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS signal_tags (
@@ -78,4 +88,18 @@ CREATE INDEX IF NOT EXISTS idx_earnings_btc_address     ON earnings(btc_address)
 CREATE INDEX IF NOT EXISTS idx_classifieds_btc_address  ON classifieds(btc_address);
 CREATE INDEX IF NOT EXISTS idx_classifieds_expires_at   ON classifieds(expires_at);
 CREATE INDEX IF NOT EXISTS idx_classifieds_category     ON classifieds(category);
+CREATE INDEX IF NOT EXISTS idx_signals_status           ON signals(status);
 `;
+
+/**
+ * Migration SQL for existing databases that lack Phase 0 columns.
+ * Each statement is wrapped in a try/catch-friendly pattern (columns may already exist).
+ * Run via news-do constructor after SCHEMA_SQL.
+ */
+export const MIGRATION_PHASE0_SQL = [
+  "ALTER TABLE signals ADD COLUMN status TEXT NOT NULL DEFAULT 'submitted'",
+  "ALTER TABLE signals ADD COLUMN publisher_feedback TEXT",
+  "ALTER TABLE signals ADD COLUMN reviewed_at TEXT",
+  "ALTER TABLE signals ADD COLUMN disclosure TEXT NOT NULL DEFAULT ''",
+  "CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)",
+] as const;

@@ -91,6 +91,11 @@ export interface Source {
 }
 
 /**
+ * Valid signal statuses for the editorial pipeline.
+ */
+export type SignalStatus = "submitted" | "in_review" | "approved" | "rejected" | "brief_included";
+
+/**
  * A signal is a news item submitted by a correspondent
  */
 export interface Signal {
@@ -108,6 +113,14 @@ export interface Signal {
   readonly created_at: string;
   readonly updated_at: string;
   readonly correction_of: string | null;
+  /** Editorial status — defaults to 'submitted' */
+  readonly status: SignalStatus;
+  /** Publisher feedback on the signal (required on rejection) */
+  readonly publisher_feedback: string | null;
+  /** Timestamp of last editorial review */
+  readonly reviewed_at: string | null;
+  /** Models, tools, and skills used to produce this signal */
+  readonly disclosure: string;
 }
 
 /**

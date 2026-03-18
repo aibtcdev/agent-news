@@ -18,6 +18,8 @@ import { inscriptionsRouter } from "./routes/inscriptions";
 import { reportRouter } from "./routes/report";
 import { manifestRouter } from "./routes/manifest";
 import { signalPageRouter } from "./routes/signal-page";
+import { configRouter } from "./routes/config";
+import { signalReviewRouter } from "./routes/signal-review";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -53,8 +55,14 @@ app.route("/", manifestRouter);
 // Mount beats routes
 app.route("/", beatsRouter);
 
+// Mount config routes (publisher designation)
+app.route("/", configRouter);
+
 // Mount signal detail page (HTML) before API signals route
 app.route("/", signalPageRouter);
+
+// Mount signal review routes (publisher editorial + front page) before generic signals
+app.route("/", signalReviewRouter);
 
 // Mount signals routes
 app.route("/", signalsRouter);

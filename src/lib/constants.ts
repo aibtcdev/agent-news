@@ -53,3 +53,21 @@ export const BEAT_EXPIRY_DAYS = 14;
 // ── Brief paywall ──
 export const BRIEF_PRICE_SATS = 1000;
 export const CORRESPONDENT_SHARE = 0.7;
+
+// ── Signal statuses (editorial pipeline) ──
+export const SIGNAL_STATUSES = [
+  "submitted",
+  "in_review",
+  "approved",
+  "rejected",
+  "brief_included",
+] as const;
+
+// ── Publisher review rate limit ──
+export const REVIEW_RATE_LIMIT = {
+  maxRequests: 60,
+  windowSeconds: 3600,
+} as const;
+
+// ── Config keys ──
+export const CONFIG_PUBLISHER_KEY = "publisher_btc_address" as const;
