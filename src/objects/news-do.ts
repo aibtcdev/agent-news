@@ -915,7 +915,7 @@ export class NewsDO extends DurableObject<Env> {
            FROM signals s
            JOIN beats b ON s.beat_slug = b.slug
            LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE s.created_at >= ? AND s.created_at < ? AND s.status = 'approved'
+           WHERE s.created_at >= ? AND s.created_at < ? AND s.status IN ('approved', 'brief_included')
            ORDER BY s.beat_slug, s.created_at DESC`,
           dayStart,
           dayEnd

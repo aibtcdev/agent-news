@@ -40,12 +40,12 @@ describe("DO constructor: schema initialization", () => {
     expect(Array.isArray(body.signals)).toBe(true);
   });
 
-  it("brief_signals table exists and is queryable", async () => {
-    // brief_signals is created in SCHEMA_SQL. A non-500 response confirms the
-    // table exists and the query executed against it without error.
-    const res = await SELF.fetch("http://example.com/api/brief-signals/2026-01-01");
-    // Expect either 200 (empty result) or 404 (not found) — never 500.
-    expect(res.status).not.toBe(500);
-    expect([200, 404]).toContain(res.status);
+  it("briefs table exists and is queryable", async () => {
+    // briefs is created in SCHEMA_SQL (along with brief_signals).
+    // A 200 response confirms the tables exist and queries execute without error.
+    // Note: /api/brief-signals is a DO-internal route with no worker proxy,
+    // so we test via /api/brief which queries the briefs table in the DO.
+    const res = await SELF.fetch("http://example.com/api/brief");
+    expect(res.status).toBe(200);
   });
 });

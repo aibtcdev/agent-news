@@ -447,7 +447,11 @@ export interface ConfigEntry {
 export async function getConfig(env: Env, key: string): Promise<ConfigEntry | null> {
   const stub = getStub(env);
   const result = await doFetch<ConfigEntry>(stub, `/config/${encodeURIComponent(key)}`);
-  return result.ok ? (result.data ?? null) : null;
+  if (result.ok) return result.data ?? null;
+  // "not set" is a normal 404 — return null
+  if (result.error?.includes("not set")) return null;
+  // Any other error (DO crash, 500) — throw so callers can fail closed
+  throw new Error(result.error ?? "Failed to fetch config");
 }
 
 export async function setConfig(env: Env, key: string, value: string): Promise<DOResult<ConfigEntry>> {

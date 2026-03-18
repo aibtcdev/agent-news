@@ -52,9 +52,15 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   }
 
   // Publisher gate: if a publisher is designated, only they may compile the brief
-  const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_KEY);
+  // Fail closed: if config lookup errors, deny the request rather than skipping the gate
+  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
+  try {
+    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_KEY);
+  } catch {
+    return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
+  }
   if (publisherConfig && publisherConfig.value) {
-    if (btc_address !== publisherConfig.value) {
+    if ((btc_address as string).toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
       return c.json({ error: "Only the designated Publisher can compile the daily brief" }, 403);
     }
   }
@@ -216,10 +222,13 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
 
   // Record which signals were included in this brief and transition them to brief_included
   const signalIds = signals.map((s) => s.id);
+  let briefSignalsWarning: string | undefined;
   if (signalIds.length > 0) {
     const briefSignalsResult = await recordBriefSignals(c.env, date, signalIds);
     if (!briefSignalsResult.ok) {
-      console.error("Failed to record brief signals:", briefSignalsResult.error);
+      const logger = c.get("logger");
+      logger.error("Failed to record brief signals", { date, error: briefSignalsResult.error });
+      briefSignalsWarning = `Failed to record brief_signals: ${briefSignalsResult.error ?? "unknown error"}. Signals remain in 'approved' state — retry compile to fix.`;
     }
   }
 
@@ -230,6 +239,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
       summary,
       text,
       brief: report,
+      ...(briefSignalsWarning && { warning: briefSignalsWarning }),
     },
     201
   );
