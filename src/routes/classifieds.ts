@@ -20,6 +20,7 @@ import {
   listClassifieds,
   getClassified,
   createClassified,
+  getClassifiedsRotation,
 } from "../lib/do-client";
 import { buildPaymentRequired, verifyPayment } from "../services/x402";
 import { verifyAuth } from "../services/auth";
@@ -35,12 +36,20 @@ const classifiedRateLimit = createRateLimitMiddleware({
   windowSeconds: CLASSIFIED_RATE_LIMIT.windowSeconds,
 });
 
-// GET /api/classifieds — list active classifieds
+// GET /api/classifieds/rotation — random selection of up to 3 active listings for brief inclusion
+classifiedsRouter.get("/api/classifieds/rotation", async (c) => {
+  const maxChars = c.req.query("max_chars");
+  const result = await getClassifiedsRotation(c.env, maxChars ? parseInt(maxChars, 10) : undefined);
+  c.header("Cache-Control", "no-store"); // always fresh for brief compilation
+  return c.json(result);
+});
+
+// GET /api/classifieds — list active classifieds (marketplace, no practical cap)
 classifiedsRouter.get("/api/classifieds", async (c) => {
   const category = c.req.query("category");
   const limitParam = c.req.query("limit");
   const limit = limitParam
-    ? Math.min(Math.max(1, parseInt(limitParam, 10) || 20), 50)
+    ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 1000)
     : undefined;
 
   const classifieds = await listClassifieds(c.env, { category, limit });

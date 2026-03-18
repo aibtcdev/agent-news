@@ -285,6 +285,21 @@ export async function createClassified(
   });
 }
 
+export async function getClassifiedsRotation(
+  env: Env,
+  maxChars?: number
+): Promise<{ ok: boolean; data: Classified[]; slots: number; filled: number }> {
+  const stub = getStub(env);
+  const url = maxChars
+    ? `/classifieds/rotation?max_chars=${maxChars}`
+    : "/classifieds/rotation";
+  const result = await doFetch<{ data: Classified[]; slots: number; filled: number }>(stub, url);
+  if (!result.ok || !result.data) {
+    return { ok: false, data: [], slots: 3, filled: 0 };
+  }
+  return { ok: true, ...result.data };
+}
+
 // ---------------------------------------------------------------------------
 // Correspondents
 // ---------------------------------------------------------------------------

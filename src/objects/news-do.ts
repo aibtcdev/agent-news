@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL } from "./schema";
 
 /**
@@ -1072,13 +1072,14 @@ export class NewsDO extends DurableObject<Env> {
     // Classifieds CRUD
     // -------------------------------------------------------------------------
 
-    // GET /classifieds — list active classifieds
+    // GET /classifieds — list active classifieds (marketplace, effectively unlimited)
     this.router.get("/classifieds", (c) => {
       const category = c.req.query("category") ?? null;
       const limitParam = c.req.query("limit");
+      // Marketplace has no meaningful cap — default 50, max 1000
       const limit = Math.min(
-        Math.max(1, parseInt(limitParam ?? "20", 10) || 20),
-        50
+        Math.max(1, parseInt(limitParam ?? "50", 10) || 50),
+        1000
       );
       const rows = this.ctx.storage.sql
         .exec(
@@ -1095,6 +1096,43 @@ export class NewsDO extends DurableObject<Env> {
         ok: true,
         data: rows as unknown as Classified[],
       } satisfies DOResult<Classified[]>);
+    });
+
+    // GET /classifieds/rotation — random selection of up to 3 active listings for brief inclusion
+    this.router.get("/classifieds/rotation", (c) => {
+      const maxCharsParam = c.req.query("max_chars");
+      const maxChars = maxCharsParam
+        ? Math.max(1, parseInt(maxCharsParam, 10) || CLASSIFIED_BRIEF_MAX_CHARS)
+        : CLASSIFIED_BRIEF_MAX_CHARS;
+
+      // Fetch more than needed so we can filter by char budget and still fill slots
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM classifieds
+           WHERE expires_at > datetime('now')
+           ORDER BY RANDOM()
+           LIMIT ?`,
+          CLASSIFIED_BRIEF_SLOTS * 4
+        )
+        .toArray() as unknown as Classified[];
+
+      // Filter to listings that fit within the per-slot character budget, take up to CLASSIFIED_BRIEF_SLOTS
+      const selected = rows
+        .filter((row) => {
+          const charCount =
+            (row.headline?.length ?? 0) +
+            (row.body?.length ?? 0) +
+            (row.contact?.length ?? 0);
+          return charCount <= maxChars;
+        })
+        .slice(0, CLASSIFIED_BRIEF_SLOTS);
+
+      return c.json({
+        ok: true,
+        data: selected,
+        slots: CLASSIFIED_BRIEF_SLOTS,
+        filled: selected.length,
+      });
     });
 
     // GET /classifieds/:id — get a single classified
