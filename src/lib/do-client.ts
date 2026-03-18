@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, WeeklyPayoutResult } from "./types";
 
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
@@ -611,20 +611,6 @@ export async function recordBriefInclusionPayouts(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ brief_date: briefDate, signal_ids: signalIds }),
   });
-}
-
-export interface PayoutRecord {
-  rank: number;
-  btc_address: string;
-  amount_sats: number;
-  reason: string;
-}
-
-export interface WeeklyPayoutResult {
-  week: string;
-  paid: PayoutRecord[];
-  skipped: PayoutRecord[];
-  warnings: string[];
 }
 
 /** Record top-3 weekly leaderboard prize earnings for the given ISO week. Idempotent. */

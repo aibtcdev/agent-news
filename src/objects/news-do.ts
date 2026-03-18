@@ -1527,7 +1527,16 @@ export class NewsDO extends DurableObject<Env> {
       let paid = 0;
       let skipped = 0;
 
-      for (const signalId of signal_ids as string[]) {
+      // Validate and deduplicate signal IDs
+      const validIds = [...new Set((signal_ids as unknown[]).filter((id): id is string => typeof id === "string" && id.length > 0))];
+      if (validIds.length === 0) {
+        return c.json(
+          { ok: false, error: "signal_ids must contain at least one non-empty string" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+
+      for (const signalId of validIds) {
         // Look up correspondent for this signal
         const sigRows = this.ctx.storage.sql
           .exec("SELECT btc_address FROM signals WHERE id = ?", signalId)
@@ -1584,6 +1593,15 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
+      // Validate ISO week number is in valid range (01-53)
+      const weekNum = parseInt((week as string).slice(-2), 10);
+      if (weekNum < 1 || weekNum > 53) {
+        return c.json(
+          { ok: false, error: "Invalid ISO week number — must be between 01 and 53" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+
       // Fetch top 3 from the leaderboard (same scoring as GET /leaderboard)
       const top3 = this.ctx.storage.sql
         .exec(
@@ -1622,7 +1640,7 @@ export class NewsDO extends DurableObject<Env> {
              FROM referral_credits WHERE credited_at IS NOT NULL AND credited_at > datetime('now', '-30 days')
              GROUP BY scout_address
            ) rf ON a.btc_address = rf.btc_address
-           ORDER BY score DESC
+           ORDER BY score DESC, a.btc_address ASC
            LIMIT 3`
         )
         .toArray() as Array<{ btc_address: string; score: number }>;

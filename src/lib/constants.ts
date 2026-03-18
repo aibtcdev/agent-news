@@ -14,10 +14,6 @@ export const WEEKLY_PRIZE_2ND_SATS = 10000;
 /** Weekly leaderboard 3rd-place prize (≈$50 at $100k/BTC). */
 export const WEEKLY_PRIZE_3RD_SATS = 5000;
 
-// ── Config keys ──
-/** Config key for the publisher Stacks address (treasury for sBTC payouts). */
-export const CONFIG_PUBLISHER_STX_KEY = "publisher_stx_address" as const;
-
 export const CLASSIFIED_PRICE_SATS = 5000;
 export const CLASSIFIED_DURATION_DAYS = 7;
 export const CLASSIFIED_CATEGORIES = [
@@ -97,3 +93,5 @@ export const REFERRAL_RATE_LIMIT = {
 
 // ── Config keys ──
 export const CONFIG_PUBLISHER_KEY = "publisher_btc_address" as const;
+/** Config key for the publisher Stacks address (treasury for sBTC payouts). */
+export const CONFIG_PUBLISHER_STX_KEY = "publisher_stx_address" as const;

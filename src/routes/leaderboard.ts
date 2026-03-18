@@ -148,6 +148,10 @@ leaderboardRouter.post("/api/leaderboard/payout", async (c) => {
     if (!/^\d{4}-W\d{2}$/.test(week)) {
       return c.json({ error: "Invalid week format — use YYYY-WNN (e.g. '2026-W11')" }, 400);
     }
+    const weekNum = parseInt(week.slice(-2), 10);
+    if (weekNum < 1 || weekNum > 53) {
+      return c.json({ error: "Invalid ISO week number — must be between 01 and 53" }, 400);
+    }
     targetWeek = week;
   } else {
     targetWeek = getPreviousISOWeek(new Date());

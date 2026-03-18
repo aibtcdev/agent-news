@@ -142,9 +142,10 @@ export const MIGRATION_PHASE0_SQL = [
 
 /**
  * Payments migration — Phase 4.
- * Adds a UNIQUE index on earnings(reason, reference_id) to prevent double-paying
- * the same correspondent for the same event (brief inclusion or weekly prize).
- * INSERT OR IGNORE is used on payout writes, so duplicates are silently skipped.
+ * Adds a partial UNIQUE index on earnings(reason, reference_id) WHERE reference_id
+ * IS NOT NULL, preventing double-paying the same correspondent for the same event
+ * (brief inclusion or weekly prize). INSERT OR IGNORE is used on payout writes,
+ * so duplicates are silently skipped. Rows with NULL reference_id are not constrained.
  */
 export const MIGRATION_PAYMENTS_SQL = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_earnings_reason_ref ON earnings(reason, reference_id) WHERE reference_id IS NOT NULL",

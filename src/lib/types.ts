@@ -271,6 +271,6 @@ export interface WeeklyPayoutResult {
   paid: PayoutRecord[];
   /** Records skipped because they were already paid */
   skipped: PayoutRecord[];
-  /** Non-fatal warnings (e.g. publisher_stx_address not configured) */
+  /** Non-fatal warnings (e.g. publisher_btc_address not configured) */
   warnings: string[];
 }

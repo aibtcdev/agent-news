@@ -233,7 +233,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   }
 
   // Record brief-inclusion earnings for all included signals.
-  // This is fire-and-forget: a failure here does not fail the compile request.
+  // Best-effort: awaited but non-fatal — a failure here does not fail the compile request.
   // Double-pay prevention is enforced by the UNIQUE index on earnings(reason, reference_id).
   let payoutSummary: { paid: number; skipped: number } | undefined;
   if (signalIds.length > 0 && !briefSignalsWarning) {
