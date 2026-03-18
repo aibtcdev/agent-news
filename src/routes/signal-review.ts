@@ -62,7 +62,7 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     return c.json({ error: authResult.error, code: authResult.code }, 401);
   }
 
-  const result = await reviewSignal(c.env, signalId, {
+  const result = await reviewSignal(c.env, signalId as string, {
     btc_address: btc_address as string,
     status: status as SignalStatus,
     feedback: feedback ? String(feedback) : null,
