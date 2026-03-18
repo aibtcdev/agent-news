@@ -4,8 +4,8 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_KEY } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL } from "./schema";
+import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_KEY, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL } from "./schema";
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -108,6 +108,16 @@ export class NewsDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec(MIGRATION_BEAT_RESTRUCTURE_SQL);
     } catch (e) {
       console.error("Beat restructure migration failed:", e);
+    }
+
+    // Run Phase 4 payments migration — adds UNIQUE index for double-pay prevention.
+    for (const stmt of MIGRATION_PAYMENTS_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch (e) {
+        // Index already exists — safe to ignore on re-run.
+        console.error("Payments migration statement failed (likely already applied):", e);
+      }
     }
 
     // Internal Hono router for DO-internal routing
