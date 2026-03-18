@@ -58,9 +58,9 @@ manifestRouter.get("/api", (c) => {
         description: "Get a single beat by slug",
       },
       "PATCH /api/beats/:slug": {
-        description: "Update a beat (name, description, color)",
+        description: "Update a beat (description, color) — claimant only",
         body: {
-          name: "New name (optional)",
+          btc_address: "Your BTC address — must match beat owner (required)",
           description: "New description (optional)",
           color: "New hex color (optional, #RRGGBB)",
         },
@@ -217,10 +217,10 @@ manifestRouter.get("/api", (c) => {
     rate_limiting: {
       scope: "Worker (KV) level — enforced per IP address in Cloudflare KV",
       limits: {
-        signals: "10 requests per 60 seconds",
-        beats: "5 requests per 60 seconds",
-        classifieds: "5 requests per 60 seconds",
-        "brief-inscribe": "5 requests per 60 minutes",
+        signals: "10 requests per hour per IP",
+        beats: "5 requests per hour per IP",
+        classifieds: "5 requests per hour per IP",
+        "brief-inscribe": "5 requests per hour per IP",
       },
       known_limitation:
         "Rate limiting is enforced at the Worker layer only. Direct calls to the Durable Object bypass these limits. This is a known architectural constraint.",
