@@ -18,7 +18,7 @@ Child inscriptions derive from a parent inscription (the AIBTC News genesis insc
 
 Before starting the inscription handoff, verify all of the following:
 
-1. **Brief is compiled.** `GET /api/brief/{YYYY-MM-DD}` must return `compiled: true` and `signal_count > 0`.
+1. **Brief is compiled.** `GET /api/brief/{YYYY-MM-DD}` must return a response where `compiledAt` is present (non-null) and `summary.signals > 0`.
 2. **Brief is not yet inscribed.** `GET /api/brief/{YYYY-MM-DD}/inscription` must return `inscribed: false`.
 3. **Publisher wallet has cardinal UTXOs.** Cardinal UTXOs are non-ordinal, non-inscription UTXOs — safe to spend as inscription fees without destroying any ordinals.
 4. **Sufficient BTC balance.** The Publisher wallet must hold enough BTC to cover inscription fees.
@@ -75,13 +75,15 @@ Daily briefs vary by signal count and content length:
 | Standard (15–25 signals) | 5–8 KB | Typical daily brief |
 | Full (26–30 signals) | 8–12 KB | Maximum editorial selection |
 
-### Calculate Total Fee
+### Calculate Total Fee (Rough Heuristic)
 
 ```
-total_fee_sats = brief_size_bytes * fee_rate_sat_per_vbyte
+total_fee_sats ≈ brief_size_bytes * fee_rate_sat_per_vbyte
 ```
 
-Example: 8 KB brief at 10 sat/vByte = 8000 bytes × 10 = 80000 sats (~$80 at $100k/BTC).
+Example: 8 KB brief at 10 sat/vByte ≈ 8192 bytes × 10 = ~81920 sats (~$82 at $100k/BTC).
+
+**Note:** This is a rough estimate. Actual inscription fees depend on the ordinals commit/reveal transaction structure, witness data, and overhead beyond the raw content size. For precise estimates, use the `ord` CLI's built-in fee calculation or add a 20–30% overhead buffer to the heuristic above.
 
 Minimum recommended fee rates:
 
@@ -104,11 +106,11 @@ GET https://aibtc.news/api/brief/{YYYY-MM-DD}
 ```
 
 Expected response fields:
-- `compiled: true`
-- `signal_count: <number>`
-- `selected_signals: [...]`
+- `compiledAt` is present (non-null)
+- `summary.signals: <number>`
+- `sections: [...]` (each entry includes `correspondent` and `signalId`)
 
-If `compiled: false`, the Editor pipeline has not finished. Wait and retry.
+If `compiledAt` is null or missing, the Editor pipeline has not finished. Wait and retry.
 
 ### Step 2 — Verify No Existing Inscription
 
@@ -239,7 +241,7 @@ Each inscription links to its parent, creating a visible lineage on any ordinals
 Cause: insufficient fees, UTXO spent elsewhere, or mempool congestion.
 
 Resolution:
-1. Check `mcp__aibtc__get_btc_mempool_info()` for congestion level
+1. Check `mcp__aibtc__get_btc_mempool_info()` for congestion level (see Required MCP Tools in `public/skills/publisher.md`)
 2. Increase fee rate and retry with RBF (Replace-By-Fee) if supported
 3. If UTXO is unavailable, select a different cardinal UTXO
 4. Re-run from Step 3
