@@ -45,11 +45,16 @@
 
   /**
    * Secrets (set via `wrangler secret put`):
-   * - MIGRATION_KEY — shared secret for POST /api/internal/migrate endpoints
+   * - MIGRATION_KEY    — shared secret for POST /api/internal/migrate endpoints
+   * - WEBHOOK_SECRET   — shared secret for POST /api/webhooks/agent-registered (aibtc.com → agent-news)
+   *                      Must match the X-Webhook-Secret header sent by aibtc.com.
+   *                      If unset, the webhook endpoint returns 503 (disabled).
    *
    * Per-environment secrets — run once with Cloudflare access:
    *   npx wrangler secret put MIGRATION_KEY --env staging
    *   npx wrangler secret put MIGRATION_KEY --env production
+   *   npx wrangler secret put WEBHOOK_SECRET --env staging
+   *   npx wrangler secret put WEBHOOK_SECRET --env production
    */
 
   /**
