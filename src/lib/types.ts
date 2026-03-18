@@ -1,4 +1,5 @@
 import type { Context } from "hono";
+import { SIGNAL_STATUSES } from "./constants";
 
 /**
  * LogsRPC interface (from worker-logs service)
@@ -92,8 +93,9 @@ export interface Source {
 
 /**
  * Valid signal statuses for the editorial pipeline.
+ * Derived from SIGNAL_STATUSES constant — single source of truth, can't drift.
  */
-export type SignalStatus = "submitted" | "in_review" | "approved" | "rejected" | "brief_included";
+export type SignalStatus = (typeof SIGNAL_STATUSES)[number];
 
 /**
  * A signal is a news item submitted by a correspondent

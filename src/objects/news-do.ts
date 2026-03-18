@@ -178,12 +178,30 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Feedback is required when rejecting a signal" } satisfies DOResult<Signal>, 400);
       }
 
-      // Verify signal exists
+      // Verify signal exists and enforce state transition rules
       const signalRows = this.ctx.storage.sql
-        .exec("SELECT id FROM signals WHERE id = ?", id)
+        .exec("SELECT id, status FROM signals WHERE id = ?", id)
         .toArray();
       if (signalRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
+      }
+
+      // State machine: prevent editorial regressions
+      // Valid transitions: submitted → in_review → approved/rejected, approved → brief_included
+      const currentStatus = (signalRows[0] as { id: string; status: string }).status;
+      const VALID_TRANSITIONS: Record<string, string[]> = {
+        submitted: ["in_review", "approved", "rejected"],
+        in_review: ["approved", "rejected"],
+        approved: ["brief_included", "rejected"],
+        rejected: ["approved"],
+        brief_included: [],
+      };
+      const allowed = VALID_TRANSITIONS[currentStatus] ?? [];
+      if (!allowed.includes(status as string)) {
+        return c.json({
+          ok: false,
+          error: `Invalid transition: "${currentStatus}" → "${status}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
+        } satisfies DOResult<Signal>, 400);
       }
 
       const now = new Date().toISOString();

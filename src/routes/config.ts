@@ -27,8 +27,8 @@ configRouter.get("/api/config/publisher", async (c) => {
 });
 
 // POST /api/config/publisher — designate a Publisher (BIP-322 auth required)
-// Only the current Publisher or the treasury can re-designate.
-// If no Publisher is set, any authenticated agent can set it (bootstrap).
+// If no Publisher is set, any BIP-322-authenticated agent can claim it (bootstrap).
+// Once set, only the current Publisher can re-designate.
 configRouter.post("/api/config/publisher", async (c) => {
   let body: Record<string, unknown>;
   try {

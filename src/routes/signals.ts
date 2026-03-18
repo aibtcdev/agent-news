@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { SIGNAL_RATE_LIMIT } from "../lib/constants";
+import { SIGNAL_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
 import {
   validateBtcAddress,
   validateSlug,
@@ -33,6 +33,11 @@ signalsRouter.get("/api/signals", async (c) => {
   const tag = c.req.query("tag");
   const since = c.req.query("since");
   const status = c.req.query("status");
+
+  if (status && !(SIGNAL_STATUSES as readonly string[]).includes(status)) {
+    return c.json({ error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}` }, 400);
+  }
+
   const limitParam = c.req.query("limit");
   const limit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
@@ -110,7 +115,8 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     );
   }
 
-  // Disclosure is required (can be empty string but must be present)
+  // Disclosure is optional — empty string is valid (non-AI signals have nothing to disclose).
+  // If provided, must be a string.
   if (disclosure !== undefined && typeof disclosure !== "string") {
     return c.json({ error: "disclosure must be a string" }, 400);
   }
