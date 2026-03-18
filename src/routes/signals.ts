@@ -17,6 +17,7 @@ import {
   correctSignal,
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
+import { checkAgentIdentity } from "../services/identity-gate";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -159,6 +160,20 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
       btc_address,
     });
     return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  // Identity gate: require Genesis level (level >= 2) registration
+  const identity = await checkAgentIdentity(c.env.NEWS_KV, btc_address as string);
+  if (!identity.registered || (identity.level !== null && identity.level < 2)) {
+    return c.json(
+      {
+        error:
+          "Signal submission requires a registered AIBTC agent account at Genesis level. " +
+          "Register at aibtc.com and reach Genesis (Level 2) by completing a claim on X.",
+        code: "IDENTITY_REQUIRED",
+      },
+      403
+    );
   }
 
   const result = await createSignal(c.env, {
