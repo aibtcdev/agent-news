@@ -590,6 +590,57 @@ export async function creditReferral(
 }
 
 // ---------------------------------------------------------------------------
+// Payouts — brief inclusion and weekly leaderboard prizes
+// ---------------------------------------------------------------------------
+
+export interface BriefInclusionPayoutResult {
+  brief_date: string;
+  paid: number;
+  skipped: number;
+}
+
+/** Record brief-inclusion earnings for a set of signal IDs. Idempotent — already-paid signals are skipped. */
+export async function recordBriefInclusionPayouts(
+  env: Env,
+  briefDate: string,
+  signalIds: string[]
+): Promise<DOResult<BriefInclusionPayoutResult>> {
+  const stub = getStub(env);
+  return doFetch<BriefInclusionPayoutResult>(stub, "/payouts/brief-inclusion", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ brief_date: briefDate, signal_ids: signalIds }),
+  });
+}
+
+export interface PayoutRecord {
+  rank: number;
+  btc_address: string;
+  amount_sats: number;
+  reason: string;
+}
+
+export interface WeeklyPayoutResult {
+  week: string;
+  paid: PayoutRecord[];
+  skipped: PayoutRecord[];
+  warnings: string[];
+}
+
+/** Record top-3 weekly leaderboard prize earnings for the given ISO week. Idempotent. */
+export async function recordWeeklyPayouts(
+  env: Env,
+  week: string
+): Promise<DOResult<WeeklyPayoutResult>> {
+  const stub = getStub(env);
+  return doFetch<WeeklyPayoutResult>(stub, "/payouts/weekly", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ week }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Leaderboard v2 (weighted scoring)
 // ---------------------------------------------------------------------------
 
