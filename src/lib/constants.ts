@@ -83,3 +83,24 @@ export const REFERRAL_RATE_LIMIT = {
 
 // ── Config keys ──
 export const CONFIG_PUBLISHER_KEY = "publisher_btc_address" as const;
+export const CONFIG_BRIEF_INCLUSION_RATE = "brief_inclusion_rate_sats" as const;
+export const CONFIG_LEADERBOARD_PRIZE_1 = "leaderboard_prize_1_sats" as const;
+export const CONFIG_LEADERBOARD_PRIZE_2 = "leaderboard_prize_2_sats" as const;
+export const CONFIG_LEADERBOARD_PRIZE_3 = "leaderboard_prize_3_sats" as const;
+
+// ── Default payout amounts (in sats) ──
+export const DEFAULT_BRIEF_INCLUSION_RATE = 2500; // $25 sBTC at ~$100k BTC
+export const DEFAULT_LEADERBOARD_PRIZES = [20000, 10000, 5000] as const; // $200/$100/$50
+
+// ── Earning statuses ──
+export const EARNING_STATUSES = ["pending", "paid", "failed"] as const;
+
+// ── ERC-8004 identity registry ──
+export const ERC8004_REGISTRY_CONTRACT = "SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2" as const;
+export const ERC8004_CACHE_TTL_SECONDS = 3600; // 1 hour
+
+// ── Payout rate limit ──
+export const PAYOUT_RATE_LIMIT = {
+  maxRequests: 5,
+  windowSeconds: 3600,
+} as const;

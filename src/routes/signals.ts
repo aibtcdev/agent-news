@@ -17,6 +17,7 @@ import {
   correctSignal,
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
+import { identityGate } from "../middleware/identity-gate";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -94,7 +95,7 @@ signalsRouter.get("/api/signals/:id", async (c) => {
 });
 
 // POST /api/signals — submit a new signal (rate limited, BIP-322 auth required)
-signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
+signalsRouter.post("/api/signals", signalRateLimit, identityGate, async (c) => {
   let body: Record<string, unknown>;
   try {
     body = await c.req.json<Record<string, unknown>>();

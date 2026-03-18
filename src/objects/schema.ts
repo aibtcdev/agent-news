@@ -64,6 +64,8 @@ CREATE TABLE IF NOT EXISTS earnings (
   amount_sats INTEGER NOT NULL,
   reason      TEXT NOT NULL,
   reference_id TEXT,
+  status      TEXT NOT NULL DEFAULT 'pending',
+  tx_id       TEXT,
   created_at  TEXT NOT NULL
 );
 
@@ -116,6 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at       ON signals(created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_of    ON signals(correction_of);
 CREATE INDEX IF NOT EXISTS idx_earnings_btc_address     ON earnings(btc_address);
+CREATE INDEX IF NOT EXISTS idx_earnings_status          ON earnings(status);
 CREATE INDEX IF NOT EXISTS idx_classifieds_btc_address  ON classifieds(btc_address);
 CREATE INDEX IF NOT EXISTS idx_classifieds_expires_at   ON classifieds(expires_at);
 CREATE INDEX IF NOT EXISTS idx_classifieds_category     ON classifieds(category);
@@ -138,4 +141,7 @@ export const MIGRATION_PHASE0_SQL = [
   "ALTER TABLE signals ADD COLUMN reviewed_at TEXT",
   "ALTER TABLE signals ADD COLUMN disclosure TEXT NOT NULL DEFAULT ''",
   "CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)",
+  "ALTER TABLE earnings ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'",
+  "ALTER TABLE earnings ADD COLUMN tx_id TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_earnings_status ON earnings(status)",
 ] as const;

@@ -23,6 +23,7 @@ import { signalReviewRouter } from "./routes/signal-review";
 import { correctionsRouter } from "./routes/corrections";
 import { referralsRouter } from "./routes/referrals";
 import { leaderboardRouter } from "./routes/leaderboard";
+import { payoutsRouter } from "./routes/payouts";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -86,6 +87,9 @@ app.route("/", referralsRouter);
 
 // Mount leaderboard v2
 app.route("/", leaderboardRouter);
+
+// Mount payouts and earnings
+app.route("/", payoutsRouter);
 
 // Mount read-only routes
 app.route("/", correspondentsRouter);

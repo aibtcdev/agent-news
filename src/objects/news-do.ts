@@ -722,8 +722,8 @@ export class NewsDO extends DurableObject<Env> {
       );
 
       this.ctx.storage.sql.exec(
-        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, 0, 'signal', ?, ?)`,
+        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, status, created_at)
+           VALUES (?, ?, 0, 'signal', ?, 'pending', ?)`,
         earningId,
         btc_address as string,
         signalId,
@@ -1450,8 +1450,8 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date().toISOString();
 
       this.ctx.storage.sql.exec(
-        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
         id,
         btc_address as string,
         amount_sats as number,
@@ -1470,16 +1470,95 @@ export class NewsDO extends DurableObject<Env> {
       );
     });
 
-    // GET /earnings/:address
-    this.router.get("/earnings/:address", (c) => {
-      const address = c.req.param("address");
+    // GET /earnings/pending — list all pending earnings (for Publisher payout batch)
+    // Must be registered before /:address to avoid route shadowing
+    this.router.get("/earnings/pending", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
-          "SELECT * FROM earnings WHERE btc_address = ? ORDER BY created_at DESC LIMIT 200",
-          address
+          `SELECT * FROM earnings WHERE status = 'pending' AND amount_sats > 0 ORDER BY created_at ASC LIMIT 500`
         )
         .toArray();
       return c.json({ ok: true, data: rows as unknown as Earning[] } satisfies DOResult<Earning[]>);
+    });
+
+    // GET /earnings/:address — with optional status filter
+    this.router.get("/earnings/:address", (c) => {
+      const address = c.req.param("address");
+      const status = c.req.query("status") ?? null;
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM earnings WHERE btc_address = ? AND (?2 IS NULL OR status = ?2) ORDER BY created_at DESC LIMIT 200`,
+          address,
+          status
+        )
+        .toArray();
+
+      // Compute totals
+      const totalRows = this.ctx.storage.sql
+        .exec(
+          `SELECT status, SUM(amount_sats) as total, COUNT(*) as count FROM earnings WHERE btc_address = ? GROUP BY status`,
+          address
+        )
+        .toArray();
+
+      const totals: Record<string, { total: number; count: number }> = {};
+      for (const r of totalRows) {
+        const row = r as Record<string, unknown>;
+        totals[row.status as string] = { total: Number(row.total) || 0, count: Number(row.count) || 0 };
+      }
+
+      return c.json({ ok: true, data: { earnings: rows as unknown as Earning[], totals } } satisfies DOResult<unknown>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Payouts — Publisher records payout results
+    // -------------------------------------------------------------------------
+
+    // PATCH /earnings/:id/pay — mark an earning as paid with tx_id
+    this.router.patch("/earnings/:id/pay", async (c) => {
+      const id = c.req.param("id");
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Earning>, 400);
+      }
+
+      const { btc_address, tx_id, status } = body;
+
+      // Verify publisher
+      const publisherRows = this.ctx.storage.sql
+        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_KEY)
+        .toArray();
+      if (publisherRows.length === 0) {
+        return c.json({ ok: false, error: "Publisher not yet designated" } satisfies DOResult<Earning>, 403);
+      }
+      if (btc_address !== (publisherRows[0] as { value: string }).value) {
+        return c.json({ ok: false, error: "Only the designated Publisher can process payouts" } satisfies DOResult<Earning>, 403);
+      }
+
+      if (!status || (status !== "paid" && status !== "failed")) {
+        return c.json({ ok: false, error: "Status must be 'paid' or 'failed'" } satisfies DOResult<Earning>, 400);
+      }
+
+      // Verify earning exists
+      const earningRows = this.ctx.storage.sql
+        .exec("SELECT * FROM earnings WHERE id = ?", id)
+        .toArray();
+      if (earningRows.length === 0) {
+        return c.json({ ok: false, error: `Earning "${id}" not found` } satisfies DOResult<Earning>, 404);
+      }
+
+      this.ctx.storage.sql.exec(
+        "UPDATE earnings SET status = ?, tx_id = ? WHERE id = ?",
+        status as string,
+        tx_id ? (tx_id as string) : null,
+        id
+      );
+
+      const updated = this.ctx.storage.sql
+        .exec("SELECT * FROM earnings WHERE id = ?", id)
+        .toArray();
+
+      return c.json({ ok: true, data: updated[0] as unknown as Earning } satisfies DOResult<Earning>);
     });
 
     // -------------------------------------------------------------------------

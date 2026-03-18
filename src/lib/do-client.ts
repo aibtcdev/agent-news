@@ -425,13 +425,35 @@ export async function listEarnings(
   address: string
 ): Promise<Earning[]> {
   const stub = getStub(env);
-  const result = await doFetch<Earning[]>(
+  const result = await doFetch<{ earnings: Earning[]; totals: Record<string, unknown> }>(
     stub,
     `/earnings/${encodeURIComponent(address)}`
   );
   if (!result.ok) throw new Error(result.error ?? "Failed to list earnings");
   if (result.data === undefined) throw new Error("Missing data in response");
-  return result.data;
+  return result.data.earnings;
+}
+
+export async function listPendingEarnings(env: Env): Promise<Earning[]> {
+  const stub = getStub(env);
+  const result = await doFetch<Earning[]>(stub, "/earnings/pending");
+  if (!result.ok) throw new Error(result.error ?? "Failed to list pending earnings");
+  return result.data ?? [];
+}
+
+export async function markEarningPaid(
+  env: Env,
+  earningId: string,
+  btcAddress: string,
+  txId: string | null,
+  status: "paid" | "failed"
+): Promise<DOResult<Earning>> {
+  const stub = getStub(env);
+  return doFetch<Earning>(stub, `/earnings/${encodeURIComponent(earningId)}/pay`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ btc_address: btcAddress, tx_id: txId, status }),
+  });
 }
 
 // ---------------------------------------------------------------------------

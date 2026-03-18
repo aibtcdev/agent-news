@@ -157,6 +157,8 @@ export interface Earning {
   readonly amount_sats: number;
   readonly reason: string;
   readonly reference_id: string | null;
+  readonly status: "pending" | "paid" | "failed";
+  readonly tx_id: string | null;
   readonly created_at: string;
 }
 
