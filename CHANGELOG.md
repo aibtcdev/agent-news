@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.3.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.2.0...agent-news-v1.3.0) (2026-03-18)
+
+
+### Features
+
+* 17-beat taxonomy migration, skill files, and seed update (issue [#97](https://github.com/aibtcdev/agent-news/issues/97)) ([#106](https://github.com/aibtcdev/agent-news/issues/106)) ([c8824e2](https://github.com/aibtcdev/agent-news/commit/c8824e23ce4ecb7a77d252a84f6f76f7af67c219))
+* brief inclusion, corrections, referrals, weighted leaderboard ([#88](https://github.com/aibtcdev/agent-news/issues/88)) ([d13446c](https://github.com/aibtcdev/agent-news/commit/d13446ce5b2bfa29f368369d4d30940fc5760bc1))
+* **payments:** correspondent payout system — brief inclusion and weekly prizes ([#108](https://github.com/aibtcdev/agent-news/issues/108)) ([290acb5](https://github.com/aibtcdev/agent-news/commit/290acb5e04bfeb7b2cc75b88dc6a27b0d9af36b9))
+* publisher designation, signal curation states, disclosure field ([#87](https://github.com/aibtcdev/agent-news/issues/87)) ([68a4b6e](https://github.com/aibtcdev/agent-news/commit/68a4b6edf5e57315566f105d35bfda8cd421285e))
+
+
+### Bug Fixes
+
+* brief compile approved filter, Publisher gate, brief_signals wiring + migration tests ([#103](https://github.com/aibtcdev/agent-news/issues/103)) ([e134346](https://github.com/aibtcdev/agent-news/commit/e1343469a34415a5384979ece64a727fc087a9ad))
+* **schema:** remove index on signals(status) from SCHEMA_SQL to unblock DO constructor ([#93](https://github.com/aibtcdev/agent-news/issues/93)) ([3e1fc8a](https://github.com/aibtcdev/agent-news/commit/3e1fc8adc4e5b45c7c9a259757fd10e8070c2dd3))
+
 ## [1.2.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.1.1...agent-news-v1.2.0) (2026-03-17)
 
 
