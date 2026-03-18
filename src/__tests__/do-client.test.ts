@@ -6,13 +6,13 @@ import { SELF } from "cloudflare:test";
  * These verify error propagation and not-found handling for DO-backed resources.
  */
 describe("do-client error propagation via HTTP", () => {
-  it("GET /api/beats returns empty array when DO has no beats", async () => {
+  it("GET /api/beats returns 17 canonical beats from migration", async () => {
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
     const body = await res.json<unknown[]>();
-    // Fresh DO instance starts empty
+    // Fresh DO auto-populates 17 beats via MIGRATION_BEAT_RESTRUCTURE_SQL
     expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(0);
+    expect(body.length).toBe(17);
   });
 
   it("GET /api/beats/:slug returns 404 for unknown beat", async () => {

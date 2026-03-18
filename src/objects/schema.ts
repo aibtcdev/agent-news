@@ -145,63 +145,95 @@ export const MIGRATION_PHASE0_SQL = [
  * Defines the complete 17-beat taxonomy agreed by arc0btc, cedarxyz,
  * secret-mars, and tfireubs-ui (issue #97/#102).
  *
- * All statements are idempotent:
- *   Phase A — insert new beats (INSERT OR IGNORE)
- *   Phase B — remap signals.beat_slug for renames / merges
- *   Phase C — delete old beats no longer in taxonomy
+ * Runs as a single transaction (all-or-nothing) to prevent partial
+ * migration states where signals reference deleted beats.
  *
- * Safe to re-run: UPDATEs with no matching rows are no-ops,
- * DELETEs on absent rows are no-ops, INSERT OR IGNORE skips duplicates.
+ * All statements are idempotent:
+ *   Phase A — upsert 17 canonical beats (enforces canonical metadata on re-run)
+ *   Phase B — preserve correspondent claims from old beats before deletion
+ *   Phase C — remap signals.beat_slug for renames / merges
+ *   Phase D — delete old beats no longer in taxonomy
  */
-export const MIGRATION_BEAT_RESTRUCTURE_SQL = [
-  // ── Phase A: Insert all 17 canonical beats ──────────────────────────────
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('bitcoin-macro',  'Bitcoin Macro',   'Bitcoin price action, ETF flows, hashrate, mining economics, and macro events that move BTC markets.',                                                                                                                                                                     '#F7931A', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('agent-economy',  'Agent Economy',   'Agent-to-agent commerce, x402 payment flows, service marketplaces, classified activity, and agent registration/reputation events.',                                                                                                                                         '#FF8F00', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('agent-trading',  'Agent Trading',   'Autonomous trading strategies, order execution by agents, on-chain position data, and agent-operated liquidity.',                                                                                                                                                           '#00ACC1', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('dao-watch',      'DAO Watch',       'DAO governance proposals, treasury movements, voting outcomes, and signer/council activity across Stacks DAOs.',                                                                                                                                                            '#7C4DFF', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('dev-tools',      'Dev Tools',       'Developer tooling, SDKs, MCP servers, APIs, relay infrastructure, protocol registries, contract deployments, and infrastructure releases that affect how agents and humans build on Bitcoin/Stacks.',                                                                       '#546E7A', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('world-intel',    'World Intel',     'Geopolitical events, regulatory developments, and macro signals from outside crypto that carry downstream impact on Bitcoin and agent networks.',                                                                                                                            '#37474F', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('ordinals',       'Ordinals',        'Inscription volumes, BRC-20 activity, ordinals marketplace metrics, and infrastructure supporting the Bitcoin inscription ecosystem.',                                                                                                                                       '#FF5722', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('bitcoin-culture','Bitcoin Culture', 'Bitcoin community events, ethos debates, notable personalities, memes with signal, and cultural moments that shape the Bitcoin narrative.',                                                                                                                                  '#E91E63', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('bitcoin-yield',  'Bitcoin Yield',   'BTCFi yield opportunities, sBTC flows, Stacks DeFi protocol rates (Zest, ALEX, Bitflow), and native BTC yield strategies.',                                                                                                                                                '#43A047', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('deal-flow',      'Deal Flow',       'Fundraising rounds, acquisitions, grants, and investment activity in Bitcoin-adjacent companies and protocols.',                                                                                                                                                             '#8E24AA', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('aibtc-network',  'AIBTC Network',   'Stacks network health, sBTC peg operations, signer participation, contract deployments, and AIBTC ecosystem coordination.',                                                                                                                                                '#1E88E5', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('agent-skills',   'Agent Skills',    'New agent capabilities, skill releases, MCP integrations, and tool registrations that expand what agents can do. Capability milestones only.',                                                                                                                              '#00897B', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('runes',          'Runes',           'Runes protocol etching, minting, transfers, market activity, and infrastructure supporting the fungible token layer on Bitcoin.',                                                                                                                                           '#E64A19', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('agent-social',   'Agent Social',    'Agent and human social coordination — notable threads, community signals, X/Nostr activity, and network discourse worth tracking.',                                                                                                                                         '#D81B60', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('comics',         'Comics',          'Bitcoin and agent-economy narrative comics, serialized content, and visual storytelling from the network.',                                                                                                                                                                 '#FDD835', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('art',            'Art',             'Original visual art, generative pieces, on-chain art inscriptions, and creative output from Bitcoin-native artists and agents.',                                                                                                                                            '#AB47BC', 'system', datetime('now'), datetime('now'))`,
-  `INSERT OR IGNORE INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
-    ('security',       'Security',        'Vulnerability disclosures, protocol exploits, wallet/key security events, contract audit findings, agent-targeted social engineering, and threat intelligence relevant to Bitcoin and Stacks.',                                                                             '#E53935', 'system', datetime('now'), datetime('now'))`,
+export const MIGRATION_BEAT_RESTRUCTURE_SQL = `
+  -- ── Phase A: Upsert all 17 canonical beats ─────────────────────────────
+  -- Uses ON CONFLICT to enforce canonical name/description/color on re-run,
+  -- while preserving created_by/created_at from the original row.
+  INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
+    ('bitcoin-macro',   'Bitcoin Macro',   'Bitcoin price action, ETF flows, hashrate, mining economics, and macro events that move BTC markets.',                                                                                '#F7931A', 'system', datetime('now'), datetime('now')),
+    ('agent-economy',   'Agent Economy',   'Agent-to-agent commerce, x402 payment flows, service marketplaces, classified activity, and agent registration/reputation events.',                                                   '#FF8F00', 'system', datetime('now'), datetime('now')),
+    ('agent-trading',   'Agent Trading',   'Autonomous trading strategies, order execution by agents, on-chain position data, and agent-operated liquidity.',                                                                     '#00ACC1', 'system', datetime('now'), datetime('now')),
+    ('dao-watch',       'DAO Watch',       'DAO governance proposals, treasury movements, voting outcomes, and signer/council activity across Stacks DAOs.',                                                                      '#7C4DFF', 'system', datetime('now'), datetime('now')),
+    ('dev-tools',       'Dev Tools',       'Developer tooling, SDKs, MCP servers, APIs, relay infrastructure, protocol registries, contract deployments, and infrastructure releases that affect how agents and humans build on Bitcoin/Stacks.', '#546E7A', 'system', datetime('now'), datetime('now')),
+    ('world-intel',     'World Intel',     'Geopolitical events, regulatory developments, and macro signals from outside crypto that carry downstream impact on Bitcoin and agent networks.',                                      '#37474F', 'system', datetime('now'), datetime('now')),
+    ('ordinals',        'Ordinals',        'Inscription volumes, BRC-20 activity, ordinals marketplace metrics, and infrastructure supporting the Bitcoin inscription ecosystem.',                                                 '#FF5722', 'system', datetime('now'), datetime('now')),
+    ('bitcoin-culture', 'Bitcoin Culture', 'Bitcoin community events, ethos debates, notable personalities, memes with signal, and cultural moments that shape the Bitcoin narrative.',                                            '#E91E63', 'system', datetime('now'), datetime('now')),
+    ('bitcoin-yield',   'Bitcoin Yield',   'BTCFi yield opportunities, sBTC flows, Stacks DeFi protocol rates (Zest, ALEX, Bitflow), and native BTC yield strategies.',                                                          '#43A047', 'system', datetime('now'), datetime('now')),
+    ('deal-flow',       'Deal Flow',       'Fundraising rounds, acquisitions, grants, and investment activity in Bitcoin-adjacent companies and protocols.',                                                                       '#8E24AA', 'system', datetime('now'), datetime('now')),
+    ('aibtc-network',   'AIBTC Network',   'Stacks network health, sBTC peg operations, signer participation, contract deployments, and AIBTC ecosystem coordination.',                                                          '#1E88E5', 'system', datetime('now'), datetime('now')),
+    ('agent-skills',    'Agent Skills',    'New agent capabilities, skill releases, MCP integrations, and tool registrations that expand what agents can do. Capability milestones only.',                                         '#00897B', 'system', datetime('now'), datetime('now')),
+    ('runes',           'Runes',           'Runes protocol etching, minting, transfers, market activity, and infrastructure supporting the fungible token layer on Bitcoin.',                                                     '#E64A19', 'system', datetime('now'), datetime('now')),
+    ('agent-social',    'Agent Social',    'Agent and human social coordination — notable threads, community signals, X/Nostr activity, and network discourse worth tracking.',                                                   '#D81B60', 'system', datetime('now'), datetime('now')),
+    ('comics',          'Comics',          'Bitcoin and agent-economy narrative comics, serialized content, and visual storytelling from the network.',                                                                            '#FDD835', 'system', datetime('now'), datetime('now')),
+    ('art',             'Art',             'Original visual art, generative pieces, on-chain art inscriptions, and creative output from Bitcoin-native artists and agents.',                                                       '#AB47BC', 'system', datetime('now'), datetime('now')),
+    ('security',        'Security',        'Vulnerability disclosures, protocol exploits, wallet/key security events, contract audit findings, agent-targeted social engineering, and threat intelligence relevant to Bitcoin and Stacks.', '#E53935', 'system', datetime('now'), datetime('now'))
+  ON CONFLICT(slug) DO UPDATE SET
+    name        = excluded.name,
+    description = excluded.description,
+    color       = excluded.color,
+    updated_at  = datetime('now');
 
-  // ── Phase B: Remap signals.beat_slug ────────────────────────────────────
-  // Renames: old slug → new slug
-  "UPDATE signals SET beat_slug = 'bitcoin-macro' WHERE beat_slug = 'btc-macro'",
-  "UPDATE signals SET beat_slug = 'agent-economy' WHERE beat_slug = 'agent-commerce'",
-  "UPDATE signals SET beat_slug = 'aibtc-network' WHERE beat_slug = 'network-ops'",
-  // Merges: multiple old slugs → single new slug
-  "UPDATE signals SET beat_slug = 'ordinals' WHERE beat_slug IN ('ordinals-business', 'ordinals-culture')",
-  "UPDATE signals SET beat_slug = 'dev-tools' WHERE beat_slug = 'protocol-infra'",
-  // Retirements: remap to closest-fit new beats to preserve signal data
-  "UPDATE signals SET beat_slug = 'bitcoin-yield' WHERE beat_slug = 'defi-yields'",
-  "UPDATE signals SET beat_slug = 'bitcoin-macro' WHERE beat_slug = 'fee-weather'",
+  -- ── Phase B: Preserve correspondent claims from old beats ──────────────
+  -- Copy created_by/created_at from old slugs into new slugs so ownership
+  -- survives the rename. For merges, the first old slug's claim wins.
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'btc-macro'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'btc-macro')
+  WHERE slug = 'bitcoin-macro'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'btc-macro')
+    AND (SELECT created_by FROM beats WHERE slug = 'btc-macro') != 'system';
 
-  // ── Phase C: Delete old beats (all signals remapped above) ───────────────
-  "DELETE FROM beats WHERE slug IN ('btc-macro', 'agent-commerce', 'network-ops', 'ordinals-business', 'ordinals-culture', 'protocol-infra', 'defi-yields', 'fee-weather')",
-] as const;
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'agent-commerce'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'agent-commerce')
+  WHERE slug = 'agent-economy'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'agent-commerce')
+    AND (SELECT created_by FROM beats WHERE slug = 'agent-commerce') != 'system';
+
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'network-ops'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'network-ops')
+  WHERE slug = 'aibtc-network'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'network-ops')
+    AND (SELECT created_by FROM beats WHERE slug = 'network-ops') != 'system';
+
+  -- Merges: ordinals-business wins claim for ordinals (first claimant)
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'ordinals-business'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'ordinals-business')
+  WHERE slug = 'ordinals'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'ordinals-business')
+    AND (SELECT created_by FROM beats WHERE slug = 'ordinals-business') != 'system';
+
+  -- protocol-infra claim carries to dev-tools
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'protocol-infra'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'protocol-infra')
+  WHERE slug = 'dev-tools'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'protocol-infra')
+    AND (SELECT created_by FROM beats WHERE slug = 'protocol-infra') != 'system';
+
+  -- ── Phase C: Remap signals.beat_slug ───────────────────────────────────
+  -- Renames: old slug → new slug
+  UPDATE signals SET beat_slug = 'bitcoin-macro' WHERE beat_slug = 'btc-macro';
+  UPDATE signals SET beat_slug = 'agent-economy' WHERE beat_slug = 'agent-commerce';
+  UPDATE signals SET beat_slug = 'aibtc-network' WHERE beat_slug = 'network-ops';
+  -- Merges: multiple old slugs → single new slug
+  UPDATE signals SET beat_slug = 'ordinals' WHERE beat_slug IN ('ordinals-business', 'ordinals-culture');
+  UPDATE signals SET beat_slug = 'dev-tools' WHERE beat_slug = 'protocol-infra';
+  -- Retirements: remap to closest-fit new beats to preserve signal data
+  UPDATE signals SET beat_slug = 'bitcoin-yield' WHERE beat_slug = 'defi-yields';
+  UPDATE signals SET beat_slug = 'bitcoin-macro' WHERE beat_slug = 'fee-weather';
+
+  -- ── Phase D: Delete old beats (all signals remapped above) ─────────────
+  DELETE FROM beats WHERE slug IN ('btc-macro', 'agent-commerce', 'network-ops', 'ordinals-business', 'ordinals-culture', 'protocol-infra', 'defi-yields', 'fee-weather');
+`;

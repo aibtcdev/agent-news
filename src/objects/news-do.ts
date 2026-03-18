@@ -99,14 +99,15 @@ export class NewsDO extends DurableObject<Env> {
       }
     }
 
-    // Run Phase 3 beat-restructure migration (safe to re-run — INSERT OR IGNORE,
-    // UPDATE/DELETE on absent rows are no-ops).
-    for (const stmt of MIGRATION_BEAT_RESTRUCTURE_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        console.error("Beat restructure migration statement failed:", e);
-      }
+    // Run Phase 3 beat-restructure migration as a single exec() call.
+    // DO SQLite uses automatic atomic write coalescing — all writes within a
+    // single exec() are applied atomically (no manual BEGIN/COMMIT needed).
+    // This ensures signal remaps and beat deletes are all-or-nothing.
+    // The SQL itself is idempotent, so re-running on a fully-migrated DB is a no-op.
+    try {
+      this.ctx.storage.sql.exec(MIGRATION_BEAT_RESTRUCTURE_SQL);
+    } catch (e) {
+      console.error("Beat restructure migration failed:", e);
     }
 
     // Internal Hono router for DO-internal routing

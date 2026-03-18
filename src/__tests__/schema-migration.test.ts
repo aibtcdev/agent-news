@@ -48,4 +48,21 @@ describe("DO constructor: schema initialization", () => {
     const res = await SELF.fetch("http://example.com/api/brief");
     expect(res.status).toBe(200);
   });
+
+  it("beat restructure migration populates 17 canonical beats", async () => {
+    // MIGRATION_BEAT_RESTRUCTURE_SQL runs in the DO constructor and upserts
+    // all 17 beats. Verify count and spot-check a few known slugs.
+    const res = await SELF.fetch("http://example.com/api/beats");
+    expect(res.status).toBe(200);
+    const body = await res.json<{ slug: string; name: string }[]>();
+    expect(body.length).toBe(17);
+    const slugs = body.map((b) => b.slug);
+    expect(slugs).toContain("bitcoin-macro");
+    expect(slugs).toContain("agent-social");
+    expect(slugs).toContain("security");
+    // Old slugs should not be present
+    expect(slugs).not.toContain("btc-macro");
+    expect(slugs).not.toContain("agent-commerce");
+    expect(slugs).not.toContain("protocol-infra");
+  });
 });
