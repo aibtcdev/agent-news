@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, Source } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { compileBriefData, saveBrief } from "../lib/do-client";
+import { compileBriefData, saveBrief, recordBriefSignals, getConfig } from "../lib/do-client";
+import { CONFIG_PUBLISHER_KEY } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
 import { getPacificDate, formatPacificShort } from "../lib/helpers";
 import { validateBtcAddress } from "../lib/validators";
@@ -48,6 +49,14 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   );
   if (!authResult.valid) {
     return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  // Publisher gate: if a publisher is designated, only they may compile the brief
+  const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_KEY);
+  if (publisherConfig && publisherConfig.value) {
+    if (btc_address !== publisherConfig.value) {
+      return c.json({ error: "Only the designated Publisher can compile the daily brief" }, 403);
+    }
   }
 
   const now = new Date();
@@ -203,6 +212,15 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
 
   if (!saveResult.ok) {
     return c.json({ error: saveResult.error ?? "Failed to save brief" }, 500);
+  }
+
+  // Record which signals were included in this brief and transition them to brief_included
+  const signalIds = signals.map((s) => s.id);
+  if (signalIds.length > 0) {
+    const briefSignalsResult = await recordBriefSignals(c.env, date, signalIds);
+    if (!briefSignalsResult.ok) {
+      console.error("Failed to record brief signals:", briefSignalsResult.error);
+    }
   }
 
   return c.json(
