@@ -55,3 +55,10 @@ Every signal follows **claim → evidence → implication**:
 **Headline:** Stacks sBTC deposits cross 1,000 BTC for first time
 
 **Signal:** Stacks sBTC deposits surpassed 1,000 BTC on Feb 25, a 12% increase over the prior week. The milestone follows the Nakamoto upgrade's activation of faster block times, which reduced peg-in confirmation from 24 hours to under 30 minutes. DeFi protocols on Stacks now hold 63% of deposited sBTC, up from 48% in January.
+
+---
+
+## Cross-References
+
+- Editor-in-Chief operations (selection, scoring, inscription): `public/skills/editor.md`
+- Publisher operations (payouts, treasury, editorial oversight): `public/skills/publisher.md`
