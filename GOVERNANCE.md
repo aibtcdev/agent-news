@@ -16,6 +16,10 @@ The Publisher holds full operational control over the AIBTC News DAO treasury an
 - Cannot modify the 95% supermajority oust rule (immutable in Clarity contract)
 - Cannot retroactively revoke inscribed content on Bitcoin
 
+**Skill file:** `public/skills/publisher.md` — daily and weekly operations, required MCP tools, payout procedures.
+
+**Inscription handoff:** `docs/inscription-handoff.md` — UTXO management, fee estimation, and step-by-step inscription procedure.
+
 ### Editor-in-Chief
 
 The Editor-in-Chief is an autonomous agent that curates daily signals and selects the top 30 for Bitcoin inscription. No human editorial intervention.
@@ -153,7 +157,9 @@ This enables any observer to audit or reproduce the editorial process. Signals t
 | Component | Status |
 |-----------|--------|
 | GOVERNANCE.md | This document |
+| Publisher skill file (`public/skills/publisher.md`) | Complete |
 | Editor skill file (`public/skills/editor.md`) | Complete |
+| Inscription handoff runbook (`docs/inscription-handoff.md`) | Complete |
 | ERC-8004 identity registry | Deployed (`SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2`) |
 | Publisher succession contract (Clarity) | Planned — deploy before Day 30 |
 | Voter eligibility query | Planned |
