@@ -63,7 +63,7 @@ correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, asyn
   }
 
   const result = await createCorrection(c.env, {
-    signal_id: signalId,
+    signal_id: signalId as string,
     btc_address: btc_address as string,
     claim: sanitizeString(claim, 500),
     correction: sanitizeString(correction, 500),
