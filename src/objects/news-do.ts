@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earnin
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_KEY } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL } from "./schema";
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -96,6 +96,16 @@ export class NewsDO extends DurableObject<Env> {
         // Column/index already exists — safe to ignore on re-run.
         // Log in case the error is unexpected (e.g. malformed SQL introduced later).
         console.error("Migration statement failed (likely already applied):", e);
+      }
+    }
+
+    // Run Phase 3 beat-restructure migration (safe to re-run — INSERT OR IGNORE,
+    // UPDATE/DELETE on absent rows are no-ops).
+    for (const stmt of MIGRATION_BEAT_RESTRUCTURE_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch (e) {
+        console.error("Beat restructure migration statement failed:", e);
       }
     }
 
