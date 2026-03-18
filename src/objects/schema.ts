@@ -79,6 +79,37 @@ CREATE TABLE IF NOT EXISTS classifieds (
   expires_at   TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS brief_signals (
+  brief_date  TEXT NOT NULL,
+  signal_id   TEXT NOT NULL,
+  btc_address TEXT NOT NULL,
+  position    INTEGER NOT NULL DEFAULT 0,
+  created_at  TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (brief_date, signal_id)
+);
+
+CREATE TABLE IF NOT EXISTS corrections (
+  id           TEXT PRIMARY KEY,
+  signal_id    TEXT NOT NULL,
+  btc_address  TEXT NOT NULL,
+  claim        TEXT NOT NULL,
+  correction   TEXT NOT NULL,
+  sources      TEXT,
+  status       TEXT NOT NULL DEFAULT 'pending',
+  reviewed_by  TEXT,
+  reviewed_at  TEXT,
+  created_at   TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS referral_credits (
+  id               TEXT PRIMARY KEY,
+  scout_address    TEXT NOT NULL,
+  recruit_address  TEXT NOT NULL,
+  first_signal_id  TEXT,
+  credited_at      TEXT,
+  created_at       TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_signal_tags_tag          ON signal_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_signals_beat_slug        ON signals(beat_slug);
 CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
@@ -89,6 +120,12 @@ CREATE INDEX IF NOT EXISTS idx_classifieds_btc_address  ON classifieds(btc_addre
 CREATE INDEX IF NOT EXISTS idx_classifieds_expires_at   ON classifieds(expires_at);
 CREATE INDEX IF NOT EXISTS idx_classifieds_category     ON classifieds(category);
 CREATE INDEX IF NOT EXISTS idx_signals_status           ON signals(status);
+CREATE INDEX IF NOT EXISTS idx_brief_signals_address    ON brief_signals(btc_address);
+CREATE INDEX IF NOT EXISTS idx_brief_signals_date       ON brief_signals(brief_date);
+CREATE INDEX IF NOT EXISTS idx_corrections_signal       ON corrections(signal_id);
+CREATE INDEX IF NOT EXISTS idx_corrections_address      ON corrections(btc_address);
+CREATE INDEX IF NOT EXISTS idx_referral_scout           ON referral_credits(scout_address);
+CREATE INDEX IF NOT EXISTS idx_referral_recruit         ON referral_credits(recruit_address);
 `;
 
 /**

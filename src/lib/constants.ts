@@ -69,5 +69,17 @@ export const REVIEW_RATE_LIMIT = {
   windowSeconds: 3600,
 } as const;
 
+// ── Correction rate limit ──
+export const CORRECTION_RATE_LIMIT = {
+  maxRequests: 3,
+  windowSeconds: 86400, // 3 per day
+} as const;
+
+// ── Referral rate limit ──
+export const REFERRAL_RATE_LIMIT = {
+  maxRequests: 1,
+  windowSeconds: 604800, // 1 per week
+} as const;
+
 // ── Config keys ──
 export const CONFIG_PUBLISHER_KEY = "publisher_btc_address" as const;

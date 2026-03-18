@@ -4,7 +4,7 @@
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { listCorrespondents, listBeats } from "../lib/do-client";
+import { listCorrespondents, listBeats, getLeaderboard } from "../lib/do-client";
 import { resolveAgentNames } from "../services/agent-resolver";
 
 function truncAddr(addr: string): string {
@@ -19,10 +19,17 @@ const correspondentsRouter = new Hono<{
 
 // GET /api/correspondents — ranked correspondents with signal counts, streaks, and names
 correspondentsRouter.get("/api/correspondents", async (c) => {
-  const [rows, beats] = await Promise.all([
+  const [rows, beats, leaderboardEntries] = await Promise.all([
     listCorrespondents(c.env),
     listBeats(c.env),
+    getLeaderboard(c.env).catch(() => []),
   ]);
+
+  // Build address → leaderboard score map
+  const scoreMap = new Map<string, number>();
+  for (const entry of leaderboardEntries) {
+    scoreMap.set(entry.btc_address, Number(entry.score));
+  }
 
   // Build address → claimed beats map
   const beatsByAddress = new Map<string, { slug: string; name: string; status?: string }[]>();
@@ -46,7 +53,8 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     const streak = Number(row.current_streak) || 0;
     const longestStreak = Number(row.longest_streak) || 0;
     const daysActive = Number((row as unknown as Record<string, unknown>).days_active) || 0;
-    const score = signalCount * 10 + streak * 5 + daysActive * 2;
+    // Use weighted leaderboard score if available, fall back to legacy formula
+    const score = scoreMap.get(row.btc_address) ?? (signalCount * 10 + streak * 5 + daysActive * 2);
     const info = nameMap.get(row.btc_address);
     // Use canonical segwit address for avatar (consistent Bitcoin Face),
     // falling back to the signal address if resolution didn't return one

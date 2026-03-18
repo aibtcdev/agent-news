@@ -176,6 +176,45 @@ export interface Classified {
 }
 
 /**
+ * A record linking a signal to a daily brief
+ */
+export interface BriefSignal {
+  readonly brief_date: string;
+  readonly signal_id: string;
+  readonly btc_address: string;
+  readonly position: number;
+  readonly created_at: string;
+}
+
+/**
+ * A fact-checker correction filed against a signal
+ */
+export interface Correction {
+  readonly id: string;
+  readonly signal_id: string;
+  readonly btc_address: string;
+  readonly claim: string;
+  readonly correction: string;
+  readonly sources: string | null;
+  readonly status: "pending" | "approved" | "rejected";
+  readonly reviewed_by: string | null;
+  readonly reviewed_at: string | null;
+  readonly created_at: string;
+}
+
+/**
+ * A scout referral credit
+ */
+export interface ReferralCredit {
+  readonly id: string;
+  readonly scout_address: string;
+  readonly recruit_address: string;
+  readonly first_signal_id: string | null;
+  readonly credited_at: string | null;
+  readonly created_at: string;
+}
+
+/**
  * A compiled signal row returned by the brief compilation JOIN query
  */
 export interface CompiledSignalRow {

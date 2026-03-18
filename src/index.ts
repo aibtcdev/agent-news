@@ -20,6 +20,9 @@ import { manifestRouter } from "./routes/manifest";
 import { signalPageRouter } from "./routes/signal-page";
 import { configRouter } from "./routes/config";
 import { signalReviewRouter } from "./routes/signal-review";
+import { correctionsRouter } from "./routes/corrections";
+import { referralsRouter } from "./routes/referrals";
+import { leaderboardRouter } from "./routes/leaderboard";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -74,6 +77,15 @@ app.route("/", briefInscribeRouter);
 
 // Mount classifieds routes
 app.route("/", classifiedsRouter);
+
+// Mount corrections and referrals before generic signals
+app.route("/", correctionsRouter);
+
+// Mount referrals
+app.route("/", referralsRouter);
+
+// Mount leaderboard v2
+app.route("/", leaderboardRouter);
 
 // Mount read-only routes
 app.route("/", correspondentsRouter);

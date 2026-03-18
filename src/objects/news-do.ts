@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, CompiledBriefData, DOResult } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_KEY } from "../lib/constants";
@@ -1478,6 +1478,383 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
       return c.json({ ok: true, data: rows as unknown as Earning[] } satisfies DOResult<Earning[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Brief Signals — track which signals are included in each brief
+    // -------------------------------------------------------------------------
+
+    // POST /brief-signals — record signals included in a brief
+    this.router.post("/brief-signals", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>, 400);
+      }
+
+      const { brief_date, signal_ids } = body;
+      if (!brief_date || !Array.isArray(signal_ids) || signal_ids.length === 0) {
+        return c.json({ ok: false, error: "Missing required fields: brief_date, signal_ids (non-empty array)" } satisfies DOResult<unknown>, 400);
+      }
+
+      const now = new Date().toISOString();
+      const inserted: BriefSignal[] = [];
+
+      for (let i = 0; i < signal_ids.length; i++) {
+        const signalId = signal_ids[i] as string;
+        // Look up the signal's btc_address
+        const sigRows = this.ctx.storage.sql
+          .exec("SELECT btc_address FROM signals WHERE id = ?", signalId)
+          .toArray();
+        if (sigRows.length === 0) continue;
+
+        const btcAddress = (sigRows[0] as Record<string, unknown>).btc_address as string;
+
+        // Insert (idempotent — ON CONFLICT ignore)
+        this.ctx.storage.sql.exec(
+          `INSERT OR IGNORE INTO brief_signals (brief_date, signal_id, btc_address, position, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          brief_date as string,
+          signalId,
+          btcAddress,
+          i,
+          now
+        );
+
+        // Update signal status to brief_included
+        this.ctx.storage.sql.exec(
+          "UPDATE signals SET status = 'brief_included', updated_at = ? WHERE id = ?",
+          now,
+          signalId
+        );
+
+        inserted.push({
+          brief_date: brief_date as string,
+          signal_id: signalId,
+          btc_address: btcAddress,
+          position: i,
+          created_at: now,
+        });
+      }
+
+      return c.json({ ok: true, data: { brief_date, count: inserted.length, signals: inserted } } satisfies DOResult<unknown>, 201);
+    });
+
+    // GET /brief-signals/:date — list signals included in a brief
+    this.router.get("/brief-signals/:date", (c) => {
+      const date = c.req.param("date");
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT bs.*, s.headline, s.beat_slug
+           FROM brief_signals bs
+           JOIN signals s ON bs.signal_id = s.id
+           WHERE bs.brief_date = ?
+           ORDER BY bs.position`,
+          date
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // GET /brief-signals/counts — brief inclusion counts per address (30-day rolling)
+    this.router.get("/brief-signals/counts", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT btc_address, COUNT(*) as inclusion_count
+           FROM brief_signals
+           WHERE created_at > datetime('now', '-30 days')
+           GROUP BY btc_address
+           ORDER BY inclusion_count DESC`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Corrections — fact-checker corrections on signals
+    // -------------------------------------------------------------------------
+
+    // POST /corrections — file a correction
+    this.router.post("/corrections", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Correction>, 400);
+      }
+
+      const { signal_id, btc_address, claim, correction, sources } = body;
+      if (!signal_id || !btc_address || !claim || !correction) {
+        return c.json({
+          ok: false,
+          error: "Missing required fields: signal_id, btc_address, claim, correction",
+        } satisfies DOResult<Correction>, 400);
+      }
+
+      // Verify signal exists
+      const sigRows = this.ctx.storage.sql
+        .exec("SELECT id, status FROM signals WHERE id = ?", signal_id as string)
+        .toArray();
+      if (sigRows.length === 0) {
+        return c.json({ ok: false, error: `Signal "${signal_id}" not found` } satisfies DOResult<Correction>, 404);
+      }
+
+      // Can't correct your own signal
+      const sigAddr = this.ctx.storage.sql
+        .exec("SELECT btc_address FROM signals WHERE id = ?", signal_id as string)
+        .toArray();
+      if (sigAddr.length > 0 && (sigAddr[0] as Record<string, unknown>).btc_address === btc_address) {
+        return c.json({ ok: false, error: "Cannot file a correction on your own signal" } satisfies DOResult<Correction>, 400);
+      }
+
+      const id = generateId();
+      const now = new Date().toISOString();
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO corrections (id, signal_id, btc_address, claim, correction, sources, status, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
+        id,
+        signal_id as string,
+        btc_address as string,
+        sanitizeString(claim, 500),
+        sanitizeString(correction, 500),
+        sources ? sanitizeString(sources, 1000) : null,
+        now
+      );
+
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM corrections WHERE id = ?", id)
+        .toArray();
+
+      return c.json({ ok: true, data: rows[0] as unknown as Correction } satisfies DOResult<Correction>, 201);
+    });
+
+    // GET /corrections/signal/:signalId — list corrections for a signal
+    this.router.get("/corrections/signal/:signalId", (c) => {
+      const signalId = c.req.param("signalId");
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM corrections WHERE signal_id = ? ORDER BY created_at DESC", signalId)
+        .toArray();
+      return c.json({ ok: true, data: rows as unknown as Correction[] } satisfies DOResult<Correction[]>);
+    });
+
+    // PATCH /corrections/:id — Publisher reviews a correction
+    this.router.patch("/corrections/:id", async (c) => {
+      const id = c.req.param("id");
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Correction>, 400);
+      }
+
+      const { btc_address, status } = body;
+
+      // Verify publisher
+      const publisherRows = this.ctx.storage.sql
+        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_KEY)
+        .toArray();
+      if (publisherRows.length === 0) {
+        return c.json({ ok: false, error: "Publisher not yet designated" } satisfies DOResult<Correction>, 403);
+      }
+      if (btc_address !== (publisherRows[0] as { value: string }).value) {
+        return c.json({ ok: false, error: "Only the designated Publisher can review corrections" } satisfies DOResult<Correction>, 403);
+      }
+
+      if (!status || (status !== "approved" && status !== "rejected")) {
+        return c.json({ ok: false, error: "Status must be 'approved' or 'rejected'" } satisfies DOResult<Correction>, 400);
+      }
+
+      // Verify correction exists
+      const corrRows = this.ctx.storage.sql
+        .exec("SELECT * FROM corrections WHERE id = ?", id)
+        .toArray();
+      if (corrRows.length === 0) {
+        return c.json({ ok: false, error: `Correction "${id}" not found` } satisfies DOResult<Correction>, 404);
+      }
+
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        "UPDATE corrections SET status = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ?",
+        status as string,
+        btc_address as string,
+        now,
+        id
+      );
+
+      const updated = this.ctx.storage.sql
+        .exec("SELECT * FROM corrections WHERE id = ?", id)
+        .toArray();
+
+      return c.json({ ok: true, data: updated[0] as unknown as Correction } satisfies DOResult<Correction>);
+    });
+
+    // GET /corrections/counts — approved correction counts per address (30-day rolling)
+    this.router.get("/corrections/counts", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT btc_address, COUNT(*) as correction_count
+           FROM corrections
+           WHERE status = 'approved' AND created_at > datetime('now', '-30 days')
+           GROUP BY btc_address
+           ORDER BY correction_count DESC`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Referral Credits — scout referral tracking
+    // -------------------------------------------------------------------------
+
+    // POST /referrals — register a referral
+    this.router.post("/referrals", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<ReferralCredit>, 400);
+      }
+
+      const { scout_address, recruit_address } = body;
+      if (!scout_address || !recruit_address) {
+        return c.json({
+          ok: false,
+          error: "Missing required fields: scout_address, recruit_address",
+        } satisfies DOResult<ReferralCredit>, 400);
+      }
+
+      if (scout_address === recruit_address) {
+        return c.json({ ok: false, error: "Cannot refer yourself" } satisfies DOResult<ReferralCredit>, 400);
+      }
+
+      // Check for duplicate referral
+      const existing = this.ctx.storage.sql
+        .exec(
+          "SELECT id FROM referral_credits WHERE scout_address = ? AND recruit_address = ?",
+          scout_address as string,
+          recruit_address as string
+        )
+        .toArray();
+      if (existing.length > 0) {
+        return c.json({ ok: false, error: "Referral already registered" } satisfies DOResult<ReferralCredit>, 409);
+      }
+
+      const id = generateId();
+      const now = new Date().toISOString();
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO referral_credits (id, scout_address, recruit_address, created_at)
+         VALUES (?, ?, ?, ?)`,
+        id,
+        scout_address as string,
+        recruit_address as string,
+        now
+      );
+
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM referral_credits WHERE id = ?", id)
+        .toArray();
+
+      return c.json({ ok: true, data: rows[0] as unknown as ReferralCredit } satisfies DOResult<ReferralCredit>, 201);
+    });
+
+    // POST /referrals/credit — credit a referral when recruit files first signal
+    this.router.post("/referrals/credit", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>, 400);
+      }
+
+      const { recruit_address, signal_id } = body;
+      if (!recruit_address || !signal_id) {
+        return c.json({ ok: false, error: "Missing required fields: recruit_address, signal_id" } satisfies DOResult<unknown>, 400);
+      }
+
+      // Find uncredited referral for this recruit
+      const refRows = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM referral_credits WHERE recruit_address = ? AND credited_at IS NULL",
+          recruit_address as string
+        )
+        .toArray();
+      if (refRows.length === 0) {
+        return c.json({ ok: true, data: { credited: false, reason: "No pending referral for this address" } } satisfies DOResult<unknown>);
+      }
+
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        "UPDATE referral_credits SET credited_at = ?, first_signal_id = ? WHERE recruit_address = ? AND credited_at IS NULL",
+        now,
+        signal_id as string,
+        recruit_address as string
+      );
+
+      return c.json({ ok: true, data: { credited: true, recruit_address, signal_id } } satisfies DOResult<unknown>);
+    });
+
+    // GET /referrals/counts — referral credit counts per scout (30-day rolling)
+    this.router.get("/referrals/counts", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT scout_address, COUNT(*) as referral_count
+           FROM referral_credits
+           WHERE credited_at IS NOT NULL AND credited_at > datetime('now', '-30 days')
+           GROUP BY scout_address
+           ORDER BY referral_count DESC`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Leaderboard v2 — weighted scoring with 30-day rolling window
+    // -------------------------------------------------------------------------
+
+    // GET /leaderboard — weighted scores across all roles
+    this.router.get("/leaderboard", (c) => {
+      // Single query joining all scoring sources with 30-day rolling windows
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT
+             a.btc_address,
+             COALESCE(bi.inclusion_count, 0) as brief_inclusions_30d,
+             COALESCE(sc.signal_count, 0) as signal_count_30d,
+             COALESCE(st.current_streak, 0) as current_streak,
+             COALESCE(da.days_active, 0) as days_active_30d,
+             COALESCE(cr.correction_count, 0) as approved_corrections_30d,
+             COALESCE(rf.referral_count, 0) as referral_credits_30d,
+             (COALESCE(bi.inclusion_count, 0) * 20
+              + COALESCE(sc.signal_count, 0) * 5
+              + COALESCE(st.current_streak, 0) * 5
+              + COALESCE(da.days_active, 0) * 2
+              + COALESCE(cr.correction_count, 0) * 15
+              + COALESCE(rf.referral_count, 0) * 25) as score
+           FROM (SELECT DISTINCT btc_address FROM signals WHERE correction_of IS NULL) a
+           LEFT JOIN (
+             SELECT btc_address, COUNT(*) as inclusion_count
+             FROM brief_signals WHERE created_at > datetime('now', '-30 days')
+             GROUP BY btc_address
+           ) bi ON a.btc_address = bi.btc_address
+           LEFT JOIN (
+             SELECT btc_address, COUNT(*) as signal_count
+             FROM signals WHERE correction_of IS NULL AND created_at > datetime('now', '-30 days')
+             GROUP BY btc_address
+           ) sc ON a.btc_address = sc.btc_address
+           LEFT JOIN streaks st ON a.btc_address = st.btc_address
+           LEFT JOIN (
+             SELECT btc_address, COUNT(DISTINCT date(created_at)) as days_active
+             FROM signals WHERE correction_of IS NULL AND created_at > datetime('now', '-30 days')
+             GROUP BY btc_address
+           ) da ON a.btc_address = da.btc_address
+           LEFT JOIN (
+             SELECT btc_address, COUNT(*) as correction_count
+             FROM corrections WHERE status = 'approved' AND created_at > datetime('now', '-30 days')
+             GROUP BY btc_address
+           ) cr ON a.btc_address = cr.btc_address
+           LEFT JOIN (
+             SELECT scout_address as btc_address, COUNT(*) as referral_count
+             FROM referral_credits WHERE credited_at IS NOT NULL AND credited_at > datetime('now', '-30 days')
+             GROUP BY scout_address
+           ) rf ON a.btc_address = rf.btc_address
+           ORDER BY score DESC
+           LIMIT 200`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
     });
 
     this.router.all("*", (c) => {

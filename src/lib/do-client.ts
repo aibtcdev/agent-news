@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, CompiledBriefData, DOResult } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult } from "./types";
 
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
@@ -480,5 +480,130 @@ export async function reviewSignal(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Brief Signals (inclusion tracking)
+// ---------------------------------------------------------------------------
+
+export async function recordBriefSignals(
+  env: Env,
+  briefDate: string,
+  signalIds: string[]
+): Promise<DOResult<{ brief_date: string; count: number; signals: BriefSignal[] }>> {
+  const stub = getStub(env);
+  return doFetch(stub, "/brief-signals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ brief_date: briefDate, signal_ids: signalIds }),
+  });
+}
+
+export async function getBriefSignals(env: Env, date: string): Promise<unknown[]> {
+  const stub = getStub(env);
+  const result = await doFetch<unknown[]>(stub, `/brief-signals/${encodeURIComponent(date)}`);
+  if (!result.ok) throw new Error(result.error ?? "Failed to get brief signals");
+  return result.data ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Corrections (fact-checker)
+// ---------------------------------------------------------------------------
+
+export interface CreateCorrectionInput {
+  signal_id: string;
+  btc_address: string;
+  claim: string;
+  correction: string;
+  sources?: string | null;
+}
+
+export async function createCorrection(
+  env: Env,
+  input: CreateCorrectionInput
+): Promise<DOResult<Correction>> {
+  const stub = getStub(env);
+  return doFetch<Correction>(stub, "/corrections", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listCorrections(env: Env, signalId: string): Promise<Correction[]> {
+  const stub = getStub(env);
+  const result = await doFetch<Correction[]>(stub, `/corrections/signal/${encodeURIComponent(signalId)}`);
+  if (!result.ok) throw new Error(result.error ?? "Failed to list corrections");
+  return result.data ?? [];
+}
+
+export interface ReviewCorrectionInput {
+  btc_address: string;
+  status: "approved" | "rejected";
+}
+
+export async function reviewCorrection(
+  env: Env,
+  correctionId: string,
+  input: ReviewCorrectionInput
+): Promise<DOResult<Correction>> {
+  const stub = getStub(env);
+  return doFetch<Correction>(stub, `/corrections/${encodeURIComponent(correctionId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Referral Credits (scout)
+// ---------------------------------------------------------------------------
+
+export async function registerReferral(
+  env: Env,
+  scoutAddress: string,
+  recruitAddress: string
+): Promise<DOResult<ReferralCredit>> {
+  const stub = getStub(env);
+  return doFetch<ReferralCredit>(stub, "/referrals", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ scout_address: scoutAddress, recruit_address: recruitAddress }),
+  });
+}
+
+export async function creditReferral(
+  env: Env,
+  recruitAddress: string,
+  signalId: string
+): Promise<DOResult<{ credited: boolean; recruit_address?: string; signal_id?: string }>> {
+  const stub = getStub(env);
+  return doFetch(stub, "/referrals/credit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recruit_address: recruitAddress, signal_id: signalId }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Leaderboard v2 (weighted scoring)
+// ---------------------------------------------------------------------------
+
+export interface LeaderboardEntry {
+  btc_address: string;
+  brief_inclusions_30d: number;
+  signal_count_30d: number;
+  current_streak: number;
+  days_active_30d: number;
+  approved_corrections_30d: number;
+  referral_credits_30d: number;
+  score: number;
+}
+
+export async function getLeaderboard(env: Env): Promise<LeaderboardEntry[]> {
+  const stub = getStub(env);
+  const result = await doFetch<LeaderboardEntry[]>(stub, "/leaderboard");
+  if (!result.ok) throw new Error(result.error ?? "Failed to get leaderboard");
+  return result.data ?? [];
 }
 
