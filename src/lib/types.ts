@@ -91,6 +91,8 @@ export interface Source {
   title: string;
 }
 
+import { SIGNAL_STATUSES } from "./constants";
+
 /**
  * Valid signal statuses for the editorial pipeline.
  * Derived from SIGNAL_STATUSES constant — single source of truth, can't drift.

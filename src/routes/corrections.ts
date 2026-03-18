@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { createCorrection, listCorrections, reviewCorrection } from "../lib/do-client";
-import { validateBtcAddress, sanitizeString } from "../lib/validators";
+import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 import { CORRECTION_RATE_LIMIT } from "../lib/constants";
 
@@ -62,12 +62,13 @@ correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, asyn
     return c.json({ error: authResult.error, code: authResult.code }, 401);
   }
 
+  // Sanitization is handled in the DO layer (authoritative boundary)
   const result = await createCorrection(c.env, {
     signal_id: signalId as string,
     btc_address: btc_address as string,
-    claim: sanitizeString(claim, 500),
-    correction: sanitizeString(correction, 500),
-    sources: sources ? sanitizeString(sources, 1000) : null,
+    claim: claim as string,
+    correction: correction as string,
+    sources: sources ? String(sources) : null,
   });
 
   if (!result.ok) {

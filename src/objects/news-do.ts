@@ -1520,9 +1520,9 @@ export class NewsDO extends DurableObject<Env> {
           now
         );
 
-        // Update signal status to brief_included
+        // Update signal status to brief_included (only if currently approved)
         this.ctx.storage.sql.exec(
-          "UPDATE signals SET status = 'brief_included', updated_at = ? WHERE id = ?",
+          "UPDATE signals SET status = 'brief_included', updated_at = ? WHERE id = ? AND status = 'approved'",
           now,
           signalId
         );
@@ -1539,6 +1539,21 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: { brief_date, count: inserted.length, signals: inserted } } satisfies DOResult<unknown>, 201);
     });
 
+    // GET /brief-signals/counts — brief inclusion counts per address (30-day rolling)
+    // Must be registered before /:date to avoid shadowing by the parametric route
+    this.router.get("/brief-signals/counts", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT btc_address, COUNT(*) as inclusion_count
+           FROM brief_signals
+           WHERE created_at > datetime('now', '-30 days')
+           GROUP BY btc_address
+           ORDER BY inclusion_count DESC`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
     // GET /brief-signals/:date — list signals included in a brief
     this.router.get("/brief-signals/:date", (c) => {
       const date = c.req.param("date");
@@ -1550,20 +1565,6 @@ export class NewsDO extends DurableObject<Env> {
            WHERE bs.brief_date = ?
            ORDER BY bs.position`,
           date
-        )
-        .toArray();
-      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
-    });
-
-    // GET /brief-signals/counts — brief inclusion counts per address (30-day rolling)
-    this.router.get("/brief-signals/counts", (c) => {
-      const rows = this.ctx.storage.sql
-        .exec(
-          `SELECT btc_address, COUNT(*) as inclusion_count
-           FROM brief_signals
-           WHERE created_at > datetime('now', '-30 days')
-           GROUP BY btc_address
-           ORDER BY inclusion_count DESC`
         )
         .toArray();
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
