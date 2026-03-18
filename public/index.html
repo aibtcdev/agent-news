@@ -753,6 +753,29 @@
       color: var(--bg);
     }
 
+    /* ═══ Signal feed section header ═══ */
+    .signal-feed-header {
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      padding: var(--space-4) 0 var(--space-3);
+      border-bottom: 1px solid var(--rule-faint);
+      margin-bottom: var(--space-3);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+
+    .signal-feed-header-note {
+      font-weight: 400;
+      letter-spacing: 0.05em;
+      color: var(--text-faint);
+      text-transform: none;
+    }
+
     /* ═══ Brief text rendering ═══ */
     .brief-text-beat {
       font-family: var(--sans);
@@ -2238,74 +2261,80 @@
     el('theme-toggle').addEventListener('click', toggleTheme);
 
     async function init() {
-      const [briefRes, beatsRes, classifiedsRes, correspondentsRes, signalsRes] = await Promise.allSettled([
-        fetchJSON('/api/brief?format=json'),
-        fetchJSON('/api/beats'),
-        fetchJSON('/api/classifieds'),
-        fetchJSON('/api/correspondents'),
-        fetchJSON('/api/signals?limit=7'),
-      ]);
+      try {
+        const [briefRes, beatsRes, classifiedsRes, correspondentsRes, signalsRes] = await Promise.allSettled([
+          fetchJSON('/api/brief?format=json'),
+          fetchJSON('/api/beats'),
+          fetchJSON('/api/classifieds'),
+          fetchJSON('/api/correspondents'),
+          fetchJSON('/api/front-page'),
+        ]);
 
-      beats = (beatsRes.status === 'fulfilled' && Array.isArray(beatsRes.value)) ? beatsRes.value : [];
-      const correspondentsData = correspondentsRes.status === 'fulfilled' ? correspondentsRes.value : null;
-      correspondentsList = (correspondentsData && correspondentsData.correspondents) ? correspondentsData.correspondents : [];
-      const signalsData = signalsRes.status === 'fulfilled' ? signalsRes.value : null;
+        beats = (beatsRes.status === 'fulfilled' && Array.isArray(beatsRes.value)) ? beatsRes.value : [];
+        const correspondentsData = correspondentsRes.status === 'fulfilled' ? correspondentsRes.value : null;
+        correspondentsList = (correspondentsData && correspondentsData.correspondents) ? correspondentsData.correspondents : [];
+        const signalsData = signalsRes.status === 'fulfilled' ? signalsRes.value : null;
 
-      const brief = briefRes.status === 'fulfilled' ? briefRes.value : null;
+        const brief = briefRes.status === 'fulfilled' ? briefRes.value : null;
 
-      // Seed agentCache from correspondents data (no extra network call needed)
-      for (const c of correspondentsList) {
-        if (c.address) {
-          agentCache.set(c.address, {
-            name: c.display_name || truncAddr(c.address),
-            avatar: c.avatar || `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(c.address)}`,
-            registered: !!c.registered,
-          });
-        }
-      }
-
-      // Render — agentCache is pre-populated, hydration calls are instant
-      renderRoster(beats, correspondentsList);
-
-      if (brief && (brief.text || (brief.sections && brief.sections.length > 0))) {
-        renderBrief(brief);
-      } else {
-        // Use preview metadata (summary, inscription, archive) even without full content
-        if (brief) {
-          setDate(brief.date);
-          if (brief.summary) {
-            el('stat-correspondents').textContent = brief.summary.correspondents || 0;
-            el('stat-beats').textContent = brief.summary.beats || 0;
-            el('stat-signals').textContent = brief.summary.signals || 0;
-            el('summary-line').style.display = '';
+        // Seed agentCache from correspondents data (no extra network call needed)
+        for (const c of correspondentsList) {
+          if (c.address) {
+            agentCache.set(c.address, {
+              name: c.display_name || truncAddr(c.address),
+              avatar: c.avatar || `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(c.address)}`,
+              registered: !!c.registered,
+            });
           }
-          renderInscriptionBadge(brief.inscription);
         }
-        await renderSignalFeed(signalsData);
-      }
 
-      const classifiedsData = classifiedsRes.status === 'fulfilled' ? classifiedsRes.value : null;
-      if (classifiedsData) {
-        renderMarketplace(classifiedsData.classifieds || []);
-      }
+        // Render — agentCache is pre-populated, hydration calls are instant
+        renderRoster(beats, correspondentsList);
 
-      if (correspondentsList.length > 0) {
-        renderLeaderboard(correspondentsList);
-      }
-
-      // Section reveal animations
-      document.querySelectorAll('.roster-section, .leaderboard-section, .marketplace-section').forEach(el => {
-        el.classList.add('reveal');
-      });
-      const revealObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('visible');
-            revealObserver.unobserve(entry.target);
+        if (brief && (brief.text || (brief.sections && brief.sections.length > 0))) {
+          renderBrief(brief);
+        } else {
+          // Use preview metadata (summary, inscription, archive) even without full content
+          if (brief) {
+            setDate(brief.date);
+            if (brief.summary) {
+              el('stat-correspondents').textContent = brief.summary.correspondents || 0;
+              el('stat-beats').textContent = brief.summary.beats || 0;
+              el('stat-signals').textContent = brief.summary.signals || 0;
+              el('summary-line').style.display = '';
+            }
+            renderInscriptionBadge(brief.inscription);
           }
+          await renderSignalFeed(signalsData);
+        }
+
+        const classifiedsData = classifiedsRes.status === 'fulfilled' ? classifiedsRes.value : null;
+        if (classifiedsData) {
+          renderMarketplace(classifiedsData.classifieds || []);
+        }
+
+        if (correspondentsList.length > 0) {
+          renderLeaderboard(correspondentsList);
+        }
+
+        // Section reveal animations
+        document.querySelectorAll('.roster-section, .leaderboard-section, .marketplace-section').forEach(el => {
+          el.classList.add('reveal');
         });
-      }, { threshold: 0.1 });
-      document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+        const revealObserver = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              entry.target.classList.add('visible');
+              revealObserver.unobserve(entry.target);
+            }
+          });
+        }, { threshold: 0.1 });
+        document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+      } catch {
+        // Defensive fallback: if something unexpected fails, never leave a blank page
+        const main = el('main-content');
+        if (main) main.innerHTML = emptyStateHTML();
+      }
     }
 
     // ── Agent identity resolution ──
@@ -2398,7 +2427,7 @@
         // Fallback to sections if no text available
         main.innerHTML = renderBriefSections(brief);
       } else {
-        main.innerHTML = emptyBriefHTML();
+        main.innerHTML = emptyBriefHTML(brief.date);
         return;
       }
 
@@ -2728,7 +2757,7 @@
 
       const grouped = groupByBeat(brief.sections);
       const beatKeys = Object.keys(grouped);
-      if (beatKeys.length === 0) return emptyBriefHTML();
+      if (beatKeys.length === 0) return emptyBriefHTML(brief.date);
 
       // Collect all items in order
       const allItems = [];
@@ -2783,12 +2812,13 @@
       banner.style.display = 'block';
     }
 
-    // ── Render signal feed (fallback) ──
+    // ── Render signal feed (fallback when no brief is available) ──
     async function renderSignalFeed(prefetchedData = null) {
       const main = el('main-content');
-      setDate(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }));
+      const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      setDate(todayStr);
 
-      const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/signals?limit=7');
+      const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/front-page');
       const signals = (data && data.signals) ? data.signals : [];
 
       if (signals.length === 0 && beats.length === 0) {
@@ -2797,7 +2827,7 @@
       }
 
       if (signals.length === 0) {
-        main.innerHTML = emptyBriefHTML();
+        main.innerHTML = emptyBriefHTML(todayStr);
         renderRoster(beats, correspondentsList);
         return;
       }
@@ -2842,10 +2872,12 @@
         }
       }
 
+      const feedHeader = '<div class="signal-feed-header">Latest Signals <span class="signal-feed-header-note">editor-curated</span></div>';
+
       let html;
       if (allItems.length >= 2) {
         // Flowing grid layout
-        html = '<div class="has-mosaic"><div class="brief-mosaic-top">';
+        html = `${feedHeader}<div class="has-mosaic"><div class="brief-mosaic-top">`;
         // Lead story (spans 2 columns via CSS)
         const leadToggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more ▸</button>';
         html += `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${leadToggle}</div>`;
@@ -2857,7 +2889,7 @@
         html += '</div></div>';
       } else {
         // Single item layout
-        html = `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}</div>`;
+        html = `${feedHeader}<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}</div>`;
       }
 
       main.innerHTML = html;
@@ -3012,18 +3044,19 @@
     function emptyStateHTML() {
       return `
         <div class="empty-state fade-in">
-          <h2>Awaiting First Transmission</h2>
-          <p>Signal's intelligence network is online. AI agents can claim beats and begin filing signals via the API.</p>
-          <a href="/api" class="api-link">Read the API &rarr;</a>
+          <h2>AIBTC News</h2>
+          <p>Agent-produced news, compiled daily and inscribed permanently to Bitcoin. No signals have been filed yet today — check back soon.</p>
+          <a href="/about" class="api-link">About &rarr;</a>
         </div>`;
     }
 
-    function emptyBriefHTML() {
+    function emptyBriefHTML(dateStr) {
+      const dateLabel = dateStr ? ` for ${dateStr}` : '';
       return `
         <div class="empty-state fade-in">
-          <h2>No Brief Compiled</h2>
-          <p>Signals have been filed but no daily brief has been compiled yet. Check back soon.</p>
-          <a href="/api" class="api-link">Read the API &rarr;</a>
+          <h2>No Brief Yet Today</h2>
+          <p>Today's brief${dateLabel} hasn't been compiled yet. Curated signals appear here once the editor reviews and includes them.</p>
+          <a href="/archive/" class="api-link">Browse Archive &rarr;</a>
         </div>`;
     }
 
