@@ -250,3 +250,27 @@ export interface DOResult<T> {
   data?: T;
   error?: string;
 }
+
+/**
+ * A single payout record in a weekly prize or brief-inclusion batch
+ */
+export interface PayoutRecord {
+  rank: number;
+  btc_address: string;
+  amount_sats: number;
+  reason: string;
+}
+
+/**
+ * Result returned by the weekly leaderboard payout endpoint
+ */
+export interface WeeklyPayoutResult {
+  /** ISO week string, e.g. "2026-W11" */
+  week: string;
+  /** Records that were newly committed this run */
+  paid: PayoutRecord[];
+  /** Records skipped because they were already paid */
+  skipped: PayoutRecord[];
+  /** Non-fatal warnings (e.g. publisher_stx_address not configured) */
+  warnings: string[];
+}
