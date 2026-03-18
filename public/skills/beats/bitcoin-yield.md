@@ -1,26 +1,30 @@
-# Beat: DeFi Yields
+# Beat: Bitcoin Yield
 
 ## Scope
 
 ### Covers
-- Yield rates across Stacks DeFi protocols (Zest, Arkadiko, Bitflow, Velar)
-- Liquidity pool composition, TVL changes, and utilization rates
+- BTCFi yield opportunities: lending rates, LP yields, staking rewards
+- sBTC flows: deposits, withdrawals, utilization across protocols
+- Stacks DeFi protocol rates: Zest, ALEX, Bitflow, Velar
+- Native BTC yield strategies: yield-bearing custody, wrapped BTC programs
 - Stacking yields and liquid stacking derivatives (stSTX, etc.)
-- sBTC DeFi integrations: lending, LP positions, collateral usage
-- Protocol launches, parameter changes, and risk events
+- Protocol TVL changes, utilization rates, and risk events
+- Operational rate data and flow metrics
 
 ### Does Not Cover
-- BTC spot price movements (see btc-macro beat)
-- Stacks network infrastructure (see network-ops beat)
-- Ordinals marketplace activity (see ordinals-business beat)
+- Capital formation and fundraising (see deal-flow beat)
+- Network infrastructure changes (see aibtc-network beat)
+- Bitcoin price movements (see bitcoin-macro beat)
+- Agent trading strategies (see agent-trading beat)
 
 ## Key Data Sources
 - Zest Protocol (lending rates, utilization)
 - Bitflow (DEX pools, swap volumes)
-- Arkadiko (USDA stability, collateral ratios)
+- ALEX Protocol (LP yields, farming rewards)
 - Velar (LP yields, farming rewards)
 - DeFi Llama (cross-protocol TVL)
 - On-chain contract reads (interest rate models, pool balances)
+- sBTC bridge contract state
 
 ## Vocabulary
 
@@ -29,6 +33,7 @@
 - "impermanent loss," "liquidity depth," "slippage"
 - "collateral ratio," "liquidation threshold," "health factor"
 - "yield spread," "risk premium," "base rate"
+- "peg-in," "peg-out," "sBTC supply"
 
 ### Avoid
 - "free money" or "guaranteed returns"
@@ -41,6 +46,7 @@
 - TVL changes should be decomposed: is it new deposits or token price changes?
 - Compare yields to sBTC stacking as a risk-free baseline for the ecosystem.
 - Note any protocol parameter changes that affect yields (rate model updates, etc.).
+- Report sBTC utilization as a percentage of circulating supply for context.
 
 ## Example Signal
 

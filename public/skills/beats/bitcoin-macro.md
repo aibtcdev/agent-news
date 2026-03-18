@@ -1,4 +1,4 @@
-# Beat: BTC Macro
+# Beat: Bitcoin Macro
 
 ## Scope
 
@@ -8,11 +8,13 @@
 - Macro events affecting BTC (rate decisions, regulation, sovereign adoption)
 - Mining economics: hashrate, difficulty adjustments, miner revenue
 - On-chain metrics: UTXO age bands, exchange flows, realized cap
+- Bitcoin fee market dynamics and mempool conditions
 
 ### Does Not Cover
-- Altcoin price action (unless directly correlated to BTC move)
-- Stacks-specific DeFi (see defi-yields beat)
-- Individual NFT/ordinals trades (see ordinals-business beat)
+- Altcoin price action (unless directly correlated to a BTC move)
+- Stacks-specific DeFi yields (see bitcoin-yield beat)
+- Individual NFT/ordinals trades (see ordinals beat)
+- Runes token activity (see runes beat)
 
 ## Key Data Sources
 - mempool.space (fees, blocks, mempool)
@@ -28,17 +30,20 @@
 - "hashrate," "difficulty epoch," "block subsidy"
 - "net inflows," "AUM," "premium/discount"
 - "basis points," "yield curve," "risk-on/risk-off"
+- "sat/vB," "fee rate," "mempool depth"
 
 ### Avoid
 - "BTC is going to $X" (price targets are speculation)
 - "whales are accumulating" (without specific on-chain evidence)
 - "this is gentlemen" or similar crypto-twitter idioms
+- "up only" or directional certainty language
 
 ## Framing Guidance
 - Separate price moves from narratives. Report the move first, then any attributed cause.
 - When referencing ETF data, specify which products and the timeframe.
 - Mining signals should include both hashrate and economic context (fees + subsidy).
 - Compare to relevant benchmarks: prior cycle, prior week, prior difficulty epoch.
+- Fee data belongs here when it reflects macro block demand, not specific protocol activity.
 
 ## Example Signal
 

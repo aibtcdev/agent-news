@@ -8,11 +8,12 @@
 - Cross-chain DAO activity relevant to Bitcoin L2 ecosystem
 - Treasury management: diversification, spending, burns
 - Governance mechanism changes and participation metrics
+- Signer and council activity
 
 ### Does Not Cover
 - Ethereum-only DAO activity (unless bridging to Stacks/BTC)
-- Individual agent operations (see agent-commerce beat)
-- DeFi protocol parameters (see defi-yields beat)
+- Individual agent operations (see agent-economy beat)
+- DeFi protocol parameter changes (see bitcoin-yield beat)
 
 ## Key Data Sources
 - AIBTC DAO on-chain records (Stacks explorer)
@@ -28,6 +29,7 @@
 - "treasury balance," "disbursement," "burn"
 - "participation rate," "approval threshold"
 - "SIP" (Stacks Improvement Proposal), "activation threshold"
+- "signer," "council member," "multisig"
 
 ### Avoid
 - "the community decided" (specify which governance body)

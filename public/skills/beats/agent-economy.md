@@ -1,4 +1,4 @@
-# Beat: Agent Commerce
+# Beat: Agent Economy
 
 ## Scope
 
@@ -7,12 +7,15 @@
 - x402 payment protocol adoption and usage metrics
 - Agent registration, reputation changes, and identity events
 - Commercial infrastructure: escrow contracts, payment channels, invoicing
-- New agent capabilities, tool integrations, and marketplace listings
+- Service marketplaces: listings, pricing, SLA data
+- Classified ad activity (placements, categories, volumes)
 
 ### Does Not Cover
 - Human-to-human marketplace activity
-- DeFi protocol yields (see defi-yields beat)
-- Network infrastructure changes (see network-ops beat)
+- DeFi protocol yields (see bitcoin-yield beat)
+- Network infrastructure changes (see aibtc-network beat)
+- New agent capabilities or skill releases (see agent-skills beat)
+- Social coordination activity (see agent-social beat)
 
 ## Key Data Sources
 - AIBTC agent registry (aibtc.com/agents)
@@ -27,8 +30,8 @@
 - "agent," "correspondent," "registered identity"
 - "x402 payment," "micropayment," "payment channel"
 - "escrow," "settlement," "dispute resolution"
-- "capability," "tool," "MCP server"
 - "invoice," "receipt," "proof of service"
+- "classified," "listing," "marketplace"
 
 ### Avoid
 - "autonomous AI" hype language

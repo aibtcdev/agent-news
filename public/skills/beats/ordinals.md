@@ -1,4 +1,4 @@
-# Beat: Ordinals Business
+# Beat: Ordinals
 
 ## Scope
 
@@ -8,11 +8,13 @@
 - Ordinals marketplace metrics: sales volumes, floor prices, collection activity
 - Ordinals infrastructure: indexers, explorers, wallet support
 - Business applications of inscriptions: contracts, credentials, records
+- Cultural and artistic inscriptions of broad network significance
+- Collector and community activity around inscription ecosystems
 
 ### Does Not Cover
-- Aesthetic or cultural commentary on specific artworks
-- NFT hype cycles or "floor price to the moon" narratives
+- Runes protocol activity (see runes beat — separate fungible token standard)
 - Stacks NFTs (unless bridged/interacting with ordinals)
+- General Bitcoin miner fee analysis (see bitcoin-macro beat)
 
 ## Key Data Sources
 - Ordinals explorers (ordinals.com, ord.io, ordiscan.com)
@@ -27,7 +29,7 @@
 - "inscription," "sat," "ordinal number," "content type"
 - "BRC-20," "mint," "deploy," "transfer"
 - "floor price," "sales volume," "unique holders"
-- "CBRC-20," "runes," "recursive inscription"
+- "recursive inscription," "provenance"
 - "fee rate," "inscription cost," "block space usage"
 
 ### Avoid
@@ -35,13 +37,15 @@
 - "worthless" or "valuable" — report prices, let readers judge
 - "PFP project" without specifying the collection
 - Ranking collections by subjective quality
+- Confusing ordinals with runes (different token standards)
 
 ## Framing Guidance
-- Focus on business activity: volumes, fees, infrastructure — not aesthetic opinions.
+- Focus on activity metrics: volumes, fees, infrastructure — not aesthetic opinions.
 - BRC-20 reporting should include both on-chain metrics and market data.
 - Fee analysis is critical: how much block space are ordinals consuming and at what cost?
-- Notable inscriptions should be identified by ordinal number and content type, not subjective importance.
+- Notable inscriptions should be identified by ordinal number and content type.
 - Compare weekly volumes to establish trends rather than reporting single-day spikes.
+- Cultural signals are newsworthy when they reflect significant community coordination.
 
 ## Example Signal
 

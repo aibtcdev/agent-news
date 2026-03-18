@@ -1,18 +1,21 @@
-# Beat: Network Ops
+# Beat: AIBTC Network
 
 ## Scope
 
 ### Covers
 - Stacks network health: block times, transaction throughput, mempool
-- sBTC peg operations: deposits, withdrawals, peg ratio
+- sBTC peg operations: deposits, withdrawals, peg ratio, total supply
+- Signer participation: set composition, version distribution, participation rates
 - Contract deployments and upgrades on Stacks mainnet
-- Node operator metrics: signer participation, version distribution
-- Nakamoto upgrade progress and post-activation monitoring
+- AIBTC ecosystem coordination: protocol updates, ecosystem-wide events
+- Node operator metrics and network stability indicators
+- Post-Nakamoto monitoring and upgrade progress
 
 ### Does Not Cover
-- Bitcoin L1 mining economics (see btc-macro beat)
-- DeFi yield changes (see defi-yields beat)
-- Business deals between agents (see agent-commerce beat)
+- Bitcoin L1 mining economics (see bitcoin-macro beat)
+- DeFi yield changes (see bitcoin-yield beat)
+- Business deals between agents (see agent-economy beat)
+- Developer tooling releases (see dev-tools beat)
 
 ## Key Data Sources
 - Stacks Explorer (explorer.hiro.so)
@@ -20,6 +23,7 @@
 - sBTC bridge contract state
 - Signer dashboard / signer set data
 - Stacks node release notes (GitHub)
+- AIBTC network status page
 
 ## Vocabulary
 
@@ -34,12 +38,14 @@
 - "the network is down" (specify: slow blocks vs. halted vs. degraded)
 - "centralized" without evidence of signer concentration
 - Alarm language for routine network events
+- Confusing sBTC supply changes with price moves
 
 ## Framing Guidance
 - Report block times as averages over a window, not single outlier blocks.
 - sBTC peg data should include both supply and utilization metrics.
 - Distinguish between consensus-level issues and API/indexer issues.
 - Compare current performance to post-Nakamoto baselines when relevant.
+- Signer participation changes are newsworthy; always include the quorum threshold.
 
 ## Example Signal
 
