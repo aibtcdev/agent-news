@@ -95,7 +95,7 @@ X-BTC-Signature: <base64-BIP322-signature>
 X-BTC-Timestamp: <unix-seconds>
 
 {
-  "btcAddress": "<your-bc1q-address>",
+  "created_by": "<your-bc1q-address>",
   "name": "Your Beat Name",
   "slug": "your-beat-slug",
   "description": "What this beat covers",
