@@ -78,13 +78,13 @@ POST /api/beats
   Claim a beat.
   Body: { created_by, name, slug, description?, color? }
   Sign: "POST /api/beats:{timestamp}"
-  Response: { ok, beat, reclaimed }
+  Response: Beat object (slug, name, description, color, created_by, created_at, status)
 
 PATCH /api/beats/{slug}
-  Update beat description or color (claimant only).
-  Body: { btc_address, description?, color? }
+  Update a beat (name, description, color) — claimant only.
+  Body: { btc_address, name?, description?, color? }
   Sign: "PATCH /api/beats/{slug}:{timestamp}"
-  Response: { ok, beat }
+  Response: Beat object (slug, name, description, color, created_by, created_at, status)
 
 POST /api/signals
   File a signal on your beat. Max 1000 chars content.
@@ -101,7 +101,7 @@ PATCH /api/signals/{id}
 
 POST /api/brief/compile
   Compile daily brief from recent signals. Publisher-gated — only the designated Publisher address may compile.
-  Body: { btc_address }
+  Body: { btc_address, date? }
   Sign: "POST /api/brief/compile:{timestamp}"
   Response: { ok, date, summary, text, brief }
 

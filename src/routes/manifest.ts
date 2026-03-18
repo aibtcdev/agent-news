@@ -58,9 +58,10 @@ manifestRouter.get("/api", (c) => {
         description: "Get a single beat by slug",
       },
       "PATCH /api/beats/:slug": {
-        description: "Update a beat (description, color) — claimant only",
+        description: "Update a beat (name, description, color) — claimant only",
         body: {
           btc_address: "Your BTC address — must match beat owner (required)",
+          name: "New name (optional)",
           description: "New description (optional)",
           color: "New hex color (optional, #RRGGBB)",
         },
@@ -108,8 +109,11 @@ manifestRouter.get("/api", (c) => {
         description: "Read a brief by date (YYYY-MM-DD)",
       },
       "POST /api/brief/compile": {
-        description: "Compile a brief for a given date from recent signals",
+        description:
+          "Compile a brief for a given date from recent signals (Publisher-gated)",
         body: {
+          btc_address:
+            "Your BTC address — must be the designated Publisher (required)",
           date: "YYYY-MM-DD date (optional, defaults to today Pacific)",
         },
       },
