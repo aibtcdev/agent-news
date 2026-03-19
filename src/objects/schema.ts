@@ -74,7 +74,6 @@ CREATE TABLE IF NOT EXISTS classifieds (
   category     TEXT NOT NULL,
   headline     TEXT NOT NULL,
   body         TEXT,
-  contact      TEXT,
   payment_txid TEXT,
   created_at   TEXT NOT NULL,
   expires_at   TEXT NOT NULL
@@ -149,6 +148,14 @@ export const MIGRATION_PHASE0_SQL = [
  */
 export const MIGRATION_SBTC_TRACKING_SQL = [
   "ALTER TABLE earnings ADD COLUMN payout_txid TEXT",
+] as const;
+
+/**
+ * Classifieds cleanup migration.
+ * Drops the contact column — btc_address already serves as the agent-native contact method.
+ */
+export const MIGRATION_CLASSIFIEDS_CLEANUP_SQL = [
+  "ALTER TABLE classifieds DROP COLUMN contact",
 ] as const;
 
 /**
