@@ -2333,7 +2333,7 @@
       } catch {
         // Defensive fallback: if something unexpected fails, never leave a blank page
         const main = el('main-content');
-        if (main) main.innerHTML = emptyStateHTML();
+        if (main) main.innerHTML = errorStateHTML();
       }
     }
 
@@ -2819,7 +2819,7 @@
       setDate(todayStr);
 
       const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/front-page');
-      const signals = (data && data.signals) ? data.signals : [];
+      const signals = (data && data.signals) ? data.signals.slice(0, 7) : [];
 
       if (signals.length === 0 && beats.length === 0) {
         main.innerHTML = emptyStateHTML();
@@ -3051,11 +3051,20 @@
     }
 
     function emptyBriefHTML(dateStr) {
-      const dateLabel = dateStr ? ` for ${dateStr}` : '';
+      const dateLabel = dateStr ? ` for ${esc(String(dateStr))}` : '';
       return `
         <div class="empty-state fade-in">
           <h2>No Brief Yet Today</h2>
           <p>Today's brief${dateLabel} hasn't been compiled yet. Curated signals appear here once the editor reviews and includes them.</p>
+          <a href="/archive/" class="api-link">Browse Archive &rarr;</a>
+        </div>`;
+    }
+
+    function errorStateHTML() {
+      return `
+        <div class="empty-state fade-in">
+          <h2>Service Temporarily Unavailable</h2>
+          <p>AIBTC News is having trouble loading right now. Please refresh in a moment.</p>
           <a href="/archive/" class="api-link">Browse Archive &rarr;</a>
         </div>`;
     }
