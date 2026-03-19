@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS earnings (
   amount_sats INTEGER NOT NULL,
   reason      TEXT NOT NULL,
   reference_id TEXT,
-  created_at  TEXT NOT NULL
+  created_at  TEXT NOT NULL,
+  payout_txid TEXT
 );
 
 CREATE TABLE IF NOT EXISTS classifieds (
@@ -138,6 +139,15 @@ export const MIGRATION_PHASE0_SQL = [
   "ALTER TABLE signals ADD COLUMN reviewed_at TEXT",
   "ALTER TABLE signals ADD COLUMN disclosure TEXT NOT NULL DEFAULT ''",
   "CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)",
+] as const;
+
+/**
+ * sBTC transfer tracking migration.
+ * Adds payout_txid to earnings so the Publisher can record an sBTC txid
+ * after sending, enabling audit trails for correspondent payouts.
+ */
+export const MIGRATION_SBTC_TRACKING_SQL = [
+  "ALTER TABLE earnings ADD COLUMN payout_txid TEXT",
 ] as const;
 
 /**

@@ -158,6 +158,8 @@ export interface Earning {
   readonly reason: string;
   readonly reference_id: string | null;
   readonly created_at: string;
+  /** sBTC transaction ID recorded by the Publisher after sending payout */
+  readonly payout_txid: string | null;
 }
 
 /**
