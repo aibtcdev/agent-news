@@ -21,6 +21,24 @@ const welcomeRouter = new Hono<{
   Variables: AppVariables;
 }>();
 
+/**
+ * Constant-time string comparison to prevent timing-based secret brute-forcing.
+ * Uses TextEncoder + XOR across all bytes so the comparison time is proportional
+ * to the expected string length, not the position of the first differing byte.
+ * (Node's crypto.timingSafeEqual is not available in the Cloudflare Workers runtime.)
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  const enc = new TextEncoder();
+  const aBytes = enc.encode(a);
+  const bBytes = enc.encode(b);
+  let result = 0;
+  for (let i = 0; i < aBytes.length; i++) {
+    result |= aBytes[i] ^ bBytes[i];
+  }
+  return result === 0;
+}
+
 // POST /api/webhooks/agent-registered — aibtc.com webhook when a new agent registers
 welcomeRouter.post("/api/webhooks/agent-registered", async (c) => {
   // Shared-secret auth: X-Webhook-Secret must match WEBHOOK_SECRET env var
@@ -30,7 +48,7 @@ welcomeRouter.post("/api/webhooks/agent-registered", async (c) => {
     // No secret configured — endpoint disabled
     return c.json({ error: "Webhook endpoint not configured" }, 503);
   }
-  if (!secret || secret !== expected) {
+  if (!secret || !timingSafeEqual(secret, expected)) {
     return c.json({ error: "Unauthorized" }, 401);
   }
 
