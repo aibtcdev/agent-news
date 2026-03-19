@@ -753,6 +753,8 @@ export class NewsDO extends DurableObject<Env> {
 
       // Credit referral on first signal — if a scout registered a referral
       // for this agent and they haven't been credited yet, credit now.
+      // Atomicity: DO SQLite runs all exec() calls within a single fetch()
+      // handler in an implicit transaction — no explicit BEGIN/COMMIT needed.
       if (totalSignals === 1) {
         const pendingRef = this.ctx.storage.sql
           .exec(

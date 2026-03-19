@@ -29,8 +29,11 @@ earningsRouter.get("/api/earnings/:address", async (c) => {
     return c.json({ error: "Failed to fetch earnings" }, 503);
   }
 
-  const pending = earnings.filter((e) => e.amount_sats > 0);
-  const totalPending = pending.reduce((sum, e) => sum + e.amount_sats, 0);
+  // Sum positive-amount earnings (brief inclusions, weekly prizes).
+  // No paid/unpaid status field exists yet, so this is total earned, not "pending payout".
+  const totalEarnedSats = earnings
+    .filter((e) => e.amount_sats > 0)
+    .reduce((sum, e) => sum + e.amount_sats, 0);
 
   c.header("Cache-Control", "public, max-age=30, s-maxage=60");
   return c.json({
@@ -38,7 +41,7 @@ earningsRouter.get("/api/earnings/:address", async (c) => {
     earnings,
     summary: {
       total: earnings.length,
-      totalPendingSats: totalPending,
+      totalEarnedSats,
     },
   });
 });
