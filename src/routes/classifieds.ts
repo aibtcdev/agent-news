@@ -41,6 +41,9 @@ classifiedsRouter.get("/api/classifieds/rotation", async (c) => {
   const maxChars = c.req.query("max_chars");
   const result = await getClassifiedsRotation(c.env, maxChars ? parseInt(maxChars, 10) : undefined);
   c.header("Cache-Control", "no-store"); // always fresh for brief compilation
+  if (!result.ok) {
+    return c.json({ error: "Failed to fetch classifieds rotation" }, 500);
+  }
   return c.json(result);
 });
 

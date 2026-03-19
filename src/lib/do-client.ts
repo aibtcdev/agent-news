@@ -1,4 +1,5 @@
 import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, WeeklyPayoutResult } from "./types";
+import { CLASSIFIED_BRIEF_SLOTS } from "./constants";
 
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
@@ -295,7 +296,7 @@ export async function getClassifiedsRotation(
     : "/classifieds/rotation";
   const result = await doFetch<{ data: Classified[]; slots: number; filled: number }>(stub, url);
   if (!result.ok || !result.data) {
-    return { ok: false, data: [], slots: 3, filled: 0 };
+    return { ok: false, data: [], slots: CLASSIFIED_BRIEF_SLOTS, filled: 0 };
   }
   return { ok: true, ...result.data };
 }
