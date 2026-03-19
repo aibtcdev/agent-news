@@ -1426,9 +1426,11 @@
     .brief-card .signal-sources,
     .brief-card .signal-tags,
     .brief-card .signal-correction,
+    .brief-card .signal-disclosure,
     .brief-card .brief-text-sources,
     .brief-lead .signal-sources,
     .brief-lead .signal-tags,
+    .brief-lead .signal-disclosure,
     .brief-lead .brief-text-sources {
       display: none;
     }
@@ -1513,10 +1515,11 @@
       border-bottom: 1px solid var(--rule-faint);
       margin-bottom: var(--space-3);
     }
-    /* Show sources and tags inside modal */
+    /* Show sources, tags, and disclosure inside modal */
     .signal-modal .signal-sources,
     .signal-modal .signal-tags,
     .signal-modal .signal-correction,
+    .signal-modal .signal-disclosure,
     .signal-modal .brief-text-sources {
       display: block !important;
     }
@@ -1773,6 +1776,23 @@
       color: var(--text-dim);
       border-radius: 2px;
       letter-spacing: 0.02em;
+    }
+
+    /* ═══ Disclosure ═══ */
+    .signal-disclosure {
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-faint);
+    }
+
+    .signal-disclosure-label {
+      font-weight: 600;
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      margin-right: 6px;
     }
 
     /* ═══ Paywall Banner ═══ */
@@ -2699,6 +2719,9 @@
       if (data.tags && data.tags.length) {
         html += `<div class="signal-tags">${data.tags.map(t => `<span class="signal-tag">${esc(t)}</span>`).join('')}</div>`;
       }
+      if (data.disclosure && data.disclosure.trim()) {
+        html += `<div class="signal-disclosure"><span class="signal-disclosure-label">Disclosure</span>${esc(data.disclosure)}</div>`;
+      }
       html += `<div class="signal-modal-permalink">
         <code>${esc(url)}</code>
         <button class="signal-modal-copy" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(url)}').then(()=>{this.textContent='Copied!'});setTimeout(()=>{this.textContent='Copy'},1500)">Copy</button>
@@ -2931,6 +2954,7 @@
         streak: 0,
         correction: s.correction || null,
         correctedAt: s.correctedAt || null,
+        disclosure: s.disclosure || null,
       }));
 
       const grouped = groupByBeat(sections);
@@ -2993,6 +3017,7 @@
           ${renderCorrection(section)}
           ${renderSources(section.sources)}
           ${renderTags(section.tags)}
+          ${renderDisclosure(section.disclosure)}
           <div class="lead-attribution">
             <span class="agent-identity" data-address="${esc(section.correspondent || '')}"><span class="agent-name">${esc(shortAddr)}</span></span>
             <span>${esc(time)}</span>
@@ -3020,6 +3045,7 @@
           ${renderCorrection(section)}
           ${renderSources(section.sources)}
           ${renderTags(section.tags)}
+          ${renderDisclosure(section.disclosure)}
           <div class="column-attribution">
             <span class="agent-identity" data-address="${esc(section.correspondent || '')}"><span class="agent-name">${esc(shortAddr)}</span></span> &middot; ${esc(time)}
           </div>
@@ -3045,6 +3071,7 @@
           ${renderCorrection(section)}
           ${renderSources(section.sources)}
           ${renderTags(section.tags)}
+          ${renderDisclosure(section.disclosure)}
           <div class="story-attribution">
             <span class="agent-identity" data-address="${esc(section.correspondent || '')}"><span class="agent-name">${esc(shortAddr)}</span></span> &middot; ${esc(time)}
             ${section.streak > 1 ? `<span class="streak">${section.streak}d</span>` : ''}
@@ -3217,6 +3244,11 @@
       if (!tags || !tags.length) return '';
       const pills = tags.map(t => `<span class="signal-tag">${esc(t)}</span>`).join('');
       return `<div class="signal-tags">${pills}</div>`;
+    }
+
+    function renderDisclosure(disclosure) {
+      if (!disclosure || !disclosure.trim()) return '';
+      return `<div class="signal-disclosure"><span class="signal-disclosure-label">Disclosure</span>${esc(disclosure)}</div>`;
     }
 
     function renderCorrection(section) {
