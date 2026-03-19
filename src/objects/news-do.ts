@@ -581,6 +581,80 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
     });
 
+    // GET /signals/front-page-page — date-paginated curated signals for infinite scroll
+    // Query params: before (YYYY-MM-DD Pacific date, required), limit (unused, kept for compat)
+    // Uses 2-step query: (1) find the target Pacific day, (2) fetch ALL signals for that day.
+    // Returns signals from the most recent Pacific day strictly before `before`, with hasMore flag.
+    this.router.get("/signals/front-page-page", (c) => {
+      const before = c.req.query("before") ?? null;
+
+      if (!before || !/^\d{4}-\d{2}-\d{2}$/.test(before)) {
+        return c.json(
+          { ok: false, error: "Missing or invalid 'before' param (YYYY-MM-DD required)" },
+          400
+        );
+      }
+
+      // Use Pacific-day boundaries to match brief date semantics
+      const beforeDayStartUTC = getPacificDayStartUTC(before);
+
+      // Step 1: Find the target day — get the most recent signal strictly before the boundary
+      const probeRows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.created_at
+           FROM signals s
+           WHERE s.status IN ('approved', 'brief_included')
+             AND s.created_at < ?1
+           ORDER BY s.created_at DESC
+           LIMIT 1`,
+          beforeDayStartUTC
+        )
+        .toArray();
+
+      if (probeRows.length === 0) {
+        return c.json({ ok: true, data: { signals: [], date: null, hasMore: false } });
+      }
+
+      // Determine the Pacific date of the most recent signal before the boundary
+      const probeTimestamp = (probeRows[0] as Record<string, unknown>).created_at as string;
+      const day = getPacificDate(new Date(probeTimestamp));
+      const dayStartUTC = getPacificDayStartUTC(day);
+      const dayEndUTC = getPacificDayStartUTC(getNextDate(day));
+
+      // Step 2: Fetch ALL signals for that Pacific day (complete day, no limit)
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+           FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN signal_tags st ON s.id = st.signal_id
+           WHERE s.status IN ('approved', 'brief_included')
+             AND s.created_at >= ?1
+             AND s.created_at < ?2
+           GROUP BY s.id
+           ORDER BY s.created_at DESC`,
+          dayStartUTC,
+          dayEndUTC
+        )
+        .toArray();
+
+      const daySignals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
+
+      // Check hasMore: are there any signals before this day?
+      const olderRows = this.ctx.storage.sql
+        .exec(
+          `SELECT 1 FROM signals
+           WHERE status IN ('approved', 'brief_included')
+             AND created_at < ?1
+           LIMIT 1`,
+          dayStartUTC
+        )
+        .toArray();
+      const hasMore = olderRows.length > 0;
+
+      return c.json({ ok: true, data: { signals: daySignals, date: day, hasMore } });
+    });
+
     // GET /signals/:id — get a single signal with tags and beat name joined
     this.router.get("/signals/:id", (c) => {
       const id = c.req.param("id");

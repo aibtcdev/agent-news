@@ -8,7 +8,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, SignalStatus } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { reviewSignal, listSignals } from "../lib/do-client";
+import { reviewSignal, listSignals, listFrontPagePage } from "../lib/do-client";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 import { REVIEW_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
@@ -102,10 +102,51 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
 });
 
 // GET /api/front-page — curated signals (approved + brief_included only)
+// Without ?before: returns all approved + brief_included signals (today's feed)
+// With ?before=YYYY-MM-DD: returns one day of signals strictly before that date (infinite scroll)
 signalReviewRouter.get("/api/front-page", async (c) => {
-  // Fetch approved signals
+  const before = c.req.query("before") ?? null;
+  const limitParam = c.req.query("limit");
+  const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200) : 50;
+
+  // Paginated mode: infinite scroll request
+  if (before !== null) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(before)) {
+      return c.json({ error: "Invalid 'before' param (YYYY-MM-DD required)" }, 400);
+    }
+    // Validate it parses to a real date (rejects e.g. 2026-99-99)
+    const parsed = new Date(before + "T12:00:00Z");
+    if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== before) {
+      return c.json({ error: "Invalid 'before' param (not a real date)" }, 400);
+    }
+
+    const result = await listFrontPagePage(c.env, before, limit);
+    const transformed = result.signals.map((s) => ({
+      id: s.id,
+      btcAddress: s.btc_address,
+      beat: s.beat_name ?? s.beat_slug,
+      beatSlug: s.beat_slug,
+      headline: s.headline,
+      content: s.body,
+      sources: s.sources,
+      tags: s.tags,
+      timestamp: s.created_at,
+      status: s.status,
+      disclosure: s.disclosure,
+      correction_of: s.correction_of,
+    }));
+
+    c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+    return c.json({
+      signals: transformed,
+      date: result.date,
+      hasMore: result.hasMore,
+      curated: true,
+    });
+  }
+
+  // Default mode: return all approved + brief_included signals (today's feed)
   const approved = await listSignals(c.env, { status: "approved", limit: 200 });
-  // Fetch brief_included signals
   const included = await listSignals(c.env, { status: "brief_included", limit: 200 });
 
   const all = [...approved, ...included];

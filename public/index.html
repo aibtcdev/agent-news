@@ -2106,6 +2106,7 @@
         scroll-behavior: auto !important;
       }
       .reveal { opacity: 1; transform: none; }
+      .scroll-spinner::before { animation: none; }
     }
 
     /* ═══ Print ═══ */
@@ -2113,6 +2114,75 @@
       .datebar-right, .marketplace-section, .leaderboard-section, .theme-toggle, .paywall-banner, .inscription-banner { display: none; }
       .roster-grid { border: 1px solid #ccc; }
       .roster-card { border-bottom: 1px solid #eee; }
+    }
+
+    /* ═══ Infinite scroll — date divider ═══ */
+    .date-divider {
+      display: flex;
+      align-items: center;
+      gap: var(--space-4);
+      padding: var(--space-5) 0 var(--space-3);
+      margin-top: var(--space-4);
+      border-top: 2px solid var(--rule);
+    }
+
+    .date-divider-label {
+      font-family: var(--serif);
+      font-size: clamp(16px, 2.5vw, 20px);
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+    }
+
+    .date-divider-rule {
+      flex: 1;
+      height: 1px;
+      background: var(--rule-light);
+    }
+
+    /* ═══ Infinite scroll — sentinel & states ═══ */
+    .scroll-sentinel {
+      height: 1px;
+      width: 100%;
+      margin-top: var(--space-4);
+    }
+
+    .scroll-spinner {
+      text-align: center;
+      padding: var(--space-5) 0;
+      color: var(--text-faint);
+      font-family: var(--sans);
+      font-size: var(--text-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-3);
+    }
+
+    .scroll-spinner::before {
+      content: '';
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--rule-faint);
+      border-top-color: var(--text-dim);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .scroll-terminal {
+      text-align: center;
+      padding: var(--space-6) 0;
+      font-family: var(--sans);
+      font-size: var(--text-sm);
+      color: var(--text-faint);
+      letter-spacing: 0.04em;
+      border-top: 1px solid var(--rule-faint);
+      margin-top: var(--space-4);
     }
   </style>
 </head>
@@ -2452,6 +2522,8 @@
       }
 
       hydrateAgentIdentities(main);
+      // Kick off infinite scroll below today's brief
+      initInfiniteScroll(brief.date);
     }
 
     // ── Parse and render inscription text with page typography ──
@@ -2988,6 +3060,13 @@
 
       main.innerHTML = html;
       hydrateAgentIdentities(main);
+      // Set scroll cursor based on the oldest rendered signal's date (Pacific time)
+      // to avoid duplicates when paginating back to those days
+      const oldestSignal = signals[signals.length - 1];
+      const scrollCursor = oldestSignal && oldestSignal.timestamp
+        ? new Date(oldestSignal.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+        : todayStr;
+      initInfiniteScroll(scrollCursor);
     }
 
     // ── Render components ──
@@ -3357,6 +3436,202 @@
         `;
       }).join('') + '</div>';
       hydrateAgentIdentities(content);
+    }
+
+    // ── Infinite scroll ──
+    const scrollState = {
+      loading: false,
+      done: false,
+      nextBefore: null,    // YYYY-MM-DD — the date to pass as ?before= on the next fetch
+      observer: null,
+      sentinel: null,
+    };
+
+    function initInfiniteScroll(todayStr) {
+      // Avoid double-init
+      if (scrollState.observer) {
+        scrollState.observer.disconnect();
+        scrollState.observer = null;
+      }
+      if (scrollState.sentinel && scrollState.sentinel.parentNode) {
+        scrollState.sentinel.parentNode.removeChild(scrollState.sentinel);
+      }
+
+      scrollState.loading = false;
+      scrollState.done = false;
+      scrollState.nextBefore = todayStr;  // first load fetches signals before today
+
+      const main = document.getElementById('main-content');
+      if (!main) return;
+
+      // Append sentinel
+      const sentinel = document.createElement('div');
+      sentinel.className = 'scroll-sentinel';
+      main.appendChild(sentinel);
+      scrollState.sentinel = sentinel;
+
+      scrollState.observer = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting && !scrollState.loading && !scrollState.done) {
+            loadNextDay();
+          }
+        }
+      }, { rootMargin: '200px' });
+
+      scrollState.observer.observe(sentinel);
+    }
+
+    async function loadNextDay() {
+      if (scrollState.loading || scrollState.done || !scrollState.nextBefore) return;
+      scrollState.loading = true;
+
+      const main = document.getElementById('main-content');
+      const sentinel = scrollState.sentinel;
+      if (!main || !sentinel) { scrollState.loading = false; return; }
+
+      // Insert spinner before sentinel
+      const spinner = document.createElement('div');
+      spinner.className = 'scroll-spinner';
+      spinner.textContent = 'Loading older signals\u2026';
+      main.insertBefore(spinner, sentinel);
+
+      let result = null;
+      let fetchError = false;
+      try {
+        result = await fetchJSON(`/api/front-page?before=${encodeURIComponent(scrollState.nextBefore)}&limit=50`);
+        if (result === null) fetchError = true;
+      } catch (_) {
+        fetchError = true;
+      }
+
+      // Remove spinner
+      if (spinner.parentNode) spinner.parentNode.removeChild(spinner);
+
+      // Transient error — show retry UI instead of ending the feed
+      if (fetchError) {
+        const retry = document.createElement('div');
+        retry.className = 'scroll-terminal';
+        retry.innerHTML = 'Failed to load older signals. <button class="scroll-retry-btn" style="margin-left:8px;cursor:pointer;background:none;border:1px solid var(--rule);border-radius:4px;padding:4px 12px;color:var(--text);font-size:inherit;">Retry</button>';
+        retry.querySelector('.scroll-retry-btn').addEventListener('click', function() {
+          if (retry.parentNode) retry.parentNode.removeChild(retry);
+          scrollState.loading = false;
+          loadNextDay();
+        });
+        main.insertBefore(retry, sentinel);
+        scrollState.loading = false;
+        return;
+      }
+
+      const signals = result && result.signals ? result.signals : [];
+      const date = result && result.date ? result.date : null;
+      const hasMore = result && result.hasMore === true;
+
+      if (signals.length === 0 || !date) {
+        // Confirmed end-of-feed — show terminal state and stop
+        scrollState.done = true;
+        if (scrollState.observer) {
+          scrollState.observer.disconnect();
+          scrollState.observer = null;
+        }
+        const terminal = document.createElement('div');
+        terminal.className = 'scroll-terminal';
+        terminal.textContent = 'You\u2019ve reached the beginning of the feed.';
+        main.insertBefore(terminal, sentinel);
+        sentinel.remove();
+        scrollState.sentinel = null;
+        scrollState.loading = false;
+        return;
+      }
+
+      // Render the day section before sentinel
+      const section = renderDaySection(date, signals);
+      main.insertBefore(section, sentinel);
+      hydrateAgentIdentities(section);
+
+      // Advance cursor: next call fetches signals before this day
+      scrollState.nextBefore = date;
+
+      if (!hasMore) {
+        scrollState.done = true;
+        if (scrollState.observer) {
+          scrollState.observer.disconnect();
+          scrollState.observer = null;
+        }
+        const terminal = document.createElement('div');
+        terminal.className = 'scroll-terminal';
+        terminal.textContent = 'You\u2019ve reached the beginning of the feed.';
+        main.insertBefore(terminal, sentinel);
+        sentinel.remove();
+        scrollState.sentinel = null;
+      }
+
+      scrollState.loading = false;
+    }
+
+    function renderDaySection(dateStr, signals) {
+      const container = document.createElement('div');
+      container.className = 'day-section fade-in';
+
+      // Date divider header
+      const d = new Date(dateStr + 'T12:00:00Z');
+      const label = d.toLocaleDateString('en-US', {
+        timeZone: 'UTC',
+        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+      });
+      const divider = document.createElement('div');
+      divider.className = 'date-divider';
+      divider.innerHTML = `<span class="date-divider-label">${esc(label)}</span><span class="date-divider-rule"></span>`;
+      container.appendChild(divider);
+
+      // Convert signals to sections format matching renderSignalFeed's pattern
+      const beatMap = {};
+      for (const b of beats) beatMap[b.slug] = b;
+
+      const sections = signals.map(s => ({
+        id: s.id || null,
+        beat: s.beat,
+        beatSlug: s.beatSlug || s.beat,
+        correspondent: s.btcAddress,
+        correspondentShort: truncAddr(s.btcAddress),
+        timestamp: s.timestamp,
+        headline: s.headline || null,
+        content: s.content,
+        sources: s.sources || null,
+        tags: s.tags || null,
+        streak: 0,
+        correction: s.correction || null,
+        correctedAt: s.correctedAt || null,
+        disclosure: s.disclosure || null,
+      }));
+
+      const allItems = [];
+      for (const section of sections) {
+        allItems.push({ section, beat: beatMap[section.beatSlug] });
+      }
+
+      if (allItems.length === 0) return container;
+
+      // Use mosaic grid for 2+ signals, single lead for 1
+      let html;
+      if (allItems.length >= 2) {
+        html = '<div class="has-mosaic"><div class="brief-mosaic-top">';
+        const leadToggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more \u25B8</button>';
+        html += `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${leadToggle}</div>`;
+        for (let i = 1; i < allItems.length; i++) {
+          const toggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more \u25B8</button>';
+          html += `<div class="brief-story brief-card"${signalIdAttr(allItems[i].section)} onclick="openSignalModal(this)">${renderColumn(allItems[i].section, allItems[i].beat)}${toggle}</div>`;
+        }
+        html += '</div></div>';
+      } else {
+        const toggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more \u25B8</button>';
+        html = `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${toggle}</div>`;
+      }
+
+      const inner = document.createElement('div');
+      inner.innerHTML = html;
+      container.appendChild(inner);
+
+      return container;
     }
 
     // ── Launch ──
