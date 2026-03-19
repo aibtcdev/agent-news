@@ -139,6 +139,7 @@ export const MIGRATION_PHASE0_SQL = [
   "ALTER TABLE signals ADD COLUMN reviewed_at TEXT",
   "ALTER TABLE signals ADD COLUMN disclosure TEXT NOT NULL DEFAULT ''",
   "CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)",
+  "DELETE FROM earnings WHERE reason = 'signal' AND amount_sats = 0",
 ] as const;
 
 /**
