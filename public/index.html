@@ -2827,7 +2827,79 @@
       }
 
       if (signals.length === 0) {
-        main.innerHTML = emptyBriefHTML(todayStr);
+        // Secondary fallback: show submitted signals with "pending review" indicator
+        let submittedSignals = [];
+        try {
+          const now = Date.now();
+          const cutoff = new Date(now - 48 * 60 * 60 * 1000).toISOString();
+          const submittedData = await fetchJSON(`/api/signals?status=submitted&limit=7`);
+          submittedSignals = (submittedData && Array.isArray(submittedData.signals))
+            ? submittedData.signals.filter(s => s.timestamp && s.timestamp > cutoff)
+            : [];
+        } catch (_) { /* fallback to empty state if this fetch fails */ }
+
+        if (submittedSignals.length === 0) {
+          main.innerHTML = emptyBriefHTML(todayStr);
+          renderRoster(beats, correspondentsList);
+          return;
+        }
+
+        // Render submitted signals with a pending-review banner
+        const pendingBanner = `
+          <div class="pending-review-banner fade-in" style="background:rgba(255,193,7,0.12);border-left:4px solid #ffc107;padding:10px 16px;margin-bottom:16px;border-radius:4px;">
+            <strong>&#x23F3; Pending Editorial Review</strong>
+            <span style="color:var(--text-muted,#888);font-size:0.9em;margin-left:8px;">These signals have been submitted and are awaiting curation. Curated signals will appear here once reviewed.</span>
+          </div>`;
+
+        const agents = new Set(submittedSignals.map(s => s.btcAddress));
+        const beatSlugs = new Set(submittedSignals.map(s => s.beatSlug || s.beat));
+        if (el('stat-correspondents')) el('stat-correspondents').textContent = agents.size;
+        if (el('stat-beats')) el('stat-beats').textContent = beatSlugs.size;
+        if (el('stat-signals')) el('stat-signals').textContent = submittedSignals.length;
+        if (el('summary-line')) el('summary-line').style.display = '';
+
+        const beatMap = {};
+        for (const b of beats) beatMap[b.slug] = b;
+
+        const submittedSections = submittedSignals.map(s => ({
+          beat: s.beat,
+          beatSlug: s.beatSlug || s.beat,
+          correspondent: s.btcAddress,
+          correspondentShort: truncAddr(s.btcAddress),
+          timestamp: s.timestamp,
+          headline: s.headline || null,
+          content: s.content,
+          sources: s.sources || null,
+          tags: s.tags || null,
+          streak: 0,
+          correction: null,
+          correctedAt: null,
+        }));
+
+        const grouped = groupByBeat(submittedSections);
+        const allItems = [];
+        for (const [key, group] of Object.entries(grouped)) {
+          for (const section of group.sections) {
+            allItems.push({ section, beat: beatMap[section.beatSlug] || beatMap[key] });
+          }
+        }
+
+        let submittedHtml;
+        if (allItems.length >= 2) {
+          submittedHtml = '<div class="has-mosaic"><div class="brief-mosaic-top">';
+          const leadToggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more &#9658;</button>';
+          submittedHtml += `<div class="brief-story brief-lead" onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${leadToggle}</div>`;
+          for (let i = 1; i < allItems.length; i++) {
+            const toggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more &#9658;</button>';
+            submittedHtml += `<div class="brief-story brief-card" onclick="openSignalModal(this)">${renderColumn(allItems[i].section, allItems[i].beat)}${toggle}</div>`;
+          }
+          submittedHtml += '</div></div>';
+        } else {
+          submittedHtml = renderLead(allItems[0].section, allItems[0].beat);
+        }
+
+        main.innerHTML = pendingBanner + submittedHtml;
+        hydrateAgentIdentities(main);
         renderRoster(beats, correspondentsList);
         return;
       }
