@@ -126,7 +126,10 @@ export class NewsDO extends DurableObject<Env> {
         this.ctx.storage.sql.exec(stmt);
       } catch (e) {
         // Column already exists — safe to ignore on re-run.
-        console.error("sBTC tracking migration statement failed (likely already applied):", e);
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes("duplicate column")) {
+          console.error("sBTC tracking migration statement failed:", e);
+        }
       }
     }
 
@@ -1582,6 +1585,13 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Missing required field: payout_txid (non-empty string)" } satisfies DOResult<Earning>, 400);
       }
 
+      // Validate txid format: 64 hex characters, with optional 0x prefix
+      const trimmedTxid = payout_txid.trim();
+      const rawTxid = trimmedTxid.startsWith("0x") ? trimmedTxid.slice(2) : trimmedTxid;
+      if (!/^[0-9a-fA-F]{64}$/.test(rawTxid)) {
+        return c.json({ ok: false, error: "Invalid payout_txid format: expected 64 hex characters (with optional 0x prefix)" } satisfies DOResult<Earning>, 400);
+      }
+
       // Verify publisher designation
       const publisherRows = this.ctx.storage.sql
         .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
@@ -1604,7 +1614,7 @@ export class NewsDO extends DurableObject<Env> {
 
       this.ctx.storage.sql.exec(
         "UPDATE earnings SET payout_txid = ? WHERE id = ?",
-        payout_txid as string,
+        trimmedTxid,
         id
       );
 

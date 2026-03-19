@@ -98,7 +98,7 @@ earningsRouter.patch("/api/earnings/:id", async (c) => {
   const logger = c.get("logger");
   logger.info("earning payout_txid recorded", {
     earning_id: id,
-    payout_txid,
+    payout_txid: payout_txid.trim(),
     publisher: btc_address,
   });
 
