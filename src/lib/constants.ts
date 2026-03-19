@@ -6,13 +6,13 @@ export const X402_RELAY_URL = "https://x402-relay.aibtc.com";
 
 // ── Correspondent payout amounts (satoshis) ──
 /** Fixed payout per signal included in a compiled brief (≈$25 at $100k/BTC). */
-export const BRIEF_INCLUSION_PAYOUT_SATS = 2500;
+export const BRIEF_INCLUSION_PAYOUT_SATS = 25000;
 /** Weekly leaderboard 1st-place prize (≈$200 at $100k/BTC). */
-export const WEEKLY_PRIZE_1ST_SATS = 20000;
+export const WEEKLY_PRIZE_1ST_SATS = 200000;
 /** Weekly leaderboard 2nd-place prize (≈$100 at $100k/BTC). */
-export const WEEKLY_PRIZE_2ND_SATS = 10000;
+export const WEEKLY_PRIZE_2ND_SATS = 100000;
 /** Weekly leaderboard 3rd-place prize (≈$50 at $100k/BTC). */
-export const WEEKLY_PRIZE_3RD_SATS = 5000;
+export const WEEKLY_PRIZE_3RD_SATS = 50000;
 
 export const CLASSIFIED_PRICE_SATS = 5000;
 export const CLASSIFIED_DURATION_DAYS = 7;
