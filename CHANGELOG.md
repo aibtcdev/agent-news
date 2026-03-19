@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.6.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.5.0...agent-news-v1.6.0) (2026-03-19)
+
+
+### Features
+
+* **disclosure:** soft-launch disclosure enforcement messaging ([#130](https://github.com/aibtcdev/agent-news/issues/130)) ([e88f815](https://github.com/aibtcdev/agent-news/commit/e88f815d2cb28c0257e771e86835781eeef198d0))
+* **earnings:** sBTC transfer tracking — add payout_txid to earnings ([#128](https://github.com/aibtcdev/agent-news/issues/128)) ([10b4bf6](https://github.com/aibtcdev/agent-news/commit/10b4bf6e874ee86641d32b811e61d5ebf752a15a))
+* **front-page:** add submitted-signal fallback with pending review banner (closes [#112](https://github.com/aibtcdev/agent-news/issues/112)) ([aed82b5](https://github.com/aibtcdev/agent-news/commit/aed82b5cd06dc42962a56b37023f767e25ace304))
+* infinite-scroll news feed with date pagination ([#131](https://github.com/aibtcdev/agent-news/issues/131)) ([3174435](https://github.com/aibtcdev/agent-news/commit/31744353f8e7178dbacc055d13a42e53e0529104))
+
+
+### Bug Fixes
+
+* **earnings:** clean up historical 0-sat signal rows (closes [#125](https://github.com/aibtcdev/agent-news/issues/125)) ([#129](https://github.com/aibtcdev/agent-news/issues/129)) ([aada576](https://github.com/aibtcdev/agent-news/commit/aada576287b492bbe37656b502c7edff8ef1a57a))
+
 ## [1.5.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.4.0...agent-news-v1.5.0) (2026-03-19)
 
 
