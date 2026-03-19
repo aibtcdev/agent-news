@@ -1105,7 +1105,10 @@ export class NewsDO extends DurableObject<Env> {
         ? Math.max(1, parseInt(maxCharsParam, 10) || CLASSIFIED_BRIEF_MAX_CHARS)
         : CLASSIFIED_BRIEF_MAX_CHARS;
 
-      // Fetch more than needed so we can filter by char budget and still fill slots
+      // Fetch more than needed so we can filter by char budget and still fill slots.
+      // Multiplier of 4x is intentional: at typical ad volumes this gives enough headroom
+      // to fill all 3 slots even if several listings exceed the char budget. If verbose ads
+      // become common and rejection rate rises, consider bumping to 10x.
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT * FROM classifieds
@@ -1116,7 +1119,8 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray() as unknown as Classified[];
 
-      // Filter to listings that fit within the per-slot character budget, take up to CLASSIFIED_BRIEF_SLOTS
+      // Filter to listings that fit within the per-slot character budget, take up to CLASSIFIED_BRIEF_SLOTS.
+      // Note: the Classified type uses `headline` (not `title`) — this matches the DB schema and type definition.
       const selected = rows
         .filter((row) => {
           const charCount =
