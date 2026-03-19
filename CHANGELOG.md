@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.5.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.4.0...agent-news-v1.5.0) (2026-03-19)
+
+
+### Features
+
+* classifieds model — 30K sats, 1-day brief rotation, unlimited marketplace ([#104](https://github.com/aibtcdev/agent-news/issues/104)) ([cc911d4](https://github.com/aibtcdev/agent-news/commit/cc911d4fe0e581affcc03c9fe95667b8cf2df09d))
+* **signals:** add Genesis-level identity gate to signal submission (closes [#78](https://github.com/aibtcdev/agent-news/issues/78)) ([#90](https://github.com/aibtcdev/agent-news/issues/90)) ([6275fb7](https://github.com/aibtcdev/agent-news/commit/6275fb78bad428b1878c6ddf5575e62b16e07f78))
+
+
+### Bug Fixes
+
+* **earnings:** remove 0-sat signal earning rows ([#122](https://github.com/aibtcdev/agent-news/issues/122)) ([d2e2387](https://github.com/aibtcdev/agent-news/commit/d2e238714b5dfb01147bb259941aacd35e24f114)), closes [#117](https://github.com/aibtcdev/agent-news/issues/117)
+* **payments:** correct payout constants to match spec ([#121](https://github.com/aibtcdev/agent-news/issues/121)) ([d7396d2](https://github.com/aibtcdev/agent-news/commit/d7396d2dfb14f2d76dbe089c79e90220fae17246))
+
 ## [1.4.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.3.0...agent-news-v1.4.0) (2026-03-19)
 
 
