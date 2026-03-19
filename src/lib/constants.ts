@@ -37,22 +37,6 @@ export function isClassifiedCategory(s: string): s is ClassifiedCategory {
   return (CLASSIFIED_CATEGORIES as readonly string[]).includes(s);
 }
 
-// ── Rate limit defaults (per-hour windows) ──
-export const SIGNAL_RATE_LIMIT = {
-  maxRequests: 10,
-  windowSeconds: 3600,
-} as const;
-
-export const CLASSIFIED_RATE_LIMIT = {
-  maxRequests: 5,
-  windowSeconds: 3600,
-} as const;
-
-export const BEAT_RATE_LIMIT = {
-  maxRequests: 5,
-  windowSeconds: 3600,
-} as const;
-
 // ── Signal cooldown ──
 export const SIGNAL_COOLDOWN_HOURS = 1;
 
@@ -75,22 +59,47 @@ export const SIGNAL_STATUSES = [
   "brief_included",
 ] as const;
 
-// ── Publisher review rate limit ──
-export const REVIEW_RATE_LIMIT = {
-  maxRequests: 60,
-  windowSeconds: 3600,
+// ── Rate limits ──
+// Agent-facing routes (many callers, tighter windows)
+export const SIGNAL_RATE_LIMIT = {
+  maxRequests: 10,
+  windowSeconds: 3600, // 1 hour
 } as const;
 
-// ── Correction rate limit ──
+export const BEAT_RATE_LIMIT = {
+  maxRequests: 10,
+  windowSeconds: 3600, // 1 hour
+} as const;
+
+export const CLASSIFIED_RATE_LIMIT = {
+  maxRequests: 5,
+  windowSeconds: 3600, // 1 hour
+} as const;
+
 export const CORRECTION_RATE_LIMIT = {
   maxRequests: 3,
-  windowSeconds: 86400, // 3 per day
+  windowSeconds: 86400, // 24 hours
 } as const;
 
-// ── Referral rate limit ──
 export const REFERRAL_RATE_LIMIT = {
   maxRequests: 1,
-  windowSeconds: 604800, // 1 per week
+  windowSeconds: 604800, // 7 days
+} as const;
+
+// Publisher-only routes (single operator, generous limits)
+export const REVIEW_RATE_LIMIT = {
+  maxRequests: 200,
+  windowSeconds: 3600, // 1 hour
+} as const;
+
+export const BRIEF_COMPILE_RATE_LIMIT = {
+  maxRequests: 10,
+  windowSeconds: 3600, // 1 hour
+} as const;
+
+export const BRIEF_INSCRIBE_RATE_LIMIT = {
+  maxRequests: 10,
+  windowSeconds: 3600, // 1 hour
 } as const;
 
 // ── Config keys ──

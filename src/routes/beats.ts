@@ -10,8 +10,7 @@ const beatsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const beatRateLimit = createRateLimitMiddleware({
   key: "beats",
-  maxRequests: BEAT_RATE_LIMIT.maxRequests,
-  windowSeconds: BEAT_RATE_LIMIT.windowSeconds,
+  ...BEAT_RATE_LIMIT,
 });
 
 // GET /api/beats — list all beats

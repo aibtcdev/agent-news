@@ -16,8 +16,7 @@ const referralsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const referralRateLimit = createRateLimitMiddleware({
   key: "referrals",
-  maxRequests: REFERRAL_RATE_LIMIT.maxRequests,
-  windowSeconds: REFERRAL_RATE_LIMIT.windowSeconds,
+  ...REFERRAL_RATE_LIMIT,
 });
 
 // POST /api/referrals — register a referral

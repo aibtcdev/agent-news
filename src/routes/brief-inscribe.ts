@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
+import { BRIEF_INSCRIBE_RATE_LIMIT } from "../lib/constants";
 import { getBriefByDate, updateBrief } from "../lib/do-client";
 import { validateBtcAddress, validateSignatureFormat } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
@@ -9,8 +10,7 @@ const briefInscribeRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>
 
 const inscribeRateLimit = createRateLimitMiddleware({
   key: "brief-inscribe",
-  maxRequests: 5,
-  windowSeconds: 3600,
+  ...BRIEF_INSCRIBE_RATE_LIMIT,
 });
 
 /** Validate inscription ID: {64-char txid}i{index} or numeric ordinal number */

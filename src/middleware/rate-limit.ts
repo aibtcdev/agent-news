@@ -58,6 +58,7 @@ export function createRateLimitMiddleware(opts: RateLimitOptions) {
         max: opts.maxRequests,
         retry_after: retryAfter,
       });
+      c.header("Retry-After", String(retryAfter));
       return c.json(
         { error: `Rate limited. Try again in ${retryAfter}s` },
         429

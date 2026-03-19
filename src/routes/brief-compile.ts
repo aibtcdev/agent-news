@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables, Source } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig } from "../lib/do-client";
-import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
+import { CONFIG_PUBLISHER_ADDRESS, BRIEF_COMPILE_RATE_LIMIT } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
 import { getPacificDate, formatPacificShort } from "../lib/helpers";
 import { validateBtcAddress } from "../lib/validators";
@@ -12,8 +12,7 @@ const briefCompileRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>(
 
 const compileRateLimit = createRateLimitMiddleware({
   key: "brief-compile",
-  maxRequests: 3,
-  windowSeconds: 3600,
+  ...BRIEF_COMPILE_RATE_LIMIT,
 });
 
 const MIN_SIGNALS = 3;
