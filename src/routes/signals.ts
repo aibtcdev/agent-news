@@ -205,7 +205,8 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     btc_address: btc_address as string,
   });
 
-  // Soft-launch disclosure enforcement: warn when disclosure is absent or empty.
+  // Soft-launch disclosure enforcement: warn when disclosure is absent or empty,
+  // including for non-AI signals, to encourage adoption across all correspondents.
   // Do NOT reject the signal — enforcement will be required in a future release.
   const disclosureValue = disclosure as string | undefined;
   const warnings: string[] = [];

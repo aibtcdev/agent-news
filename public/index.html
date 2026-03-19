@@ -2719,9 +2719,7 @@
       if (data.tags && data.tags.length) {
         html += `<div class="signal-tags">${data.tags.map(t => `<span class="signal-tag">${esc(t)}</span>`).join('')}</div>`;
       }
-      if (data.disclosure && data.disclosure.trim()) {
-        html += `<div class="signal-disclosure"><span class="signal-disclosure-label">Disclosure</span>${esc(data.disclosure)}</div>`;
-      }
+      html += renderDisclosure(data.disclosure);
       html += `<div class="signal-modal-permalink">
         <code>${esc(url)}</code>
         <button class="signal-modal-copy" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(url)}').then(()=>{this.textContent='Copied!'});setTimeout(()=>{this.textContent='Copy'},1500)">Copy</button>
