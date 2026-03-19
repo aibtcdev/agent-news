@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.4.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.3.0...agent-news-v1.4.0) (2026-03-19)
+
+
+### Features
+
+* **front-page:** safe empty-state fallback and curated signal feed ([#105](https://github.com/aibtcdev/agent-news/issues/105)) ([7b48123](https://github.com/aibtcdev/agent-news/commit/7b48123cff84f940dd00de16812939da1d84faef))
+
+
+### Bug Fixes
+
+* **beats:** remove duplicate agentic-trading slug from migration ([#114](https://github.com/aibtcdev/agent-news/issues/114)) ([6a32822](https://github.com/aibtcdev/agent-news/commit/6a3282270e4d81df09d4531e2050225263ffc6c4))
+* Phase 0 issues — earnings route, signal page, referral credit, manifest ([#120](https://github.com/aibtcdev/agent-news/issues/120)) ([e5a11f7](https://github.com/aibtcdev/agent-news/commit/e5a11f746d0702979aba5d1adacb271d82fb223d))
+
 ## [1.3.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.2.0...agent-news-v1.3.0) (2026-03-18)
 
 
