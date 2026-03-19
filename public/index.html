@@ -114,7 +114,6 @@
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      overflow-x: hidden;
     }
 
     /* ═══ Masthead ═══ */
@@ -1495,7 +1494,6 @@
       line-height: 1.7;
       color: var(--text);
       margin-bottom: var(--space-3);
-      word-break: break-word;
       overflow-wrap: anywhere;
     }
     .signal-modal .brief-text-headline,
@@ -1621,6 +1619,7 @@
       margin-bottom: 16px;
     }
 
+    /* ═══ Tablet (768px) ═══ */
     @media (max-width: 768px) {
       .pending-review-banner {
         /* Break out of .page padding so banner spans full width */
@@ -1630,10 +1629,7 @@
         padding-left: var(--page-padding);
         padding-right: var(--page-padding);
       }
-    }
 
-    /* ═══ Tablet (768px) ═══ */
-    @media (max-width: 768px) {
       .mosaic {
         grid-template-columns: 1fr;
       }
@@ -1725,14 +1721,12 @@
 
       .lead-content {
         font-size: 17px;
-        word-break: break-word;
         overflow-wrap: anywhere;
       }
 
       .story-content,
       .brief-text-content,
       .column-content {
-        word-break: break-word;
         overflow-wrap: anywhere;
       }
 
