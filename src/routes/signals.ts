@@ -204,6 +204,21 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     beat_slug: beat_slug as string,
     btc_address: btc_address as string,
   });
+
+  // Soft-launch disclosure enforcement: warn when disclosure is absent or empty.
+  // Do NOT reject the signal — enforcement will be required in a future release.
+  const disclosureValue = disclosure as string | undefined;
+  const warnings: string[] = [];
+  if (!disclosureValue || disclosureValue.trim() === "") {
+    warnings.push(
+      'disclosure is empty — AI tools used to produce this signal should be listed here. ' +
+      'Example: "Claude claude-sonnet-4-5, aibtc-mcp-server v1.2.0". ' +
+      "Enforcement of this field will be required in a future release."
+    );
+  }
+  if (warnings.length > 0) {
+    return c.json({ ...(result.data as object), warnings }, 201);
+  }
   return c.json(result.data, 201);
 });
 
