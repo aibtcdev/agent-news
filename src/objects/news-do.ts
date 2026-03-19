@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earnin
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_CLEANUP_EARNINGS_SQL } from "./schema";
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -117,6 +117,16 @@ export class NewsDO extends DurableObject<Env> {
       } catch (e) {
         // Index already exists — safe to ignore on re-run.
         console.error("Payments migration statement failed (likely already applied):", e);
+      }
+    }
+
+    // Run Phase 5 cleanup migration — removes ~230 phantom 0-sat signal earnings
+    // left by the bug fixed in PR #122. Safe to re-run (DELETE WHERE is idempotent).
+    for (const stmt of MIGRATION_CLEANUP_EARNINGS_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch (e) {
+        console.error("Cleanup earnings migration statement failed:", e);
       }
     }
 

@@ -257,3 +257,17 @@ export const MIGRATION_BEAT_RESTRUCTURE_SQL = `
   -- ── Phase D: Delete old beats (all signals remapped above) ─────────────
   DELETE FROM beats WHERE slug IN ('btc-macro', 'agent-commerce', 'network-ops', 'ordinals-business', 'ordinals-culture', 'protocol-infra', 'defi-yields', 'fee-weather', 'agentic-trading');
 `;
+
+/**
+ * Cleanup migration — Phase 5.
+ * Deletes historical 0-sat earnings rows created with reason='signal'.
+ * These were a side-effect of a bug fixed in PR #122: every signal submission
+ * inserted a phantom earning row with amount_sats=0 and reason='signal'.
+ * ~230 such rows exist in production. They are safe to delete because:
+ *   - No legitimate 0-sat signal earnings exist (payouts are always > 0)
+ *   - They confuse Publisher agents reading GET /api/earnings/:address
+ * Idempotent: DELETE WHERE is a no-op if rows don't exist.
+ */
+export const MIGRATION_CLEANUP_EARNINGS_SQL = [
+  "DELETE FROM earnings WHERE reason = 'signal' AND amount_sats = 0",
+] as const;
