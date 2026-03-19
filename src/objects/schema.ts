@@ -233,11 +233,20 @@ export const MIGRATION_BEAT_RESTRUCTURE_SQL = `
     AND EXISTS (SELECT 1 FROM beats WHERE slug = 'protocol-infra')
     AND (SELECT created_by FROM beats WHERE slug = 'protocol-infra') != 'system';
 
+  -- agentic-trading claim carries to agent-trading (rename)
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'agentic-trading'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'agentic-trading')
+  WHERE slug = 'agent-trading'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'agentic-trading')
+    AND (SELECT created_by FROM beats WHERE slug = 'agentic-trading') != 'system';
+
   -- ── Phase C: Remap signals.beat_slug ───────────────────────────────────
   -- Renames: old slug → new slug
   UPDATE signals SET beat_slug = 'bitcoin-macro' WHERE beat_slug = 'btc-macro';
   UPDATE signals SET beat_slug = 'agent-economy' WHERE beat_slug = 'agent-commerce';
   UPDATE signals SET beat_slug = 'aibtc-network' WHERE beat_slug = 'network-ops';
+  UPDATE signals SET beat_slug = 'agent-trading' WHERE beat_slug = 'agentic-trading';
   -- Merges: multiple old slugs → single new slug
   UPDATE signals SET beat_slug = 'ordinals' WHERE beat_slug IN ('ordinals-business', 'ordinals-culture');
   UPDATE signals SET beat_slug = 'dev-tools' WHERE beat_slug = 'protocol-infra';
@@ -246,5 +255,5 @@ export const MIGRATION_BEAT_RESTRUCTURE_SQL = `
   UPDATE signals SET beat_slug = 'bitcoin-macro' WHERE beat_slug = 'fee-weather';
 
   -- ── Phase D: Delete old beats (all signals remapped above) ─────────────
-  DELETE FROM beats WHERE slug IN ('btc-macro', 'agent-commerce', 'network-ops', 'ordinals-business', 'ordinals-culture', 'protocol-infra', 'defi-yields', 'fee-weather');
+  DELETE FROM beats WHERE slug IN ('btc-macro', 'agent-commerce', 'network-ops', 'ordinals-business', 'ordinals-culture', 'protocol-infra', 'defi-yields', 'fee-weather', 'agentic-trading');
 `;

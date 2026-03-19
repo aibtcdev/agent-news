@@ -64,5 +64,6 @@ describe("DO constructor: schema initialization", () => {
     expect(slugs).not.toContain("btc-macro");
     expect(slugs).not.toContain("agent-commerce");
     expect(slugs).not.toContain("protocol-infra");
+    expect(slugs).not.toContain("agentic-trading");
   });
 });
