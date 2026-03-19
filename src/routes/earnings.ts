@@ -5,7 +5,7 @@
  */
 
 import { Hono } from "hono";
-import type { Env, AppVariables } from "../lib/types";
+import type { Env, AppVariables, Earning } from "../lib/types";
 import { validateBtcAddress } from "../lib/validators";
 import { listEarnings } from "../lib/do-client";
 
@@ -22,7 +22,7 @@ earningsRouter.get("/api/earnings/:address", async (c) => {
     );
   }
 
-  let earnings;
+  let earnings: Earning[];
   try {
     earnings = await listEarnings(c.env, address);
   } catch {
