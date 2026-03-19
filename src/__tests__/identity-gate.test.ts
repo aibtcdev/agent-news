@@ -83,7 +83,7 @@ describe("checkAgentIdentity — API success", () => {
 
   it("caches the result after a successful API call", async () => {
     const kv = makeKV();
-    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+    const firstSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({ found: true, level: 2, levelName: "Genesis" }),
         { status: 200, headers: { "Content-Type": "application/json" } }
@@ -91,8 +91,12 @@ describe("checkAgentIdentity — API success", () => {
     );
 
     await checkAgentIdentity(kv, "bc1qcachetest");
+    expect(firstSpy).toHaveBeenCalledOnce();
 
-    // Second call should hit cache (fetch only called once)
+    // Restore the first spy before creating a new one — stacking vi.spyOn causes double-counting
+    firstSpy.mockRestore();
+
+    // Second call should hit cache (fetch not called again)
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     await checkAgentIdentity(kv, "bc1qcachetest");
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -141,9 +145,12 @@ describe("checkAgentIdentity — fail open on API errors", () => {
 
   it("does not cache the result on API failure", async () => {
     const kv = makeKV();
-    vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
+    const firstSpy = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("timeout"));
 
     await checkAgentIdentity(kv, "bc1qnocache");
+
+    // Restore the first spy before creating a new one — stacking vi.spyOn causes double-counting
+    firstSpy.mockRestore();
 
     // Second call should hit the API again (not cached)
     const fetchSpy = vi
@@ -164,10 +171,10 @@ describe("checkAgentIdentity — fail open on API errors", () => {
 describe("identity gate logic — level thresholds", () => {
   it("gate allows when apiReachable is false (fail open on API error)", () => {
     // Replicates the gate condition from signals.ts:
-    // if (identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2)))
+    // if (identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2))
     const identity = { registered: false, level: null, levelName: null, apiReachable: false };
     const shouldBlock =
-      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
+      identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2);
     // apiReachable=false → gate fails open, never blocks regardless of registered/level
     expect(shouldBlock).toBe(false);
   });
@@ -175,28 +182,36 @@ describe("identity gate logic — level thresholds", () => {
   it("gate blocks a Level 1 agent", () => {
     const identity = { registered: true, level: 1, levelName: "Member", apiReachable: true };
     const shouldBlock =
-      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
+      identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2);
     expect(shouldBlock).toBe(true);
   });
 
   it("gate allows a Level 2 (Genesis) agent", () => {
     const identity = { registered: true, level: 2, levelName: "Genesis", apiReachable: true };
     const shouldBlock =
-      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
+      identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2);
     expect(shouldBlock).toBe(false);
   });
 
   it("gate allows a Level 3+ agent", () => {
     const identity = { registered: true, level: 3, levelName: "Pioneer", apiReachable: true };
     const shouldBlock =
-      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
+      identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2);
     expect(shouldBlock).toBe(false);
+  });
+
+  it("gate blocks a registered agent with null level (missing level field)", () => {
+    const identity = { registered: true, level: null as number | null, levelName: null, apiReachable: true };
+    const shouldBlock =
+      identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2);
+    // registered=true but level=null → blocks (prevents bypass when API returns found:true with no level)
+    expect(shouldBlock).toBe(true);
   });
 
   it("gate blocks an unregistered address when API is reachable", () => {
     const identity = { registered: false, level: null, levelName: null, apiReachable: true };
     const shouldBlock =
-      identity.apiReachable && (!identity.registered || (identity.level !== null && identity.level < 2));
+      identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2);
     expect(shouldBlock).toBe(true);
   });
 });
