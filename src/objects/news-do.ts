@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earnin
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL } from "./schema";
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -117,6 +117,16 @@ export class NewsDO extends DurableObject<Env> {
       } catch (e) {
         // Index already exists — safe to ignore on re-run.
         console.error("Payments migration statement failed (likely already applied):", e);
+      }
+    }
+
+    // Run sBTC tracking migration — adds payout_txid column to earnings.
+    for (const stmt of MIGRATION_SBTC_TRACKING_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch (e) {
+        // Column already exists — safe to ignore on re-run.
+        console.error("sBTC tracking migration statement failed (likely already applied):", e);
       }
     }
 
@@ -1553,6 +1563,56 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
       return c.json({ ok: true, data: rows as unknown as Earning[] } satisfies DOResult<Earning[]>);
+    });
+
+    // PATCH /earnings/:id — Publisher records sBTC txid after sending payout
+    this.router.patch("/earnings/:id", async (c) => {
+      const id = c.req.param("id");
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Earning>, 400);
+      }
+
+      const { btc_address, payout_txid } = body;
+
+      if (!btc_address || typeof btc_address !== "string") {
+        return c.json({ ok: false, error: "Missing required field: btc_address" } satisfies DOResult<Earning>, 400);
+      }
+      if (!payout_txid || typeof payout_txid !== "string" || payout_txid.trim() === "") {
+        return c.json({ ok: false, error: "Missing required field: payout_txid (non-empty string)" } satisfies DOResult<Earning>, 400);
+      }
+
+      // Verify publisher designation
+      const publisherRows = this.ctx.storage.sql
+        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
+        .toArray();
+      if (publisherRows.length === 0) {
+        return c.json({ ok: false, error: "Publisher not yet designated" } satisfies DOResult<Earning>, 403);
+      }
+      const publisherAddress = (publisherRows[0] as { value: string }).value;
+      if (btc_address !== publisherAddress) {
+        return c.json({ ok: false, error: "Only the designated Publisher can record payout txids" } satisfies DOResult<Earning>, 403);
+      }
+
+      // Verify earning exists
+      const earningRows = this.ctx.storage.sql
+        .exec("SELECT id FROM earnings WHERE id = ?", id)
+        .toArray();
+      if (earningRows.length === 0) {
+        return c.json({ ok: false, error: `Earning "${id}" not found` } satisfies DOResult<Earning>, 404);
+      }
+
+      this.ctx.storage.sql.exec(
+        "UPDATE earnings SET payout_txid = ? WHERE id = ?",
+        payout_txid as string,
+        id
+      );
+
+      const updated = this.ctx.storage.sql
+        .exec("SELECT * FROM earnings WHERE id = ?", id)
+        .toArray();
+
+      return c.json({ ok: true, data: updated[0] as unknown as Earning } satisfies DOResult<Earning>);
     });
 
     // -------------------------------------------------------------------------
