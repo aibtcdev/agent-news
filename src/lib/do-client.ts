@@ -79,6 +79,12 @@ export interface SignalFilters {
   limit?: number;
 }
 
+export interface FrontPagePageResult {
+  signals: Signal[];
+  date: string | null;
+  hasMore: boolean;
+}
+
 export async function listSignals(
   env: Env,
   filters: SignalFilters = {}
@@ -95,6 +101,24 @@ export async function listSignals(
   const result = await doFetch<Signal[]>(stub, `/signals${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list signals");
   if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}
+
+/** Fetch one day of curated signals strictly before `before` (YYYY-MM-DD) for infinite scroll. */
+export async function listFrontPagePage(
+  env: Env,
+  before: string,
+  limit = 50
+): Promise<FrontPagePageResult> {
+  const stub = getStub(env);
+  const params = new URLSearchParams({ before, limit: String(limit) });
+  const result = await doFetch<FrontPagePageResult>(
+    stub,
+    `/signals/front-page-page?${params.toString()}`
+  );
+  if (!result.ok || !result.data) {
+    return { signals: [], date: null, hasMore: false };
+  }
   return result.data;
 }
 

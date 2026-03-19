@@ -568,6 +568,62 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
     });
 
+    // GET /signals/front-page-page — date-paginated curated signals for infinite scroll
+    // Query params: before (YYYY-MM-DD, required), limit (default 50, max 200)
+    // Returns signals from the most recent day strictly before `before`, with hasMore flag.
+    this.router.get("/signals/front-page-page", (c) => {
+      const before = c.req.query("before") ?? null;
+      const limitParam = c.req.query("limit");
+      const limit = Math.min(
+        Math.max(1, parseInt(limitParam ?? "50", 10) || 50),
+        200
+      );
+
+      if (!before || !/^\d{4}-\d{2}-\d{2}$/.test(before)) {
+        return c.json(
+          { ok: false, error: "Missing or invalid 'before' param (YYYY-MM-DD required)" },
+          400
+        );
+      }
+
+      const beforeISO = `${before}T00:00:00.000Z`;
+
+      // Fetch approved + brief_included signals strictly before the boundary.
+      // Fetch limit+1 to determine hasMore — we'll slice back to limit after day-filtering.
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+           FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN signal_tags st ON s.id = st.signal_id
+           WHERE s.status IN ('approved', 'brief_included')
+             AND s.created_at < ?1
+           GROUP BY s.id
+           ORDER BY s.created_at DESC
+           LIMIT ?2`,
+          beforeISO,
+          limit + 1
+        )
+        .toArray();
+
+      if (rows.length === 0) {
+        return c.json({ ok: true, data: { signals: [], date: null, hasMore: false } });
+      }
+
+      const allSignals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
+
+      // Determine the day: UTC date of the first (most recent) result
+      const day = allSignals[0].created_at.slice(0, 10);
+
+      // Keep only signals from that day
+      const daySignals = allSignals.filter((s) => s.created_at.slice(0, 10) === day);
+
+      // hasMore = there are signals from days older than `day`
+      const hasMore = allSignals.some((s) => s.created_at.slice(0, 10) < day);
+
+      return c.json({ ok: true, data: { signals: daySignals, date: day, hasMore } });
+    });
+
     // GET /signals/:id — get a single signal with tags and beat name joined
     this.router.get("/signals/:id", (c) => {
       const id = c.req.param("id");
