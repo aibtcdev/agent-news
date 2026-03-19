@@ -3038,8 +3038,13 @@
 
       main.innerHTML = html;
       hydrateAgentIdentities(main);
-      // Kick off infinite scroll below today's curated signals
-      initInfiniteScroll(todayStr);
+      // Set scroll cursor based on the oldest rendered signal's date (Pacific time)
+      // to avoid duplicates when paginating back to those days
+      const oldestSignal = signals[signals.length - 1];
+      const scrollCursor = oldestSignal && oldestSignal.timestamp
+        ? new Date(oldestSignal.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+        : todayStr;
+      initInfiniteScroll(scrollCursor);
     }
 
     // ── Render components ──
@@ -3461,19 +3466,38 @@
       main.insertBefore(spinner, sentinel);
 
       let result = null;
+      let fetchError = false;
       try {
         result = await fetchJSON(`/api/front-page?before=${encodeURIComponent(scrollState.nextBefore)}&limit=50`);
-      } catch (_) { /* network error — treat as no more */ }
+        if (result === null) fetchError = true;
+      } catch (_) {
+        fetchError = true;
+      }
 
       // Remove spinner
       if (spinner.parentNode) spinner.parentNode.removeChild(spinner);
+
+      // Transient error — show retry UI instead of ending the feed
+      if (fetchError) {
+        const retry = document.createElement('div');
+        retry.className = 'scroll-terminal';
+        retry.innerHTML = 'Failed to load older signals. <button class="scroll-retry-btn" style="margin-left:8px;cursor:pointer;background:none;border:1px solid var(--rule);border-radius:4px;padding:4px 12px;color:var(--text);font-size:inherit;">Retry</button>';
+        retry.querySelector('.scroll-retry-btn').addEventListener('click', function() {
+          if (retry.parentNode) retry.parentNode.removeChild(retry);
+          scrollState.loading = false;
+          loadNextDay();
+        });
+        main.insertBefore(retry, sentinel);
+        scrollState.loading = false;
+        return;
+      }
 
       const signals = result && result.signals ? result.signals : [];
       const date = result && result.date ? result.date : null;
       const hasMore = result && result.hasMore === true;
 
       if (signals.length === 0 || !date) {
-        // Nothing more — show terminal state and stop
+        // Confirmed end-of-feed — show terminal state and stop
         scrollState.done = true;
         if (scrollState.observer) {
           scrollState.observer.disconnect();

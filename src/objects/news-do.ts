@@ -569,15 +569,11 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // GET /signals/front-page-page — date-paginated curated signals for infinite scroll
-    // Query params: before (YYYY-MM-DD, required), limit (default 50, max 200)
-    // Returns signals from the most recent day strictly before `before`, with hasMore flag.
+    // Query params: before (YYYY-MM-DD Pacific date, required), limit (unused, kept for compat)
+    // Uses 2-step query: (1) find the target Pacific day, (2) fetch ALL signals for that day.
+    // Returns signals from the most recent Pacific day strictly before `before`, with hasMore flag.
     this.router.get("/signals/front-page-page", (c) => {
       const before = c.req.query("before") ?? null;
-      const limitParam = c.req.query("limit");
-      const limit = Math.min(
-        Math.max(1, parseInt(limitParam ?? "50", 10) || 50),
-        200
-      );
 
       if (!before || !/^\d{4}-\d{2}-\d{2}$/.test(before)) {
         return c.json(
@@ -586,10 +582,33 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      const beforeISO = `${before}T00:00:00.000Z`;
+      // Use Pacific-day boundaries to match brief date semantics
+      const beforeDayStartUTC = getPacificDayStartUTC(before);
 
-      // Fetch approved + brief_included signals strictly before the boundary.
-      // Fetch limit+1 to determine hasMore — we'll slice back to limit after day-filtering.
+      // Step 1: Find the target day — get the most recent signal strictly before the boundary
+      const probeRows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.created_at
+           FROM signals s
+           WHERE s.status IN ('approved', 'brief_included')
+             AND s.created_at < ?1
+           ORDER BY s.created_at DESC
+           LIMIT 1`,
+          beforeDayStartUTC
+        )
+        .toArray();
+
+      if (probeRows.length === 0) {
+        return c.json({ ok: true, data: { signals: [], date: null, hasMore: false } });
+      }
+
+      // Determine the Pacific date of the most recent signal before the boundary
+      const probeTimestamp = (probeRows[0] as Record<string, unknown>).created_at as string;
+      const day = getPacificDate(new Date(probeTimestamp));
+      const dayStartUTC = getPacificDayStartUTC(day);
+      const dayEndUTC = getPacificDayStartUTC(getNextDate(day));
+
+      // Step 2: Fetch ALL signals for that Pacific day (complete day, no limit)
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
@@ -597,29 +616,28 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN beats b ON s.beat_slug = b.slug
            LEFT JOIN signal_tags st ON s.id = st.signal_id
            WHERE s.status IN ('approved', 'brief_included')
-             AND s.created_at < ?1
+             AND s.created_at >= ?1
+             AND s.created_at < ?2
            GROUP BY s.id
-           ORDER BY s.created_at DESC
-           LIMIT ?2`,
-          beforeISO,
-          limit + 1
+           ORDER BY s.created_at DESC`,
+          dayStartUTC,
+          dayEndUTC
         )
         .toArray();
 
-      if (rows.length === 0) {
-        return c.json({ ok: true, data: { signals: [], date: null, hasMore: false } });
-      }
+      const daySignals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
 
-      const allSignals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
-
-      // Determine the day: UTC date of the first (most recent) result
-      const day = allSignals[0].created_at.slice(0, 10);
-
-      // Keep only signals from that day
-      const daySignals = allSignals.filter((s) => s.created_at.slice(0, 10) === day);
-
-      // hasMore = there are signals from days older than `day`
-      const hasMore = allSignals.some((s) => s.created_at.slice(0, 10) < day);
+      // Check hasMore: are there any signals before this day?
+      const olderRows = this.ctx.storage.sql
+        .exec(
+          `SELECT 1 FROM signals
+           WHERE status IN ('approved', 'brief_included')
+             AND created_at < ?1
+           LIMIT 1`,
+          dayStartUTC
+        )
+        .toArray();
+      const hasMore = olderRows.length > 0;
 
       return c.json({ ok: true, data: { signals: daySignals, date: day, hasMore } });
     });

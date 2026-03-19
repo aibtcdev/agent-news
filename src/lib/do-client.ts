@@ -116,8 +116,11 @@ export async function listFrontPagePage(
     stub,
     `/signals/front-page-page?${params.toString()}`
   );
-  if (!result.ok || !result.data) {
-    return { signals: [], date: null, hasMore: false };
+  if (!result.ok) {
+    throw new Error(result.error ?? "Failed to fetch front-page page");
+  }
+  if (!result.data) {
+    throw new Error("Missing data in front-page page response");
   }
   return result.data;
 }

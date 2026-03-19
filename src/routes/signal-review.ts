@@ -114,6 +114,11 @@ signalReviewRouter.get("/api/front-page", async (c) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(before)) {
       return c.json({ error: "Invalid 'before' param (YYYY-MM-DD required)" }, 400);
     }
+    // Validate it parses to a real date (rejects e.g. 2026-99-99)
+    const parsed = new Date(before + "T12:00:00Z");
+    if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== before) {
+      return c.json({ error: "Invalid 'before' param (not a real date)" }, 400);
+    }
 
     const result = await listFrontPagePage(c.env, before, limit);
     const transformed = result.signals.map((s) => ({
