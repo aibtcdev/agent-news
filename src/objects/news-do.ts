@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earnin
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL } from "./schema";
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -129,6 +129,19 @@ export class NewsDO extends DurableObject<Env> {
         const msg = e instanceof Error ? e.message : String(e);
         if (!msg.includes("duplicate column")) {
           console.error("sBTC tracking migration statement failed:", e);
+        }
+      }
+    }
+
+    // Run classifieds cleanup migration — drops contact column (btc_address serves as contact).
+    for (const stmt of MIGRATION_CLASSIFIEDS_CLEANUP_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch (e) {
+        // Column may not exist (new instances) or already dropped — safe to ignore.
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes("no such column") && !msg.includes("no column")) {
+          console.error("Classifieds cleanup migration statement failed:", e);
         }
       }
     }
@@ -1201,8 +1214,7 @@ export class NewsDO extends DurableObject<Env> {
         .filter((row) => {
           const charCount =
             (row.headline?.length ?? 0) +
-            (row.body?.length ?? 0) +
-            (row.contact?.length ?? 0);
+            (row.body?.length ?? 0);
           return charCount <= maxChars;
         })
         .slice(0, CLASSIFIED_BRIEF_SLOTS);
@@ -1240,7 +1252,7 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      const { btc_address, category, headline, body: adBody, contact, payment_txid } = body;
+      const { btc_address, category, headline, body: adBody, payment_txid } = body;
 
       if (!btc_address || !category || !headline) {
         return c.json(
@@ -1261,14 +1273,13 @@ export class NewsDO extends DurableObject<Env> {
       expiresAt.setDate(expiresAt.getDate() + CLASSIFIED_DURATION_DAYS);
 
       this.ctx.storage.sql.exec(
-        `INSERT INTO classifieds (id, btc_address, category, headline, body, contact, payment_txid, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO classifieds (id, btc_address, category, headline, body, payment_txid, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         btc_address as string,
         category as string,
         sanitizeString(headline, 100),
         adBody ? sanitizeString(adBody, 500) : null,
-        contact ? sanitizeString(contact, 200) : null,
         payment_txid ? (payment_txid as string) : null,
         nowIso,
         expiresAt.toISOString()

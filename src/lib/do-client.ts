@@ -297,7 +297,6 @@ export interface CreateClassifiedInput {
   category: string;
   headline: string;
   body?: string | null;
-  contact?: string | null;
   payment_txid?: string | null;
 }
 

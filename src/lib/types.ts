@@ -171,7 +171,6 @@ export interface Classified {
   readonly category: string;
   readonly headline: string;
   readonly body: string | null;
-  readonly contact: string | null;
   readonly payment_txid: string | null;
   readonly created_at: string;
   readonly expires_at: string;

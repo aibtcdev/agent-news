@@ -64,7 +64,6 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
     body: cl.body,
     category: cl.category,
     placedBy: cl.btc_address,
-    contact: cl.contact,
     paymentTxid: cl.payment_txid,
     createdAt: cl.created_at,
     expiresAt: cl.expires_at,
@@ -89,7 +88,6 @@ classifiedsRouter.get("/api/classifieds/:id", async (c) => {
     body: cl.body,
     category: cl.category,
     placedBy: cl.btc_address,
-    contact: cl.contact,
     paymentTxid: cl.payment_txid,
     createdAt: cl.created_at,
     expiresAt: cl.expires_at,
@@ -133,7 +131,6 @@ classifiedsRouter.post(
       category,
       headline,
       body: adBody,
-      contact,
     } = body;
 
     // Required fields
@@ -212,7 +209,6 @@ classifiedsRouter.post(
       category: category as string,
       headline: sanitizeString(headline, 100),
       body: adBody ? sanitizeString(adBody, 500) : null,
-      contact: contact ? sanitizeString(contact, 200) : null,
       payment_txid: verification.txid ?? null,
     });
 
