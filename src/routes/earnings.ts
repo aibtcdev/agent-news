@@ -1,13 +1,15 @@
 /**
  * Earnings route — correspondent earning history.
  *
- * GET /api/earnings/:address — list earnings for a BTC address
+ * GET   /api/earnings/:address — list earnings for a BTC address
+ * PATCH /api/earnings/:id      — Publisher records sBTC txid after sending payout
  */
 
 import { Hono } from "hono";
 import type { Env, AppVariables, Earning } from "../lib/types";
 import { validateBtcAddress } from "../lib/validators";
-import { listEarnings } from "../lib/do-client";
+import { listEarnings, updateEarning } from "../lib/do-client";
+import { verifyAuth } from "../services/auth";
 
 const earningsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -44,6 +46,63 @@ earningsRouter.get("/api/earnings/:address", async (c) => {
       totalEarnedSats,
     },
   });
+});
+
+// PATCH /api/earnings/:id — Publisher records sBTC txid after sending payout
+earningsRouter.patch("/api/earnings/:id", async (c) => {
+  const id = c.req.param("id");
+
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { btc_address, payout_txid } = body;
+
+  if (!btc_address || typeof btc_address !== "string") {
+    return c.json({ error: "Missing required field: btc_address" }, 400);
+  }
+  if (!payout_txid || typeof payout_txid !== "string" || payout_txid.trim() === "") {
+    return c.json({ error: "Missing required field: payout_txid (non-empty string)" }, 400);
+  }
+
+  if (!validateBtcAddress(btc_address)) {
+    return c.json({ error: "Invalid BTC address format" }, 400);
+  }
+
+  // BIP-322 auth — Publisher must sign the request
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btc_address,
+    "PATCH",
+    `/api/earnings/${id}`
+  );
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  const result = await updateEarning(c.env, id, {
+    btc_address,
+    payout_txid: payout_txid.trim(),
+  });
+
+  if (!result.ok) {
+    const httpStatus = result.error?.includes("not found") ? 404
+      : result.error?.includes("Publisher") ? 403
+      : 400;
+    return c.json({ error: result.error }, httpStatus);
+  }
+
+  const logger = c.get("logger");
+  logger.info("earning payout_txid recorded", {
+    earning_id: id,
+    payout_txid,
+    publisher: btc_address,
+  });
+
+  return c.json(result.data as Earning);
 });
 
 export { earningsRouter };

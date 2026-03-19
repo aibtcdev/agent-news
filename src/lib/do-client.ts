@@ -450,6 +450,24 @@ export async function listEarnings(
   return result.data;
 }
 
+export interface UpdateEarningInput {
+  btc_address: string;
+  payout_txid: string;
+}
+
+export async function updateEarning(
+  env: Env,
+  id: string,
+  input: UpdateEarningInput
+): Promise<DOResult<Earning>> {
+  const stub = getStub(env);
+  return doFetch<Earning>(stub, `/earnings/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
