@@ -705,9 +705,7 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      const earningId = generateId();
-
-      // Insert signal, tags, streak, and earning as individual statements.
+      // Insert signal, tags, and streak as individual statements.
       // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
       // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
       this.ctx.storage.sql.exec(
@@ -740,15 +738,6 @@ export class NewsDO extends DurableObject<Env> {
         longestStreak,
         today,
         totalSignals
-      );
-
-      this.ctx.storage.sql.exec(
-        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, 0, 'signal', ?, ?)`,
-        earningId,
-        btc_address as string,
-        signalId,
-        nowIso
       );
 
       // Credit referral on first signal — if a scout registered a referral
