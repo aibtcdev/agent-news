@@ -4,8 +4,8 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL } from "./schema";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL } from "./schema";
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -69,6 +69,27 @@ async function parseRequiredJson<T = Record<string, unknown>>(
   } catch {
     return null;
   }
+}
+
+/**
+ * Verify that the given BTC address matches the designated Publisher.
+ * Returns the publisher address on success, or an error string on failure.
+ */
+function verifyPublisher(
+  sql: DurableObjectState["storage"]["sql"],
+  btcAddress: string
+): { ok: true; address: string } | { ok: false; error: string; status: 403 } {
+  const rows = sql
+    .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
+    .toArray();
+  if (rows.length === 0) {
+    return { ok: false, error: "Publisher not yet designated", status: 403 };
+  }
+  const publisherAddress = (rows[0] as { value: string }).value;
+  if (btcAddress !== publisherAddress) {
+    return { ok: false, error: "Only the designated Publisher can perform this action", status: 403 };
+  }
+  return { ok: true, address: publisherAddress };
 }
 
 /**
@@ -142,6 +163,18 @@ export class NewsDO extends DurableObject<Env> {
         const msg = e instanceof Error ? e.message : String(e);
         if (!msg.includes("no such column") && !msg.includes("no column")) {
           console.error("Classifieds cleanup migration statement failed:", e);
+        }
+      }
+    }
+
+    // Run classifieds editorial review migration — adds status, publisher_feedback, reviewed_at, refund_txid.
+    for (const stmt of MIGRATION_CLASSIFIEDS_REVIEW_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!msg.includes("duplicate column")) {
+          console.error("Classifieds review migration statement failed:", e);
         }
       }
     }
@@ -1174,6 +1207,7 @@ export class NewsDO extends DurableObject<Env> {
         .exec(
           `SELECT * FROM classifieds
            WHERE expires_at > datetime('now')
+             AND status = 'approved'
              AND (?1 IS NULL OR category = ?1)
            ORDER BY created_at DESC
            LIMIT ?2`,
@@ -1202,6 +1236,7 @@ export class NewsDO extends DurableObject<Env> {
         .exec(
           `SELECT * FROM classifieds
            WHERE expires_at > datetime('now')
+             AND status = 'approved'
            ORDER BY RANDOM()
            LIMIT ?`,
           CLASSIFIED_BRIEF_SLOTS * 4
@@ -1268,13 +1303,12 @@ export class NewsDO extends DurableObject<Env> {
       const nowIso = now.toISOString();
       const id = generateId();
 
-      // expires_at = now + CLASSIFIED_DURATION_DAYS
-      const expiresAt = new Date(now);
-      expiresAt.setDate(expiresAt.getDate() + CLASSIFIED_DURATION_DAYS);
-
+      // expires_at = created_at (already expired) — pending classifieds are excluded
+      // from active listings and rotation by the existing expires_at > datetime('now') filter.
+      // TTL starts on approval: expires_at = approval_time + CLASSIFIED_DURATION_DAYS.
       this.ctx.storage.sql.exec(
-        `INSERT INTO classifieds (id, btc_address, category, headline, body, payment_txid, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO classifieds (id, btc_address, category, headline, body, payment_txid, status, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
         id,
         btc_address as string,
         category as string,
@@ -1282,7 +1316,7 @@ export class NewsDO extends DurableObject<Env> {
         adBody ? sanitizeString(adBody, 500) : null,
         payment_txid ? (payment_txid as string) : null,
         nowIso,
-        expiresAt.toISOString()
+        nowIso // expires_at = created_at → immediately expired until approved
       );
 
       const rows = this.ctx.storage.sql
@@ -1293,6 +1327,148 @@ export class NewsDO extends DurableObject<Env> {
         { ok: true, data: rows[0] as unknown as Classified } satisfies DOResult<Classified>,
         201
       );
+    });
+
+    // GET /classifieds/pending — list classifieds awaiting review (Publisher convenience)
+    this.router.get("/classifieds/pending", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM classifieds
+           WHERE status = 'pending_review'
+           ORDER BY created_at ASC`
+        )
+        .toArray();
+      return c.json({
+        ok: true,
+        data: rows as unknown as Classified[],
+      } satisfies DOResult<Classified[]>);
+    });
+
+    // PATCH /classifieds/:id/review — Publisher approves or rejects a classified
+    this.router.patch("/classifieds/:id/review", async (c) => {
+      const id = c.req.param("id");
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Classified>, 400);
+      }
+
+      const { btc_address, status, feedback } = body;
+
+      // Verify publisher designation
+      const pub = verifyPublisher(this.ctx.storage.sql, btc_address as string);
+      if (!pub.ok) {
+        return c.json({ ok: false, error: pub.error } satisfies DOResult<Classified>, pub.status);
+      }
+
+      // Validate status
+      if (!status || !(CLASSIFIED_STATUSES as readonly string[]).includes(status as string)) {
+        return c.json({
+          ok: false,
+          error: `Invalid status. Must be one of: ${CLASSIFIED_STATUSES.join(", ")}`,
+        } satisfies DOResult<Classified>, 400);
+      }
+
+      // Rejection requires feedback
+      if (status === "rejected" && !feedback) {
+        return c.json({ ok: false, error: "Feedback is required when rejecting a classified" } satisfies DOResult<Classified>, 400);
+      }
+
+      // Verify classified exists and enforce state transitions
+      const classifiedRows = this.ctx.storage.sql
+        .exec("SELECT id, status FROM classifieds WHERE id = ?", id)
+        .toArray();
+      if (classifiedRows.length === 0) {
+        return c.json({ ok: false, error: `Classified "${id}" not found` } satisfies DOResult<Classified>, 404);
+      }
+
+      const currentStatus = (classifiedRows[0] as { id: string; status: string }).status;
+      const VALID_TRANSITIONS: Record<string, string[]> = {
+        pending_review: ["approved", "rejected"],
+        rejected: ["approved"],
+        approved: [], // terminal — TTL is already running
+      };
+      const allowed = VALID_TRANSITIONS[currentStatus] ?? [];
+      if (!allowed.includes(status as string)) {
+        return c.json({
+          ok: false,
+          error: `Invalid transition: "${currentStatus}" → "${status}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
+        } satisfies DOResult<Classified>, 400);
+      }
+
+      const now = new Date();
+      const nowIso = now.toISOString();
+
+      if (status === "approved") {
+        // TTL starts now
+        const expiresAt = new Date(now);
+        expiresAt.setDate(expiresAt.getDate() + CLASSIFIED_DURATION_DAYS);
+        this.ctx.storage.sql.exec(
+          `UPDATE classifieds SET status = 'approved', publisher_feedback = ?, reviewed_at = ?, expires_at = ?
+           WHERE id = ?`,
+          feedback ? sanitizeString(feedback, 1000) : null,
+          nowIso,
+          expiresAt.toISOString(),
+          id
+        );
+      } else {
+        // Rejected — leave expires_at as-is (already expired)
+        this.ctx.storage.sql.exec(
+          `UPDATE classifieds SET status = 'rejected', publisher_feedback = ?, reviewed_at = ?
+           WHERE id = ?`,
+          feedback ? sanitizeString(feedback, 1000) : null,
+          nowIso,
+          id
+        );
+      }
+
+      const updated = this.ctx.storage.sql
+        .exec("SELECT * FROM classifieds WHERE id = ?", id)
+        .toArray();
+      return c.json({ ok: true, data: updated[0] as unknown as Classified } satisfies DOResult<Classified>);
+    });
+
+    // PATCH /classifieds/:id/refund — Publisher records refund txid after sending sBTC back
+    this.router.patch("/classifieds/:id/refund", async (c) => {
+      const id = c.req.param("id");
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Classified>, 400);
+      }
+
+      const { btc_address, refund_txid } = body;
+
+      // Verify publisher designation
+      const pub = verifyPublisher(this.ctx.storage.sql, btc_address as string);
+      if (!pub.ok) {
+        return c.json({ ok: false, error: pub.error } satisfies DOResult<Classified>, pub.status);
+      }
+
+      if (!refund_txid) {
+        return c.json({ ok: false, error: "Missing required field: refund_txid" } satisfies DOResult<Classified>, 400);
+      }
+
+      // Verify classified exists and is rejected
+      const classifiedRows = this.ctx.storage.sql
+        .exec("SELECT id, status FROM classifieds WHERE id = ?", id)
+        .toArray();
+      if (classifiedRows.length === 0) {
+        return c.json({ ok: false, error: `Classified "${id}" not found` } satisfies DOResult<Classified>, 404);
+      }
+      const currentStatus = (classifiedRows[0] as { id: string; status: string }).status;
+      if (currentStatus !== "rejected") {
+        return c.json({ ok: false, error: `Refund can only be recorded on rejected classifieds (current: "${currentStatus}")` } satisfies DOResult<Classified>, 400);
+      }
+
+      this.ctx.storage.sql.exec(
+        "UPDATE classifieds SET refund_txid = ? WHERE id = ?",
+        refund_txid as string,
+        id
+      );
+
+      const updated = this.ctx.storage.sql
+        .exec("SELECT * FROM classifieds WHERE id = ?", id)
+        .toArray();
+      return c.json({ ok: true, data: updated[0] as unknown as Classified } satisfies DOResult<Classified>);
     });
 
     // -------------------------------------------------------------------------

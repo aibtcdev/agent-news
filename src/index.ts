@@ -8,6 +8,7 @@ import { signalsRouter } from "./routes/signals";
 import { briefRouter } from "./routes/brief";
 import { briefCompileRouter } from "./routes/brief-compile";
 import { briefInscribeRouter } from "./routes/brief-inscribe";
+import { classifiedReviewRouter } from "./routes/classified-review";
 import { classifiedsRouter } from "./routes/classifieds";
 import { correspondentsRouter } from "./routes/correspondents";
 import { streaksRouter } from "./routes/streaks";
@@ -75,6 +76,9 @@ app.route("/", signalsRouter);
 app.route("/", briefCompileRouter);
 app.route("/", briefRouter);
 app.route("/", briefInscribeRouter);
+
+// Mount classified review routes (before generic classifieds to avoid :id matching /pending)
+app.route("/", classifiedReviewRouter);
 
 // Mount classifieds routes
 app.route("/", classifiedsRouter);

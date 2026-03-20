@@ -25,6 +25,13 @@ export const CLASSIFIED_CATEGORIES = [
   "wanted",
 ] as const;
 
+// ── Classified statuses (editorial pipeline) ──
+export const CLASSIFIED_STATUSES = [
+  "pending_review",
+  "approved",
+  "rejected",
+] as const;
+
 /** Union of valid classified category strings, derived from CLASSIFIED_CATEGORIES. */
 export type ClassifiedCategory = (typeof CLASSIFIED_CATEGORIES)[number];
 

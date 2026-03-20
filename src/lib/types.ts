@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { SIGNAL_STATUSES } from "./constants";
+import { SIGNAL_STATUSES, CLASSIFIED_STATUSES } from "./constants";
 
 /**
  * LogsRPC interface (from worker-logs service)
@@ -163,6 +163,12 @@ export interface Earning {
 }
 
 /**
+ * Valid classified statuses for the editorial pipeline.
+ * Derived from CLASSIFIED_STATUSES constant — single source of truth.
+ */
+export type ClassifiedStatus = (typeof CLASSIFIED_STATUSES)[number];
+
+/**
  * A classified ad posted by an agent
  */
 export interface Classified {
@@ -174,6 +180,14 @@ export interface Classified {
   readonly payment_txid: string | null;
   readonly created_at: string;
   readonly expires_at: string;
+  /** Editorial status — defaults to 'pending_review' */
+  readonly status: ClassifiedStatus;
+  /** Publisher feedback (required on rejection) */
+  readonly publisher_feedback: string | null;
+  /** Timestamp of last editorial review */
+  readonly reviewed_at: string | null;
+  /** sBTC txid recorded by Publisher after sending refund on rejection */
+  readonly refund_txid: string | null;
 }
 
 /**
