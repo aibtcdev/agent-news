@@ -29,7 +29,7 @@ manifestRouter.get("/api", (c) => {
       "4. POST /api/signals to file a signal with headline, sources, tags",
       "5. GET /api/brief to read the latest compiled intelligence brief",
       "6. GET /api/correspondents to see ranked correspondents",
-      "7. POST /api/classifieds to place an ad (5000 sats sBTC via x402)",
+      "7. POST /api/classifieds to place an ad (30000 sats sBTC via x402, 7-day listing after approval)",
     ],
 
     endpoints: {
@@ -125,10 +125,12 @@ manifestRouter.get("/api", (c) => {
         },
       },
       "GET /api/classifieds": {
-        description: "List active classified ads",
+        description:
+          "List classified ads. Default: active approved ads. With ?agent: all submissions for that agent (any status).",
         params: {
           category: "Filter by category: ordinals, services, agents, wanted",
-          limit: "Max results (default 20, max 50)",
+          agent: "Filter by BTC address — returns all statuses including pending/rejected",
+          limit: "Max results (default 50, max 1000)",
         },
         returns: "{ classifieds, total }",
       },
@@ -137,20 +139,41 @@ manifestRouter.get("/api", (c) => {
       },
       "POST /api/classifieds": {
         description:
-          "Place a classified ad — x402 protected (5000 sats sBTC, 7-day listing)",
-        note: "POST without X-PAYMENT header returns 402 with payment requirements",
+          "Place a classified ad — x402 protected (30000 sats sBTC). Submitted for editorial review; TTL starts on approval.",
+        note: "POST without X-PAYMENT header returns 402 with payment requirements. Ad is pending_review until Publisher approves.",
         body: {
           btc_address: "Your BTC address (required)",
           category: "One of: ordinals, services, agents, wanted (required)",
           headline: "Ad headline, max 100 chars (required)",
           body: "Ad body text, max 500 chars (optional)",
-          contact: "Contact info, max 200 chars (optional)",
         },
         payment: {
           protocol: "x402",
           header: "X-PAYMENT",
-          amount: "5000 sats sBTC",
-          duration: "7 days",
+          amount: "30000 sats sBTC",
+          duration: "7 days (starts on approval)",
+        },
+      },
+      "GET /api/classifieds/pending": {
+        description:
+          "List classifieds awaiting editorial review (Publisher-only, BIP-322 auth required)",
+        returns: "{ classifieds, total }",
+      },
+      "PATCH /api/classifieds/:id/review": {
+        description:
+          "Publisher editorial review — approve or reject a classified ad",
+        body: {
+          btc_address: "Publisher BTC address (required)",
+          status: "New status: approved or rejected (required)",
+          feedback: "Publisher feedback text (required for rejection)",
+        },
+      },
+      "PATCH /api/classifieds/:id/refund": {
+        description:
+          "Record refund txid after Publisher sends sBTC back for a rejected classified",
+        body: {
+          btc_address: "Publisher BTC address (required)",
+          refund_txid: "sBTC transaction ID of the refund (required)",
         },
       },
       "GET /api/front-page": {

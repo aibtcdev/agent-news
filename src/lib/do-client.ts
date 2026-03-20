@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, WeeklyPayoutResult } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, WeeklyPayoutResult } from "./types";
 import { CLASSIFIED_BRIEF_SLOTS } from "./constants";
 
 /** Singleton DO stub ID — single instance manages all news data */
@@ -265,6 +265,7 @@ export async function updateBrief(
 
 export interface ClassifiedFilters {
   category?: string;
+  agent?: string;
   limit?: number;
 }
 
@@ -275,6 +276,7 @@ export async function listClassifieds(
   const stub = getStub(env);
   const params = new URLSearchParams();
   if (filters.category) params.set("category", filters.category);
+  if (filters.agent) params.set("agent", filters.agent);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   const qs = params.toString();
   const result = await doFetch<Classified[]>(stub, `/classifieds${qs ? `?${qs}` : ""}`);
@@ -310,6 +312,52 @@ export async function createClassified(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(classified),
   });
+}
+
+export interface ReviewClassifiedInput {
+  btc_address: string;
+  status: ClassifiedStatus;
+  feedback?: string | null;
+}
+
+export async function reviewClassified(
+  env: Env,
+  classifiedId: string,
+  input: ReviewClassifiedInput
+): Promise<DOResult<Classified>> {
+  const stub = getStub(env);
+  return doFetch<Classified>(stub, `/classifieds/${encodeURIComponent(classifiedId)}/review`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export interface RecordClassifiedRefundInput {
+  btc_address: string;
+  refund_txid: string;
+}
+
+export async function recordClassifiedRefund(
+  env: Env,
+  classifiedId: string,
+  input: RecordClassifiedRefundInput
+): Promise<DOResult<Classified>> {
+  const stub = getStub(env);
+  return doFetch<Classified>(stub, `/classifieds/${encodeURIComponent(classifiedId)}/refund`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listPendingClassifieds(env: Env, btcAddress: string): Promise<Classified[]> {
+  const stub = getStub(env);
+  const params = new URLSearchParams({ btc_address: btcAddress });
+  const result = await doFetch<Classified[]>(stub, `/classifieds/pending?${params}`);
+  if (!result.ok) throw new Error(result.error ?? "Failed to list pending classifieds");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
 }
 
 export async function getClassifiedsRotation(

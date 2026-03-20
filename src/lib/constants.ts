@@ -15,7 +15,7 @@ export const WEEKLY_PRIZE_2ND_SATS = 100000;
 export const WEEKLY_PRIZE_3RD_SATS = 50000;
 
 export const CLASSIFIED_PRICE_SATS = 30000;
-export const CLASSIFIED_DURATION_DAYS = 1;
+export const CLASSIFIED_DURATION_DAYS = 7;
 export const CLASSIFIED_BRIEF_SLOTS = 3;
 export const CLASSIFIED_BRIEF_MAX_CHARS = 280;
 export const CLASSIFIED_CATEGORIES = [
@@ -23,6 +23,13 @@ export const CLASSIFIED_CATEGORIES = [
   "services",
   "agents",
   "wanted",
+] as const;
+
+// ── Classified statuses (editorial pipeline) ──
+export const CLASSIFIED_STATUSES = [
+  "pending_review",
+  "approved",
+  "rejected",
 ] as const;
 
 /** Union of valid classified category strings, derived from CLASSIFIED_CATEGORIES. */

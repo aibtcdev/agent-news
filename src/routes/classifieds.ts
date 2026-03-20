@@ -7,7 +7,7 @@
  */
 
 import { Hono } from "hono";
-import type { Env, AppVariables } from "../lib/types";
+import type { Env, AppVariables, Classified } from "../lib/types";
 import {
   CLASSIFIED_PRICE_SATS,
   CLASSIFIED_CATEGORIES,
@@ -24,6 +24,25 @@ import {
 } from "../lib/do-client";
 import { buildPaymentRequired, verifyPayment } from "../services/x402";
 import { verifyAuth } from "../services/auth";
+
+/** Transform a Classified row to the camelCase API response shape. */
+export function transformClassified(cl: Classified) {
+  return {
+    id: cl.id,
+    title: cl.headline,
+    body: cl.body,
+    category: cl.category,
+    placedBy: cl.btc_address,
+    paymentTxid: cl.payment_txid,
+    createdAt: cl.created_at,
+    expiresAt: cl.expires_at,
+    active: new Date(cl.expires_at).getTime() > Date.now(),
+    status: cl.status,
+    publisherFeedback: cl.publisher_feedback,
+    reviewedAt: cl.reviewed_at,
+    refundTxid: cl.refund_txid,
+  };
+}
 
 const classifiedsRouter = new Hono<{
   Bindings: Env;
@@ -46,28 +65,19 @@ classifiedsRouter.get("/api/classifieds/rotation", async (c) => {
   return c.json(result);
 });
 
-// GET /api/classifieds — list active classifieds (marketplace, no practical cap)
+// GET /api/classifieds — list classifieds
+// Default: active approved ads. With ?agent=ADDRESS: all submissions for that agent.
 classifiedsRouter.get("/api/classifieds", async (c) => {
   const category = c.req.query("category");
+  const agent = c.req.query("agent");
   const limitParam = c.req.query("limit");
   const limit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 1000)
     : undefined;
 
-  const classifieds = await listClassifieds(c.env, { category, limit });
+  const classifieds = await listClassifieds(c.env, { category, agent, limit });
 
-  // Transform snake_case → camelCase to match frontend expectations
-  const transformed = classifieds.map((cl) => ({
-    id: cl.id,
-    title: cl.headline,
-    body: cl.body,
-    category: cl.category,
-    placedBy: cl.btc_address,
-    paymentTxid: cl.payment_txid,
-    createdAt: cl.created_at,
-    expiresAt: cl.expires_at,
-    active: new Date(cl.expires_at).getTime() > Date.now(),
-  }));
+  const transformed = classifieds.map(transformClassified);
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({ classifieds: transformed, total: transformed.length });
@@ -81,17 +91,7 @@ classifiedsRouter.get("/api/classifieds/:id", async (c) => {
     return c.json({ error: `Classified "${id}" not found` }, 404);
   }
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({
-    id: cl.id,
-    title: cl.headline,
-    body: cl.body,
-    category: cl.category,
-    placedBy: cl.btc_address,
-    paymentTxid: cl.payment_txid,
-    createdAt: cl.created_at,
-    expiresAt: cl.expires_at,
-    active: new Date(cl.expires_at).getTime() > Date.now(),
-  });
+  return c.json(transformClassified(cl));
 });
 
 // POST /api/classifieds — place a classified ad (x402 payment required)
@@ -215,12 +215,12 @@ classifiedsRouter.post(
       return c.json({ error: result.error }, 400);
     }
 
-    logger.info("classified created", {
+    logger.info("classified created (pending review)", {
       id: (result.data as { id?: string })?.id,
       btc_address: btc_address as string,
       category: category as string,
     });
-    return c.json(result.data, 201);
+    return c.json({ ...result.data, message: "Classified submitted for editorial review" }, 201);
   }
 );
 

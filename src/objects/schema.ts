@@ -170,6 +170,22 @@ export const MIGRATION_PAYMENTS_SQL = [
 ] as const;
 
 /**
+ * Classifieds editorial review migration.
+ * Adds status, publisher_feedback, reviewed_at, and refund_txid columns
+ * so classifieds go through publisher review before going live.
+ * TTL starts from approval (not submission). Backfills existing rows as 'approved'.
+ */
+export const MIGRATION_CLASSIFIEDS_REVIEW_SQL = [
+  "ALTER TABLE classifieds ADD COLUMN status TEXT NOT NULL DEFAULT 'pending_review'",
+  "ALTER TABLE classifieds ADD COLUMN publisher_feedback TEXT",
+  "ALTER TABLE classifieds ADD COLUMN reviewed_at TEXT",
+  "ALTER TABLE classifieds ADD COLUMN refund_txid TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_classifieds_status ON classifieds(status)",
+  // Backfill: all existing classifieds were created before editorial review existed — mark approved
+  "UPDATE classifieds SET status = 'approved' WHERE status = 'pending_review'",
+] as const;
+
+/**
  * Beat restructure migration — Phase 3.
  * Defines the complete 17-beat taxonomy agreed by arc0btc, cedarxyz,
  * secret-mars, and tfireubs-ui (issue #97/#102).
