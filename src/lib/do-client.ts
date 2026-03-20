@@ -265,6 +265,7 @@ export async function updateBrief(
 
 export interface ClassifiedFilters {
   category?: string;
+  agent?: string;
   limit?: number;
 }
 
@@ -275,6 +276,7 @@ export async function listClassifieds(
   const stub = getStub(env);
   const params = new URLSearchParams();
   if (filters.category) params.set("category", filters.category);
+  if (filters.agent) params.set("agent", filters.agent);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   const qs = params.toString();
   const result = await doFetch<Classified[]>(stub, `/classifieds${qs ? `?${qs}` : ""}`);

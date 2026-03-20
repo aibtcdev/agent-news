@@ -125,10 +125,12 @@ manifestRouter.get("/api", (c) => {
         },
       },
       "GET /api/classifieds": {
-        description: "List active classified ads",
+        description:
+          "List classified ads. Default: active approved ads. With ?agent: all submissions for that agent (any status).",
         params: {
           category: "Filter by category: ordinals, services, agents, wanted",
-          limit: "Max results (default 20, max 50)",
+          agent: "Filter by BTC address — returns all statuses including pending/rejected",
+          limit: "Max results (default 50, max 1000)",
         },
         returns: "{ classifieds, total }",
       },

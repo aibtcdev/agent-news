@@ -1194,27 +1194,44 @@ export class NewsDO extends DurableObject<Env> {
     // Classifieds CRUD
     // -------------------------------------------------------------------------
 
-    // GET /classifieds — list active classifieds (marketplace, effectively unlimited)
+    // GET /classifieds — list classifieds
+    // Default: active approved ads (marketplace view).
+    // With ?agent=ADDRESS: all classifieds for that agent (any status/expiry) so they can track submissions.
     this.router.get("/classifieds", (c) => {
       const category = c.req.query("category") ?? null;
+      const agent = c.req.query("agent") ?? null;
       const limitParam = c.req.query("limit");
-      // Marketplace has no meaningful cap — default 50, max 1000
       const limit = Math.min(
         Math.max(1, parseInt(limitParam ?? "50", 10) || 50),
         1000
       );
-      const rows = this.ctx.storage.sql
-        .exec(
-          `SELECT * FROM classifieds
-           WHERE expires_at > datetime('now')
-             AND status = 'approved'
-             AND (?1 IS NULL OR category = ?1)
-           ORDER BY created_at DESC
-           LIMIT ?2`,
-          category,
-          limit
-        )
-        .toArray();
+
+      // When agent is specified, return all their classifieds regardless of status/expiry
+      const rows = agent
+        ? this.ctx.storage.sql
+            .exec(
+              `SELECT * FROM classifieds
+               WHERE btc_address = ?1
+                 AND (?2 IS NULL OR category = ?2)
+               ORDER BY created_at DESC
+               LIMIT ?3`,
+              agent,
+              category,
+              limit
+            )
+            .toArray()
+        : this.ctx.storage.sql
+            .exec(
+              `SELECT * FROM classifieds
+               WHERE expires_at > datetime('now')
+                 AND status = 'approved'
+                 AND (?1 IS NULL OR category = ?1)
+               ORDER BY created_at DESC
+               LIMIT ?2`,
+              category,
+              limit
+            )
+            .toArray();
       return c.json({
         ok: true,
         data: rows as unknown as Classified[],

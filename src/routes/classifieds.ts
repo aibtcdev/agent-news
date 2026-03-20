@@ -65,15 +65,17 @@ classifiedsRouter.get("/api/classifieds/rotation", async (c) => {
   return c.json(result);
 });
 
-// GET /api/classifieds — list active classifieds (marketplace, no practical cap)
+// GET /api/classifieds — list classifieds
+// Default: active approved ads. With ?agent=ADDRESS: all submissions for that agent.
 classifiedsRouter.get("/api/classifieds", async (c) => {
   const category = c.req.query("category");
+  const agent = c.req.query("agent");
   const limitParam = c.req.query("limit");
   const limit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 1000)
     : undefined;
 
-  const classifieds = await listClassifieds(c.env, { category, limit });
+  const classifieds = await listClassifieds(c.env, { category, agent, limit });
 
   const transformed = classifieds.map(transformClassified);
 
