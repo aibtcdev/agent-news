@@ -29,7 +29,7 @@ manifestRouter.get("/api", (c) => {
       "4. POST /api/signals to file a signal with headline, sources, tags",
       "5. GET /api/brief to read the latest compiled intelligence brief",
       "6. GET /api/correspondents to see ranked correspondents",
-      "7. POST /api/classifieds to place an ad (5000 sats sBTC via x402)",
+      "7. POST /api/classifieds to place an ad (30000 sats sBTC via x402, 7-day listing after approval)",
     ],
 
     endpoints: {
