@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.7.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.6.0...agent-news-v1.7.0) (2026-03-20)
+
+
+### Features
+
+* **classifieds:** add editorial review pipeline ([#144](https://github.com/aibtcdev/agent-news/issues/144)) ([4a91d58](https://github.com/aibtcdev/agent-news/commit/4a91d585ef11006fd26ed0f6ad49449c08d0380f))
+
+
+### Bug Fixes
+
+* correct x402 relay settle endpoint path ([#142](https://github.com/aibtcdev/agent-news/issues/142)) ([05f0a70](https://github.com/aibtcdev/agent-news/commit/05f0a70eb7eeb58541d01d8fbbc139cbeb671458)), closes [#140](https://github.com/aibtcdev/agent-news/issues/140)
+* **rate-limits:** raise publisher limits and consolidate constants ([#138](https://github.com/aibtcdev/agent-news/issues/138)) ([05ebcd2](https://github.com/aibtcdev/agent-news/commit/05ebcd2c0f32f008246a127f6e07387788186f79))
+
 ## [1.6.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.5.0...agent-news-v1.6.0) (2026-03-19)
 
 
