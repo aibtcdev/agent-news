@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, Source } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig } from "../lib/do-client";
+import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig, getClassifiedsRotation } from "../lib/do-client";
 import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
 import { getPacificDate, formatPacificShort } from "../lib/helpers";
@@ -200,6 +200,20 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
       text += `— ${section.correspondentName}`;
       if (section.streak > 1) text += ` (${section.streak}d streak)`;
       text += ` · ${formatPacificShort(section.timestamp)}\n\n`;
+    }
+    text += `${separator}\n`;
+  }
+
+  // Classifieds rotation — best-effort, non-fatal if fetch fails
+  const classifiedsResult = await getClassifiedsRotation(c.env);
+  if (classifiedsResult.ok && classifiedsResult.data && classifiedsResult.data.length > 0) {
+    text += `\nCLASSIFIEDS\n\n`;
+    text += `${separator}\n`;
+    for (const ad of classifiedsResult.data) {
+      text += `▸ ${ad.headline}`;
+      if (ad.body) text += ` — ${ad.body}`;
+      text += `\n`;
+      text += `Contact: ${ad.btc_address}\n\n`;
     }
     text += `${separator}\n`;
   }
