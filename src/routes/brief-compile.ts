@@ -206,17 +206,21 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   }
 
   // Classifieds rotation — best-effort, non-fatal if fetch fails
-  const classifiedsResult = await getClassifiedsRotation(c.env);
-  if (classifiedsResult.ok && classifiedsResult.data && classifiedsResult.data.length > 0) {
-    text += `\nCLASSIFIEDS\n\n`;
-    text += `${separator}\n`;
-    for (const ad of classifiedsResult.data) {
-      text += `▸ ${ad.headline}`;
-      if (ad.body) text += ` — ${ad.body}`;
-      text += `\n`;
-      text += `Contact: ${ad.btc_address}\n\n`;
+  try {
+    const classifiedsResult = await getClassifiedsRotation(c.env);
+    if (classifiedsResult.ok && classifiedsResult.data && classifiedsResult.data.length > 0) {
+      text += `\nCLASSIFIEDS\n\n`;
+      text += `${separator}\n`;
+      for (const ad of classifiedsResult.data) {
+        text += `▸ ${ad.headline}`;
+        if (ad.body) text += ` — ${ad.body}`;
+        text += `\n`;
+        text += `Contact: ${ad.btc_address}\n\n`;
+      }
+      text += `${separator}\n`;
     }
-    text += `${separator}\n`;
+  } catch {
+    // Classifieds are supplementary — don't fail the brief on rotation errors
   }
 
   text += `\nCompiled by AIBTC News Intelligence Network\n`;
