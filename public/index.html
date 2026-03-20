@@ -3072,7 +3072,8 @@
     // ── Render components ──
 
     function signalIdAttr(section) {
-      return section && section.id ? ` data-signal-id="${esc(section.id)}"` : '';
+      const id = section && (section.id || section.signalId);
+      return id ? ` data-signal-id="${esc(id)}"` : '';
     }
 
     function renderLead(section, beat) {
