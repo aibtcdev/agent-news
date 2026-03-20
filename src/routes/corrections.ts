@@ -18,8 +18,7 @@ const correctionsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>()
 
 const correctionRateLimit = createRateLimitMiddleware({
   key: "corrections",
-  maxRequests: CORRECTION_RATE_LIMIT.maxRequests,
-  windowSeconds: CORRECTION_RATE_LIMIT.windowSeconds,
+  ...CORRECTION_RATE_LIMIT,
 });
 
 // POST /api/signals/:id/corrections — file a correction

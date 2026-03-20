@@ -23,8 +23,7 @@ const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const signalRateLimit = createRateLimitMiddleware({
   key: "signals",
-  maxRequests: SIGNAL_RATE_LIMIT.maxRequests,
-  windowSeconds: SIGNAL_RATE_LIMIT.windowSeconds,
+  ...SIGNAL_RATE_LIMIT,
 });
 
 // GET /api/signals — list signals with optional filters

@@ -17,8 +17,7 @@ const signalReviewRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>(
 
 const reviewRateLimit = createRateLimitMiddleware({
   key: "signal-review",
-  maxRequests: REVIEW_RATE_LIMIT.maxRequests,
-  windowSeconds: REVIEW_RATE_LIMIT.windowSeconds,
+  ...REVIEW_RATE_LIMIT,
 });
 
 // PATCH /api/signals/:id/review — Publisher reviews a signal (BIP-322 auth required)

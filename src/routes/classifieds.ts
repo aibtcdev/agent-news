@@ -32,8 +32,7 @@ const classifiedsRouter = new Hono<{
 
 const classifiedRateLimit = createRateLimitMiddleware({
   key: "classifieds",
-  maxRequests: CLASSIFIED_RATE_LIMIT.maxRequests,
-  windowSeconds: CLASSIFIED_RATE_LIMIT.windowSeconds,
+  ...CLASSIFIED_RATE_LIMIT,
 });
 
 // GET /api/classifieds/rotation — random selection of up to 3 active listings for brief inclusion
