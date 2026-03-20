@@ -13,7 +13,7 @@ import { reviewClassified, recordClassifiedRefund, listPendingClassifieds } from
 import { transformClassified } from "./classifieds";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
-import { REVIEW_RATE_LIMIT, CLASSIFIED_STATUSES } from "../lib/constants";
+import { REVIEW_RATE_LIMIT } from "../lib/constants";
 
 const classifiedReviewRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -46,9 +46,11 @@ classifiedReviewRouter.patch("/api/classifieds/:id/review", reviewRateLimit, asy
     return c.json({ error: "Invalid BTC address format" }, 400);
   }
 
-  if (!(CLASSIFIED_STATUSES as readonly string[]).includes(status as string)) {
+  // Only approved/rejected are valid review actions (pending_review is the initial state, not a review target)
+  const REVIEW_STATUSES = ["approved", "rejected"] as const;
+  if (!status || !(REVIEW_STATUSES as readonly string[]).includes(status as string)) {
     return c.json({
-      error: `Invalid status. Must be one of: ${CLASSIFIED_STATUSES.join(", ")}`,
+      error: `Invalid status. Must be one of: ${REVIEW_STATUSES.join(", ")}`,
     }, 400);
   }
 
@@ -161,7 +163,7 @@ classifiedReviewRouter.get("/api/classifieds/pending", reviewRateLimit, async (c
     return c.json({ error: authResult.error, code: authResult.code }, 401);
   }
 
-  const classifieds = await listPendingClassifieds(c.env);
+  const classifieds = await listPendingClassifieds(c.env, btcAddress);
   const transformed = classifieds.map(transformClassified);
 
   return c.json({ classifieds: transformed, total: transformed.length });

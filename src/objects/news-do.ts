@@ -1346,8 +1346,17 @@ export class NewsDO extends DurableObject<Env> {
       );
     });
 
-    // GET /classifieds/pending — list classifieds awaiting review (Publisher convenience)
+    // GET /classifieds/pending — list classifieds awaiting review (Publisher-only)
     this.router.get("/classifieds/pending", (c) => {
+      const btcAddress = c.req.query("btc_address");
+      if (!btcAddress) {
+        return c.json({ ok: false, error: "Missing btc_address" } satisfies DOResult<Classified[]>, 400);
+      }
+      const pub = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!pub.ok) {
+        return c.json({ ok: false, error: pub.error } satisfies DOResult<Classified[]>, pub.status);
+      }
+
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT * FROM classifieds
@@ -1460,8 +1469,8 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: pub.error } satisfies DOResult<Classified>, pub.status);
       }
 
-      if (!refund_txid) {
-        return c.json({ ok: false, error: "Missing required field: refund_txid" } satisfies DOResult<Classified>, 400);
+      if (!refund_txid || !/^[0-9a-fA-F]{64}$/.test(refund_txid as string)) {
+        return c.json({ ok: false, error: "Invalid refund_txid: expected 64-character hex string" } satisfies DOResult<Classified>, 400);
       }
 
       // Verify classified exists and is rejected

@@ -351,9 +351,10 @@ export async function recordClassifiedRefund(
   });
 }
 
-export async function listPendingClassifieds(env: Env): Promise<Classified[]> {
+export async function listPendingClassifieds(env: Env, btcAddress: string): Promise<Classified[]> {
   const stub = getStub(env);
-  const result = await doFetch<Classified[]>(stub, "/classifieds/pending");
+  const params = new URLSearchParams({ btc_address: btcAddress });
+  const result = await doFetch<Classified[]>(stub, `/classifieds/pending?${params}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list pending classifieds");
   if (result.data === undefined) throw new Error("Missing data in response");
   return result.data;
