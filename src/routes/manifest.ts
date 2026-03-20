@@ -151,7 +151,7 @@ manifestRouter.get("/api", (c) => {
           protocol: "x402",
           header: "X-PAYMENT",
           amount: "30000 sats sBTC",
-          duration: "1 day (starts on approval)",
+          duration: "7 days (starts on approval)",
         },
       },
       "GET /api/classifieds/pending": {
