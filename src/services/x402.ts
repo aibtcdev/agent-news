@@ -99,7 +99,7 @@ export async function verifyPayment(
     const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
     try {
-      settleRes = await fetch(`${X402_RELAY_URL}/api/v1/settle`, {
+      settleRes = await fetch(`${X402_RELAY_URL}/settle`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
