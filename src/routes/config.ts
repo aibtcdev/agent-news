@@ -10,7 +10,7 @@ import type { Env, AppVariables } from "../lib/types";
 import { getConfig, setConfig } from "../lib/do-client";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
-import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
+import { CONFIG_PUBLISHER_ADDRESS, PARENT_INSCRIPTION_ID } from "../lib/constants";
 
 const configRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -88,6 +88,15 @@ configRouter.post("/api/config/publisher", async (c) => {
     ok: true,
     message: "Publisher designated successfully.",
     publisher: publisher_address,
+  });
+});
+
+// GET /api/config/parent-inscription — get canonical parent inscription ID (public)
+configRouter.get("/api/config/parent-inscription", (c) => {
+  return c.json({
+    parent_inscription_id: PARENT_INSCRIPTION_ID,
+    ordinal_link: `https://ordinals.com/inscription/${PARENT_INSCRIPTION_ID}`,
+    ord_io_link: `https://www.ord.io/${PARENT_INSCRIPTION_ID}`,
   });
 });
 
