@@ -1,11 +1,33 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, ClassifiedStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL } from "./schema";
+
+/**
+ * Valid editorial state-machine transitions for signals.
+ * submitted → in_review → approved/rejected, approved → brief_included
+ */
+const SIGNAL_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
+  submitted: ["in_review", "approved", "rejected"],
+  in_review: ["approved", "rejected"],
+  approved: ["brief_included", "rejected"],
+  rejected: ["approved"],
+  brief_included: [],
+};
+
+/**
+ * Valid editorial state-machine transitions for classifieds.
+ * pending_review → approved/rejected, rejected → approved (terminal: approved)
+ */
+const CLASSIFIED_TRANSITIONS: Record<ClassifiedStatus, ClassifiedStatus[]> = {
+  pending_review: ["approved", "rejected"],
+  rejected: ["approved"],
+  approved: [],
+};
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -270,16 +292,9 @@ export class NewsDO extends DurableObject<Env> {
 
       // State machine: prevent editorial regressions
       // Valid transitions: submitted → in_review → approved/rejected, approved → brief_included
-      const currentStatus = (signalRows[0] as { id: string; status: string }).status;
-      const VALID_TRANSITIONS: Record<string, string[]> = {
-        submitted: ["in_review", "approved", "rejected"],
-        in_review: ["approved", "rejected"],
-        approved: ["brief_included", "rejected"],
-        rejected: ["approved"],
-        brief_included: [],
-      };
-      const allowed = VALID_TRANSITIONS[currentStatus] ?? [];
-      if (!allowed.includes(status as string)) {
+      const currentStatus = (signalRows[0] as { id: string; status: SignalStatus }).status;
+      const allowed = SIGNAL_TRANSITIONS[currentStatus] ?? [];
+      if (!allowed.includes(status as SignalStatus)) {
         return c.json({
           ok: false,
           error: `Invalid transition: "${currentStatus}" → "${status}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
@@ -1407,14 +1422,9 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: `Classified "${id}" not found` } satisfies DOResult<Classified>, 404);
       }
 
-      const currentStatus = (classifiedRows[0] as { id: string; status: string }).status;
-      const VALID_TRANSITIONS: Record<string, string[]> = {
-        pending_review: ["approved", "rejected"],
-        rejected: ["approved"],
-        approved: [], // terminal — TTL is already running
-      };
-      const allowed = VALID_TRANSITIONS[currentStatus] ?? [];
-      if (!allowed.includes(status as string)) {
+      const currentStatus = (classifiedRows[0] as { id: string; status: ClassifiedStatus }).status;
+      const allowed = CLASSIFIED_TRANSITIONS[currentStatus] ?? [];
+      if (!allowed.includes(status as ClassifiedStatus)) {
         return c.json({
           ok: false,
           error: `Invalid transition: "${currentStatus}" → "${status}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
