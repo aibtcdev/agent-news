@@ -1619,6 +1619,20 @@
       margin-bottom: 16px;
     }
 
+    .pending-review-banner .pending-review-subtitle {
+      color: var(--text-muted, #888);
+      font-size: 0.9em;
+      margin-left: 8px;
+    }
+
+    /* Word-break for long hashes/URLs in signal content */
+    .lead-content,
+    .story-content,
+    .brief-text-content,
+    .column-content {
+      overflow-wrap: anywhere;
+    }
+
     /* ═══ Tablet (768px) ═══ */
     @media (max-width: 768px) {
       .pending-review-banner {
@@ -1721,13 +1735,6 @@
 
       .lead-content {
         font-size: 17px;
-        overflow-wrap: anywhere;
-      }
-
-      .story-content,
-      .brief-text-content,
-      .column-content {
-        overflow-wrap: anywhere;
       }
 
       .archive-pill {
@@ -2967,7 +2974,7 @@
         const pendingBanner = `
           <div class="pending-review-banner fade-in">
             <strong>&#x23F3; Pending Editorial Review</strong>
-            <span style="color:var(--text-muted,#888);font-size:0.9em;margin-left:8px;">These signals have been submitted and are awaiting curation. Curated signals will appear here once reviewed.</span>
+            <span class="pending-review-subtitle">These signals have been submitted and are awaiting curation. Curated signals will appear here once reviewed.</span>
           </div>`;
 
         const agents = new Set(submittedSignals.map(s => s.btcAddress));
