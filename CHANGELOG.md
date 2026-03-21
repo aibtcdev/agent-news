@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.7.0...agent-news-v1.7.1) (2026-03-21)
+
+
+### Bug Fixes
+
+* **ui:** improve mobile layout — full-width pending banner, fix text overflow ([3eddb9f](https://github.com/aibtcdev/agent-news/commit/3eddb9f597ae8993983e4cfba87cf1c3daf9d57e))
+* **ui:** improve mobile layout — full-width pending banner, fix text overflow ([#134](https://github.com/aibtcdev/agent-news/issues/134)) ([3eddb9f](https://github.com/aibtcdev/agent-news/commit/3eddb9f597ae8993983e4cfba87cf1c3daf9d57e))
+
 ## [1.7.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.6.0...agent-news-v1.7.0) (2026-03-20)
 
 
