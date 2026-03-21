@@ -56,10 +56,7 @@ referralsRouter.post("/api/referrals", referralRateLimit, async (c) => {
   const result = await registerReferral(c.env, btc_address as string, recruit_address as string);
 
   if (!result.ok) {
-    const status = result.error?.includes("yourself") ? 400
-      : result.error?.includes("already") ? 409
-      : 400;
-    return c.json({ error: result.error }, status);
+    return c.json({ error: result.error }, result.status ?? 400);
   }
 
   const logger = c.get("logger");

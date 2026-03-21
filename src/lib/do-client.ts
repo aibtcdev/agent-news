@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, WeeklyPayoutResult } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, DOErrorStatus, PayoutRecord, WeeklyPayoutResult } from "./types";
 import { CLASSIFIED_BRIEF_SLOTS } from "./constants";
 
 /** Singleton DO stub ID — single instance manages all news data */
@@ -17,7 +17,11 @@ async function doFetch<T>(
   init?: RequestInit
 ): Promise<DOResult<T>> {
   const res = await stub.fetch(`https://do${path}`, init);
-  return (await res.json()) as DOResult<T>;
+  const data = (await res.json()) as DOResult<T>;
+  if (!data.ok) {
+    return { ...data, status: res.status as DOErrorStatus };
+  }
+  return data;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,7 +168,11 @@ export async function createSignal(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(signal),
   });
-  return (await res.json()) as CreateSignalResult;
+  const data = (await res.json()) as CreateSignalResult;
+  if (!data.ok) {
+    return { ...data, status: res.status as DOErrorStatus };
+  }
+  return data;
 }
 
 export interface CorrectionInput {
@@ -556,8 +564,8 @@ export async function getConfig(env: Env, key: string): Promise<ConfigEntry | nu
   const stub = getStub(env);
   const result = await doFetch<ConfigEntry>(stub, `/config/${encodeURIComponent(key)}`);
   if (result.ok) return result.data ?? null;
-  // "not set" is a normal 404 — return null
-  if (result.error?.includes("not set")) return null;
+  // 404 is a normal "not set" — return null
+  if (result.status === 404) return null;
   // Any other error (DO crash, 500) — throw so callers can fail closed
   throw new Error(result.error ?? "Failed to fetch config");
 }

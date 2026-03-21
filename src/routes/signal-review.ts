@@ -68,10 +68,7 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
   });
 
   if (!result.ok) {
-    const httpStatus = result.error?.includes("not found") ? 404
-      : result.error?.includes("Publisher") ? 403
-      : 400;
-    return c.json({ error: result.error }, httpStatus);
+    return c.json({ error: result.error }, result.status ?? 400);
   }
 
   const logger = c.get("logger");

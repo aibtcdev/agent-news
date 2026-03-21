@@ -193,8 +193,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
         429
       );
     }
-    const status = result.error?.includes("not found") ? 404 : 400;
-    return c.json({ error: result.error }, status);
+    return c.json({ error: result.error }, result.status ?? 400);
   }
 
   const logger = c.get("logger");
@@ -292,12 +291,7 @@ signalsRouter.patch("/api/signals/:id", async (c) => {
   });
 
   if (!result.ok) {
-    const status = result.error?.includes("not found")
-      ? 404
-      : result.error?.includes("Only the original author")
-      ? 403
-      : 400;
-    return c.json({ error: result.error }, status);
+    return c.json({ error: result.error }, result.status ?? 400);
   }
 
   return c.json(result.data);

@@ -71,10 +71,7 @@ correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, asyn
   });
 
   if (!result.ok) {
-    const status = result.error?.includes("not found") ? 404
-      : result.error?.includes("own signal") ? 400
-      : 400;
-    return c.json({ error: result.error }, status);
+    return c.json({ error: result.error }, result.status ?? 400);
   }
 
   const logger = c.get("logger");
@@ -138,10 +135,7 @@ correctionsRouter.patch("/api/signals/:id/corrections/:correctionId", async (c) 
   });
 
   if (!result.ok) {
-    const httpStatus = result.error?.includes("not found") ? 404
-      : result.error?.includes("Publisher") ? 403
-      : 400;
-    return c.json({ error: result.error }, httpStatus);
+    return c.json({ error: result.error }, result.status ?? 400);
   }
 
   return c.json(result.data);
