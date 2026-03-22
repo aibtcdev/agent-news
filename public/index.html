@@ -2449,9 +2449,79 @@
         }, { threshold: 0.1 });
         document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
       } catch {
-        // Defensive fallback: if something unexpected fails, never leave a blank page
-        const main = el('main-content');
-        if (main) main.innerHTML = errorStateHTML();
+        // Degraded-mode fallback: /api/init failed (DO temporarily unavailable).
+        // Retry with individual endpoints via Promise.allSettled so partial data
+        // still renders — matching the behaviour before PR #163 consolidated calls.
+        try {
+          const [briefRes, beatsRes, classifiedsRes, correspondentsRes, signalsRes] = await Promise.allSettled([
+            fetchJSON('/api/brief?format=json'),
+            fetchJSON('/api/beats'),
+            fetchJSON('/api/classifieds'),
+            fetchJSON('/api/correspondents'),
+            fetchJSON('/api/front-page'),
+          ]);
+
+          beats = (beatsRes.status === 'fulfilled' && Array.isArray(beatsRes.value)) ? beatsRes.value : [];
+          const correspondentsData = correspondentsRes.status === 'fulfilled' ? correspondentsRes.value : null;
+          correspondentsList = (correspondentsData && correspondentsData.correspondents) ? correspondentsData.correspondents : [];
+          const signalsData = signalsRes.status === 'fulfilled' ? signalsRes.value : null;
+          const brief = briefRes.status === 'fulfilled' ? briefRes.value : null;
+          const classifiedsData = classifiedsRes.status === 'fulfilled' ? classifiedsRes.value : null;
+
+          // Seed agentCache from correspondents data
+          for (const c of correspondentsList) {
+            if (c.address) {
+              agentCache.set(c.address, {
+                name: c.display_name || truncAddr(c.address),
+                avatar: c.avatar || `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(c.address)}`,
+                registered: !!c.registered,
+              });
+            }
+          }
+
+          renderRoster(beats, correspondentsList);
+
+          if (brief && (brief.text || (brief.sections && brief.sections.length > 0))) {
+            renderBrief(brief);
+          } else {
+            if (brief) {
+              setDate(brief.date);
+              if (brief.summary) {
+                el('stat-correspondents').textContent = brief.summary.correspondents || 0;
+                el('stat-beats').textContent = brief.summary.beats || 0;
+                el('stat-signals').textContent = brief.summary.signals || 0;
+                el('summary-line').style.display = '';
+              }
+              renderInscriptionBadge(brief.inscription);
+            }
+            await renderSignalFeed(signalsData);
+          }
+
+          if (classifiedsData) {
+            renderMarketplace(classifiedsData.classifieds || []);
+          }
+
+          if (correspondentsList.length > 0) {
+            renderLeaderboard(correspondentsList);
+          }
+
+          document.querySelectorAll('.roster-section, .leaderboard-section, .marketplace-section').forEach(el => {
+            el.classList.add('reveal');
+          });
+          const revealObserver = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+              if (entry.isIntersecting) {
+                entry.target.classList.add('visible');
+                revealObserver.unobserve(entry.target);
+              }
+            });
+          }, { threshold: 0.1 });
+          document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+        } catch {
+          // All fallback endpoints also failed — show a meaningful error instead of blank page
+          const main = el('main-content');
+          if (main) main.innerHTML = errorStateHTML();
+        }
       }
     }
 
