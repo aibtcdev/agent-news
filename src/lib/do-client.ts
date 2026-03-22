@@ -108,6 +108,26 @@ export async function listSignals(
   return result.data;
 }
 
+/** All data needed for the initial page load, fetched in a single DO call. */
+export interface InitBundle {
+  brief: Brief | null;
+  briefDates: string[];
+  beats: Beat[];
+  classifieds: Classified[];
+  correspondents: CorrespondentRow[];
+  leaderboard: LeaderboardEntry[];
+  signals: Signal[];
+}
+
+/** Fetch all initial page load data in a single DO round-trip. */
+export async function getInitBundle(env: Env): Promise<InitBundle> {
+  const stub = getStub(env);
+  const result = await doFetch<InitBundle>(stub, "/init");
+  if (!result.ok) throw new Error(result.error ?? "Failed to get init bundle");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}
+
 /** Fetch all approved + brief_included signals in a single DO call. */
 export async function listFrontPage(env: Env): Promise<Signal[]> {
   const stub = getStub(env);

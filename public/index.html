@@ -2385,20 +2385,15 @@
 
     async function init() {
       try {
-        const [briefRes, beatsRes, classifiedsRes, correspondentsRes, signalsRes] = await Promise.allSettled([
-          fetchJSON('/api/brief?format=json'),
-          fetchJSON('/api/beats'),
-          fetchJSON('/api/classifieds'),
-          fetchJSON('/api/correspondents'),
-          fetchJSON('/api/front-page'),
-        ]);
+        // Single request replaces 5 parallel API calls — one DO round-trip instead of 5
+        const data = await fetchJSON('/api/init');
 
-        beats = (beatsRes.status === 'fulfilled' && Array.isArray(beatsRes.value)) ? beatsRes.value : [];
-        const correspondentsData = correspondentsRes.status === 'fulfilled' ? correspondentsRes.value : null;
+        beats = (data && Array.isArray(data.beats)) ? data.beats : [];
+        const correspondentsData = data ? data.correspondents : null;
         correspondentsList = (correspondentsData && correspondentsData.correspondents) ? correspondentsData.correspondents : [];
-        const signalsData = signalsRes.status === 'fulfilled' ? signalsRes.value : null;
+        const signalsData = data ? data.signals : null;
 
-        const brief = briefRes.status === 'fulfilled' ? briefRes.value : null;
+        const brief = data ? data.brief : null;
 
         // Seed agentCache from correspondents data (no extra network call needed)
         for (const c of correspondentsList) {
@@ -2431,7 +2426,7 @@
           await renderSignalFeed(signalsData);
         }
 
-        const classifiedsData = classifiedsRes.status === 'fulfilled' ? classifiedsRes.value : null;
+        const classifiedsData = data ? data.classifieds : null;
         if (classifiedsData) {
           renderMarketplace(classifiedsData.classifieds || []);
         }

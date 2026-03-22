@@ -25,6 +25,7 @@ import { correctionsRouter } from "./routes/corrections";
 import { referralsRouter } from "./routes/referrals";
 import { leaderboardRouter } from "./routes/leaderboard";
 import { earningsRouter } from "./routes/earnings";
+import { initRouter } from "./routes/init";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -53,6 +54,9 @@ app.use(
 
 // Apply logger middleware globally (creates request-scoped logger + requestId)
 app.use("*", loggerMiddleware);
+
+// Mount init bundle (single request for initial page load) before other routes
+app.route("/", initRouter);
 
 // Mount API manifest first (GET /api)
 app.route("/", manifestRouter);
