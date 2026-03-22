@@ -123,7 +123,15 @@ export class NewsDO extends DurableObject<Env> {
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
-    const appliedVersion = versionRows.length > 0 ? Number((versionRows[0] as { value: string }).value) : 0;
+    let appliedVersion = 0;
+    if (versionRows.length > 0) {
+      const parsed = Number.parseInt((versionRows[0] as { value: string }).value, 10);
+      if (Number.isFinite(parsed)) {
+        appliedVersion = parsed;
+      } else {
+        console.warn("Invalid migration_version in config; re-running all migrations");
+      }
+    }
 
     if (appliedVersion < CURRENT_MIGRATION_VERSION) {
       // Run Phase 0 migrations for existing databases (safe to re-run — ALTER TABLE
@@ -212,7 +220,7 @@ export class NewsDO extends DurableObject<Env> {
     // This eliminates cold start overhead for the singleton DO that serves all traffic.
     this.ctx.blockConcurrencyWhile(async () => {
       const existing = await this.ctx.storage.getAlarm();
-      if (!existing) {
+      if (existing === null) {
         await this.ctx.storage.setAlarm(Date.now() + 50_000);
       }
     });

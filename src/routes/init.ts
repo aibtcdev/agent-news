@@ -30,9 +30,14 @@ initRouter.get("/api/init", async (c) => {
   const todaysBrief = bundle.brief?.date === today ? bundle.brief : null;
   let briefPayload: Record<string, unknown>;
   if (todaysBrief) {
-    const jsonData = todaysBrief.json_data
-      ? (JSON.parse(todaysBrief.json_data) as Record<string, unknown>)
-      : {};
+    let jsonData: Record<string, unknown> = {};
+    if (todaysBrief.json_data) {
+      try {
+        jsonData = JSON.parse(todaysBrief.json_data) as Record<string, unknown>;
+      } catch (err) {
+        console.error("Failed to parse brief json_data in /api/init:", err);
+      }
+    }
     const inscription = todaysBrief.inscription_id
       ? { inscriptionId: todaysBrief.inscription_id, inscribedTxid: todaysBrief.inscribed_txid }
       : (jsonData.inscription ?? null);
@@ -109,7 +114,7 @@ initRouter.get("/api/init", async (c) => {
       const signalCount = Number(row.signal_count) || 0;
       const streak = Number(row.current_streak) || 0;
       const longestStreak = Number(row.longest_streak) || 0;
-      const daysActive = Number((row as unknown as Record<string, unknown>).days_active) || 0;
+      const daysActive = Number(row.days_active) || 0;
       const score = scoreMap.get(row.btc_address) ?? (signalCount * 10 + streak * 5 + daysActive * 2);
       const info = nameMap.get(row.btc_address);
       const avatarAddr = info?.btcAddress ?? row.btc_address;

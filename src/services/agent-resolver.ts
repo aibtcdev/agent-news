@@ -36,10 +36,11 @@ export async function resolveAgentName(
     return { name: cached || null, btcAddress: null };
   }
 
-  // Cache miss — fetch from external API
+  // Cache miss — fetch from external API with 5-second timeout
   try {
     const res = await fetch(`${AGENT_API_BASE}/${encodeURIComponent(btcAddress)}`, {
       headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(5000),
     });
 
     if (res.ok) {

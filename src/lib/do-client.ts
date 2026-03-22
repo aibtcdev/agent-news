@@ -420,6 +420,7 @@ export interface CorrespondentRow {
   btc_address: string;
   signal_count: number;
   last_signal: string;
+  days_active: number;
   current_streak: number | null;
   longest_streak: number | null;
   total_signals: number | null;

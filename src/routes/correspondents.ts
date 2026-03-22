@@ -58,7 +58,7 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     const signalCount = Number(row.signal_count) || 0;
     const streak = Number(row.current_streak) || 0;
     const longestStreak = Number(row.longest_streak) || 0;
-    const daysActive = Number((row as unknown as Record<string, unknown>).days_active) || 0;
+    const daysActive = Number(row.days_active) || 0;
     // Use weighted leaderboard score if available, fall back to legacy formula
     const score = scoreMap.get(row.btc_address) ?? (signalCount * 10 + streak * 5 + daysActive * 2);
     const info = nameMap.get(row.btc_address);
