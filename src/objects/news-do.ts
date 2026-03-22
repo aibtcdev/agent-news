@@ -130,6 +130,14 @@ export class NewsDO extends DurableObject<Env> {
     // Track migration version in config table to skip already-applied migrations on cold start.
     // This avoids running 50+ SQL statements (ALTER TABLE, UPSERT, UPDATE, DELETE) every time
     // the DO wakes up, significantly reducing cold start latency.
+    //
+    // Migration version history:
+    // 1 = Phase 0 (ALTER TABLE column additions: status, publisher_feedback, reviewed_at, disclosure)
+    // 2 = Beat restructure (17-beat taxonomy upsert, signal remaps, old beat deletes)
+    // 3 = Payments UNIQUE index (double-pay prevention on earnings)
+    // 4 = sBTC tracking (payout_txid column on earnings)
+    // 5 = Classifieds cleanup (drop contact column)
+    // 6 = Classifieds editorial review (status, publisher_feedback, reviewed_at, refund_txid)
     const CURRENT_MIGRATION_VERSION = 6;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
@@ -671,6 +679,7 @@ export class NewsDO extends DurableObject<Env> {
 
     // GET /signals/front-page — all approved + brief_included signals in a single query
     // Eliminates the need for two separate /signals calls from the Worker route.
+    // LIMIT 500 preserves the old behavior (200 approved + 200 brief_included = up to 400).
     this.router.get("/signals/front-page", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
@@ -681,7 +690,7 @@ export class NewsDO extends DurableObject<Env> {
            WHERE s.status IN ('approved', 'brief_included')
            GROUP BY s.id
            ORDER BY s.created_at DESC
-           LIMIT 200`
+           LIMIT 500`
         )
         .toArray();
 
@@ -2474,7 +2483,14 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      const leaderboard = this.queryLeaderboard(200);
+      // Leaderboard — wrapped in try/catch so a leaderboard failure
+      // doesn't break the correspondents endpoint (preserves old .catch(() => []) behavior)
+      let leaderboard: Array<Record<string, unknown>> = [];
+      try {
+        leaderboard = this.queryLeaderboard(200);
+      } catch (e) {
+        console.error("Leaderboard query failed in correspondents bundle:", e);
+      }
 
       return c.json({
         ok: true,
@@ -2559,8 +2575,13 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      // Leaderboard
-      const leaderboard = this.queryLeaderboard(200);
+      // Leaderboard — wrapped in try/catch to preserve partial results on failure
+      let leaderboard: Array<Record<string, unknown>> = [];
+      try {
+        leaderboard = this.queryLeaderboard(200);
+      } catch (e) {
+        console.error("Leaderboard query failed in init bundle:", e);
+      }
 
       // Front-page signals (approved + brief_included)
       const signalRows = this.ctx.storage.sql
@@ -2572,7 +2593,7 @@ export class NewsDO extends DurableObject<Env> {
            WHERE s.status IN ('approved', 'brief_included')
            GROUP BY s.id
            ORDER BY s.created_at DESC
-           LIMIT 200`
+           LIMIT 500`
         )
         .toArray();
       const signals = signalRows.map((r) => rowToSignal(r as Record<string, unknown>));
