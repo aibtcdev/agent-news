@@ -115,6 +115,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     headline: string | null;
     content: string | null;
     sources: Source[] | null;
+    id: string;
     signalId: string;
     correction_of: string | null;
   }
@@ -143,6 +144,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
       headline: sig.headline ?? null,
       content: sig.body ?? null,
       sources,
+      id: sig.id,
       signalId: sig.id,
       correction_of: sig.correction_of,
     };
