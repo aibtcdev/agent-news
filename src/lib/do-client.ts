@@ -108,6 +108,15 @@ export async function listSignals(
   return result.data;
 }
 
+/** Fetch all approved + brief_included signals in a single DO call. */
+export async function listFrontPage(env: Env): Promise<Signal[]> {
+  const stub = getStub(env);
+  const result = await doFetch<Signal[]>(stub, "/signals/front-page");
+  if (!result.ok) throw new Error(result.error ?? "Failed to list front-page signals");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}
+
 /** Fetch one day of curated signals strictly before `before` (YYYY-MM-DD) for infinite scroll. */
 export async function listFrontPagePage(
   env: Env,

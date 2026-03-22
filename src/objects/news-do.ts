@@ -108,75 +108,95 @@ export class NewsDO extends DurableObject<Env> {
     // sql.exec() is synchronous in DO SQLite, so no blockConcurrencyWhile needed.
     this.ctx.storage.sql.exec(SCHEMA_SQL);
 
-    // Run Phase 0 migrations for existing databases (safe to re-run — ALTER TABLE
-    // throws "duplicate column" which we catch and ignore).
-    for (const stmt of MIGRATION_PHASE0_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        // Column/index already exists — safe to ignore on re-run.
-        // Log in case the error is unexpected (e.g. malformed SQL introduced later).
-        console.error("Migration statement failed (likely already applied):", e);
-      }
-    }
+    // Track migration version in config table to skip already-applied migrations on cold start.
+    // This avoids running 50+ SQL statements (ALTER TABLE, UPSERT, UPDATE, DELETE) every time
+    // the DO wakes up, significantly reducing cold start latency.
+    const CURRENT_MIGRATION_VERSION = 6;
+    const versionRows = this.ctx.storage.sql
+      .exec("SELECT value FROM config WHERE key = 'migration_version'")
+      .toArray();
+    const appliedVersion = versionRows.length > 0 ? Number((versionRows[0] as { value: string }).value) : 0;
 
-    // Run Phase 3 beat-restructure migration as a single exec() call.
-    // DO SQLite uses automatic atomic write coalescing — all writes within a
-    // single exec() are applied atomically (no manual BEGIN/COMMIT needed).
-    // This ensures signal remaps and beat deletes are all-or-nothing.
-    // The SQL itself is idempotent, so re-running on a fully-migrated DB is a no-op.
-    try {
-      this.ctx.storage.sql.exec(MIGRATION_BEAT_RESTRUCTURE_SQL);
-    } catch (e) {
-      console.error("Beat restructure migration failed:", e);
-    }
-
-    // Run Phase 4 payments migration — adds UNIQUE index for double-pay prevention.
-    for (const stmt of MIGRATION_PAYMENTS_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        // Index already exists — safe to ignore on re-run.
-        console.error("Payments migration statement failed (likely already applied):", e);
-      }
-    }
-
-    // Run sBTC tracking migration — adds payout_txid column to earnings.
-    for (const stmt of MIGRATION_SBTC_TRACKING_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        // Column already exists — safe to ignore on re-run.
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!msg.includes("duplicate column")) {
-          console.error("sBTC tracking migration statement failed:", e);
+    if (appliedVersion < CURRENT_MIGRATION_VERSION) {
+      // Run Phase 0 migrations for existing databases (safe to re-run — ALTER TABLE
+      // throws "duplicate column" which we catch and ignore).
+      if (appliedVersion < 1) {
+        for (const stmt of MIGRATION_PHASE0_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Migration statement failed (likely already applied):", e);
+          }
         }
       }
-    }
 
-    // Run classifieds cleanup migration — drops contact column (btc_address serves as contact).
-    for (const stmt of MIGRATION_CLASSIFIEDS_CLEANUP_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        // Column may not exist (new instances) or already dropped — safe to ignore.
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!msg.includes("no such column") && !msg.includes("no column")) {
-          console.error("Classifieds cleanup migration statement failed:", e);
+      // Run Phase 3 beat-restructure migration as a single exec() call.
+      if (appliedVersion < 2) {
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_BEAT_RESTRUCTURE_SQL);
+        } catch (e) {
+          console.error("Beat restructure migration failed:", e);
         }
       }
-    }
 
-    // Run classifieds editorial review migration — adds status, publisher_feedback, reviewed_at, refund_txid.
-    for (const stmt of MIGRATION_CLASSIFIEDS_REVIEW_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!msg.includes("duplicate column")) {
-          console.error("Classifieds review migration statement failed:", e);
+      // Run Phase 4 payments migration — adds UNIQUE index for double-pay prevention.
+      if (appliedVersion < 3) {
+        for (const stmt of MIGRATION_PAYMENTS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Payments migration statement failed (likely already applied):", e);
+          }
         }
       }
+
+      // Run sBTC tracking migration — adds payout_txid column to earnings.
+      if (appliedVersion < 4) {
+        for (const stmt of MIGRATION_SBTC_TRACKING_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("sBTC tracking migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run classifieds cleanup migration — drops contact column.
+      if (appliedVersion < 5) {
+        for (const stmt of MIGRATION_CLASSIFIEDS_CLEANUP_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("no such column") && !msg.includes("no column")) {
+              console.error("Classifieds cleanup migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run classifieds editorial review migration.
+      if (appliedVersion < 6) {
+        for (const stmt of MIGRATION_CLASSIFIEDS_REVIEW_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("Classifieds review migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Record current migration version so future cold starts skip all of the above.
+      this.ctx.storage.sql.exec(
+        "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+        String(CURRENT_MIGRATION_VERSION)
+      );
     }
 
     // Internal Hono router for DO-internal routing
@@ -624,6 +644,26 @@ export class NewsDO extends DurableObject<Env> {
 
       const signals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
 
+      return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
+    });
+
+    // GET /signals/front-page — all approved + brief_included signals in a single query
+    // Eliminates the need for two separate /signals calls from the Worker route.
+    this.router.get("/signals/front-page", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+           FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN signal_tags st ON s.id = st.signal_id
+           WHERE s.status IN ('approved', 'brief_included')
+           GROUP BY s.id
+           ORDER BY s.created_at DESC
+           LIMIT 200`
+        )
+        .toArray();
+
+      const signals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
       return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
     });
 
