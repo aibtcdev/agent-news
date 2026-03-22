@@ -5,12 +5,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { getCorrespondentsBundle } from "../lib/do-client";
-import { resolveAgentNames } from "../services/agent-resolver";
-
-function truncAddr(addr: string): string {
-  if (!addr || addr.length < 16) return addr;
-  return `${addr.slice(0, 8)}...${addr.slice(-6)}`;
-}
+import { truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
 
 const correspondentsRouter = new Hono<{
   Bindings: Env;
@@ -31,34 +26,20 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     scoreMap.set(entry.btc_address, Number(entry.score));
   }
 
-  // Build address → claimed beats map
-  const beatsByAddress = new Map<string, { slug: string; name: string; status?: string }[]>();
-  for (const b of beats) {
-    const addr = b.created_by;
-    if (!beatsByAddress.has(addr)) beatsByAddress.set(addr, []);
-    beatsByAddress.get(addr)?.push({
-      slug: b.slug,
-      name: b.name,
-      status: b.status ?? "inactive",
-    });
-  }
-
-  // Resolve agent display names with a 3-second timeout.
-  // If aibtc.com is slow, return without names rather than blocking the response.
+  const beatsByAddress = buildBeatsByAddress(beats);
   const addresses = rows.map((r) => r.btc_address);
-  const nameResolution = resolveAgentNames(c.env.NEWS_KV, addresses);
-  const timeout = new Promise<Map<string, import("../services/agent-resolver").AgentInfo>>(
-    (resolve) => setTimeout(() => resolve(new Map()), 3000)
+  const nameMap = await resolveNamesWithTimeout(
+    c.env.NEWS_KV,
+    addresses,
+    (p) => c.executionCtx.waitUntil(p)
   );
-  const nameMap = await Promise.race([nameResolution, timeout]);
-  c.executionCtx.waitUntil(nameResolution.catch(() => {}));
 
   // Transform to match frontend expectations (camelCase, computed fields)
   const correspondents = rows.map((row) => {
     const signalCount = Number(row.signal_count) || 0;
     const streak = Number(row.current_streak) || 0;
     const longestStreak = Number(row.longest_streak) || 0;
-    const daysActive = Number((row as unknown as Record<string, unknown>).days_active) || 0;
+    const daysActive = Number(row.days_active) || 0;
     // Use weighted leaderboard score if available, fall back to legacy formula
     const score = scoreMap.get(row.btc_address) ?? (signalCount * 10 + streak * 5 + daysActive * 2);
     const info = nameMap.get(row.btc_address);

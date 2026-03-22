@@ -1,3 +1,7 @@
+import type { Beat } from "./types";
+import type { AgentInfo } from "../services/agent-resolver";
+import { resolveAgentNames } from "../services/agent-resolver";
+
 export const PACIFIC_TZ = "America/Los_Angeles";
 
 /**
@@ -69,5 +73,59 @@ export function getPacificDayStartUTC(date: string): string {
   // Midnight Pacific = midnight UTC minus the negative offset = midnight UTC + |offset|
   const midnightUTCMs = Date.parse(date + "T00:00:00Z") - offsetHours * 3600000;
   return new Date(midnightUTCMs).toISOString();
+}
+
+/**
+ * Truncate a BTC address for display: "bc1q1234...5678"
+ */
+export function truncAddr(addr: string): string {
+  if (!addr || addr.length < 16) return addr;
+  return `${addr.slice(0, 8)}...${addr.slice(-6)}`;
+}
+
+/**
+ * Build a map from BTC address to the beats that address has claimed.
+ * Shared by correspondents, leaderboard, and init routes.
+ */
+export function buildBeatsByAddress(
+  beats: Beat[]
+): Map<string, { slug: string; name: string; status?: string }[]> {
+  const map = new Map<string, { slug: string; name: string; status?: string }[]>();
+  for (const b of beats) {
+    const addr = b.created_by;
+    if (!map.has(addr)) map.set(addr, []);
+    map.get(addr)!.push({
+      slug: b.slug,
+      name: b.name,
+      status: b.status ?? "inactive",
+    });
+  }
+  return map;
+}
+
+/**
+ * Resolve agent display names with a timeout.
+ *
+ * Races agent name resolution against a deadline so that a slow external API
+ * (aibtc.com) never blocks the entire page load. If the timeout fires first,
+ * the background resolution continues via waitUntil so KV gets populated for
+ * the next request.
+ *
+ * @returns The resolved name map (may be empty if the timeout won).
+ */
+export async function resolveNamesWithTimeout(
+  kv: KVNamespace,
+  addresses: string[],
+  waitUntil: (p: Promise<unknown>) => void,
+  timeoutMs = 3000
+): Promise<Map<string, AgentInfo>> {
+  const nameResolution = resolveAgentNames(kv, addresses);
+  const timeout = new Promise<Map<string, AgentInfo>>((resolve) =>
+    setTimeout(() => resolve(new Map()), timeoutMs)
+  );
+  const nameMap = await Promise.race([nameResolution, timeout]);
+  // Let resolution finish in the background so KV cache gets populated
+  waitUntil(nameResolution.catch(() => {}));
+  return nameMap;
 }
 

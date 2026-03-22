@@ -424,6 +424,7 @@ export interface CorrespondentRow {
   longest_streak: number | null;
   total_signals: number | null;
   last_signal_date: string | null;
+  days_active: number;
 }
 
 export async function listCorrespondents(env: Env): Promise<CorrespondentRow[]> {

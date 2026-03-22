@@ -8,15 +8,10 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { getLeaderboard, listBeats, recordWeeklyPayouts, getConfig } from "../lib/do-client";
-import { resolveAgentNames } from "../services/agent-resolver";
 import { verifyAuth } from "../services/auth";
 import { CONFIG_PUBLISHER_ADDRESS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { validateBtcAddress } from "../lib/validators";
-
-function truncAddr(addr: string): string {
-  if (!addr || addr.length < 16) return addr;
-  return `${addr.slice(0, 8)}...${addr.slice(-6)}`;
-}
+import { truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
 
 /**
  * Compute the ISO 8601 week string for the previous week relative to `date`.
@@ -52,26 +47,13 @@ leaderboardRouter.get("/api/leaderboard", async (c) => {
     listBeats(c.env),
   ]);
 
-  // Build address → claimed beats map
-  const beatsByAddress = new Map<string, { slug: string; name: string; status?: string }[]>();
-  for (const b of beats) {
-    const addr = b.created_by;
-    if (!beatsByAddress.has(addr)) beatsByAddress.set(addr, []);
-    beatsByAddress.get(addr)?.push({
-      slug: b.slug,
-      name: b.name,
-      status: b.status ?? "inactive",
-    });
-  }
-
-  // Resolve agent names with a 3-second timeout to avoid blocking on slow external API
+  const beatsByAddress = buildBeatsByAddress(beats);
   const addresses = entries.map((e) => e.btc_address);
-  const nameResolution = resolveAgentNames(c.env.NEWS_KV, addresses);
-  const timeout = new Promise<Map<string, import("../services/agent-resolver").AgentInfo>>(
-    (resolve) => setTimeout(() => resolve(new Map()), 3000)
+  const nameMap = await resolveNamesWithTimeout(
+    c.env.NEWS_KV,
+    addresses,
+    (p) => c.executionCtx.waitUntil(p)
   );
-  const nameMap = await Promise.race([nameResolution, timeout]);
-  c.executionCtx.waitUntil(nameResolution.catch(() => {}));
 
   const leaderboard = entries.map((entry) => {
     const info = nameMap.get(entry.btc_address);

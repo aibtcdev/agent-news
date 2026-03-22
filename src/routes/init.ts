@@ -9,15 +9,9 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { getInitBundle } from "../lib/do-client";
-import { resolveAgentNames } from "../services/agent-resolver";
 import { transformClassified } from "./classifieds";
-import { getPacificDate } from "../lib/helpers";
+import { getPacificDate, truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
 import { BRIEF_PRICE_SATS } from "../lib/constants";
-
-function truncAddr(addr: string): string {
-  if (!addr || addr.length < 16) return addr;
-  return `${addr.slice(0, 8)}...${addr.slice(-6)}`;
-}
 
 const initRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -30,9 +24,14 @@ initRouter.get("/api/init", async (c) => {
   const todaysBrief = bundle.brief?.date === today ? bundle.brief : null;
   let briefPayload: Record<string, unknown>;
   if (todaysBrief) {
-    const jsonData = todaysBrief.json_data
-      ? (JSON.parse(todaysBrief.json_data) as Record<string, unknown>)
-      : {};
+    let jsonData: Record<string, unknown> = {};
+    if (todaysBrief.json_data) {
+      try {
+        jsonData = JSON.parse(todaysBrief.json_data) as Record<string, unknown>;
+      } catch (err) {
+        console.error("Failed to parse brief json_data in /api/init:", err);
+      }
+    }
     const inscription = todaysBrief.inscription_id
       ? { inscriptionId: todaysBrief.inscription_id, inscribedTxid: todaysBrief.inscribed_txid }
       : (jsonData.inscription ?? null);
@@ -80,36 +79,20 @@ initRouter.get("/api/init", async (c) => {
     scoreMap.set(entry.btc_address, Number(entry.score));
   }
 
-  const beatsByAddress = new Map<string, { slug: string; name: string; status?: string }[]>();
-  for (const b of bundle.beats) {
-    const addr = b.created_by;
-    if (!beatsByAddress.has(addr)) beatsByAddress.set(addr, []);
-    beatsByAddress.get(addr)?.push({
-      slug: b.slug,
-      name: b.name,
-      status: b.status ?? "inactive",
-    });
-  }
-
+  const beatsByAddress = buildBeatsByAddress(bundle.beats);
   const addresses = bundle.correspondents.map((r) => r.btc_address);
-  // Race agent name resolution against a 3-second timeout.
-  // If aibtc.com is slow or KV cache is cold, we return without names rather than
-  // blocking the entire page load. The frontend gracefully falls back to truncated addresses.
-  // Fire-and-forget: continue resolution in the background so KV gets populated for next request.
-  const nameResolution = resolveAgentNames(c.env.NEWS_KV, addresses);
-  const timeout = new Promise<Map<string, import("../services/agent-resolver").AgentInfo>>(
-    (resolve) => setTimeout(() => resolve(new Map()), 3000)
+  const nameMap = await resolveNamesWithTimeout(
+    c.env.NEWS_KV,
+    addresses,
+    (p) => c.executionCtx.waitUntil(p)
   );
-  const nameMap = await Promise.race([nameResolution, timeout]);
-  // If we timed out, let the resolution continue in the background to populate KV cache
-  c.executionCtx.waitUntil(nameResolution.catch(() => {}));
 
   const correspondentsPayload = {
     correspondents: bundle.correspondents.map((row) => {
       const signalCount = Number(row.signal_count) || 0;
       const streak = Number(row.current_streak) || 0;
       const longestStreak = Number(row.longest_streak) || 0;
-      const daysActive = Number((row as unknown as Record<string, unknown>).days_active) || 0;
+      const daysActive = Number(row.days_active) || 0;
       const score = scoreMap.get(row.btc_address) ?? (signalCount * 10 + streak * 5 + daysActive * 2);
       const info = nameMap.get(row.btc_address);
       const avatarAddr = info?.btcAddress ?? row.btc_address;
