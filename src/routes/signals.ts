@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
+import { identityGateMiddleware } from "../middleware/identity-gate";
 import { SIGNAL_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
 import {
   validateBtcAddress,
@@ -93,8 +94,8 @@ signalsRouter.get("/api/signals/:id", async (c) => {
   });
 });
 
-// POST /api/signals — submit a new signal (rate limited, BIP-322 auth required)
-signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
+// POST /api/signals — submit a new signal (rate limited, ERC-8004 identity gate, BIP-322 auth required)
+signalsRouter.post("/api/signals", signalRateLimit, identityGateMiddleware, async (c) => {
   let body: Record<string, unknown>;
   try {
     body = await c.req.json<Record<string, unknown>>();
