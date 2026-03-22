@@ -108,76 +108,114 @@ export class NewsDO extends DurableObject<Env> {
     // sql.exec() is synchronous in DO SQLite, so no blockConcurrencyWhile needed.
     this.ctx.storage.sql.exec(SCHEMA_SQL);
 
-    // Run Phase 0 migrations for existing databases (safe to re-run — ALTER TABLE
-    // throws "duplicate column" which we catch and ignore).
-    for (const stmt of MIGRATION_PHASE0_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        // Column/index already exists — safe to ignore on re-run.
-        // Log in case the error is unexpected (e.g. malformed SQL introduced later).
-        console.error("Migration statement failed (likely already applied):", e);
-      }
-    }
+    // Track migration version in config table to skip already-applied migrations on cold start.
+    // This avoids running 50+ SQL statements (ALTER TABLE, UPSERT, UPDATE, DELETE) every time
+    // the DO wakes up, significantly reducing cold start latency.
+    //
+    // Migration version history:
+    // 1 = Phase 0 (ALTER TABLE column additions: status, publisher_feedback, reviewed_at, disclosure)
+    // 2 = Beat restructure (17-beat taxonomy upsert, signal remaps, old beat deletes)
+    // 3 = Payments UNIQUE index (double-pay prevention on earnings)
+    // 4 = sBTC tracking (payout_txid column on earnings)
+    // 5 = Classifieds cleanup (drop contact column)
+    // 6 = Classifieds editorial review (status, publisher_feedback, reviewed_at, refund_txid)
+    const CURRENT_MIGRATION_VERSION = 6;
+    const versionRows = this.ctx.storage.sql
+      .exec("SELECT value FROM config WHERE key = 'migration_version'")
+      .toArray();
+    const appliedVersion = versionRows.length > 0 ? Number((versionRows[0] as { value: string }).value) : 0;
 
-    // Run Phase 3 beat-restructure migration as a single exec() call.
-    // DO SQLite uses automatic atomic write coalescing — all writes within a
-    // single exec() are applied atomically (no manual BEGIN/COMMIT needed).
-    // This ensures signal remaps and beat deletes are all-or-nothing.
-    // The SQL itself is idempotent, so re-running on a fully-migrated DB is a no-op.
-    try {
-      this.ctx.storage.sql.exec(MIGRATION_BEAT_RESTRUCTURE_SQL);
-    } catch (e) {
-      console.error("Beat restructure migration failed:", e);
-    }
-
-    // Run Phase 4 payments migration — adds UNIQUE index for double-pay prevention.
-    for (const stmt of MIGRATION_PAYMENTS_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        // Index already exists — safe to ignore on re-run.
-        console.error("Payments migration statement failed (likely already applied):", e);
-      }
-    }
-
-    // Run sBTC tracking migration — adds payout_txid column to earnings.
-    for (const stmt of MIGRATION_SBTC_TRACKING_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        // Column already exists — safe to ignore on re-run.
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!msg.includes("duplicate column")) {
-          console.error("sBTC tracking migration statement failed:", e);
+    if (appliedVersion < CURRENT_MIGRATION_VERSION) {
+      // Run Phase 0 migrations for existing databases (safe to re-run — ALTER TABLE
+      // throws "duplicate column" which we catch and ignore).
+      if (appliedVersion < 1) {
+        for (const stmt of MIGRATION_PHASE0_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Migration statement failed (likely already applied):", e);
+          }
         }
       }
-    }
 
-    // Run classifieds cleanup migration — drops contact column (btc_address serves as contact).
-    for (const stmt of MIGRATION_CLASSIFIEDS_CLEANUP_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        // Column may not exist (new instances) or already dropped — safe to ignore.
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!msg.includes("no such column") && !msg.includes("no column")) {
-          console.error("Classifieds cleanup migration statement failed:", e);
+      // Run Phase 3 beat-restructure migration as a single exec() call.
+      if (appliedVersion < 2) {
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_BEAT_RESTRUCTURE_SQL);
+        } catch (e) {
+          console.error("Beat restructure migration failed:", e);
         }
       }
-    }
 
-    // Run classifieds editorial review migration — adds status, publisher_feedback, reviewed_at, refund_txid.
-    for (const stmt of MIGRATION_CLASSIFIEDS_REVIEW_SQL) {
-      try {
-        this.ctx.storage.sql.exec(stmt);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (!msg.includes("duplicate column")) {
-          console.error("Classifieds review migration statement failed:", e);
+      // Run Phase 4 payments migration — adds UNIQUE index for double-pay prevention.
+      if (appliedVersion < 3) {
+        for (const stmt of MIGRATION_PAYMENTS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Payments migration statement failed (likely already applied):", e);
+          }
         }
       }
+
+      // Run sBTC tracking migration — adds payout_txid column to earnings.
+      if (appliedVersion < 4) {
+        for (const stmt of MIGRATION_SBTC_TRACKING_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("sBTC tracking migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run classifieds cleanup migration — drops contact column.
+      if (appliedVersion < 5) {
+        for (const stmt of MIGRATION_CLASSIFIEDS_CLEANUP_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("no such column") && !msg.includes("no column")) {
+              console.error("Classifieds cleanup migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run classifieds editorial review migration.
+      if (appliedVersion < 6) {
+        for (const stmt of MIGRATION_CLASSIFIEDS_REVIEW_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("Classifieds review migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Record current migration version so future cold starts skip all of the above.
+      this.ctx.storage.sql.exec(
+        "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
+        String(CURRENT_MIGRATION_VERSION)
+      );
     }
+
+    // Schedule a keep-alive alarm if none exists. The alarm fires every 50 seconds,
+    // preventing the DO from being evicted after 70-140 seconds of inactivity.
+    // This eliminates cold start overhead for the singleton DO that serves all traffic.
+    this.ctx.blockConcurrencyWhile(async () => {
+      const existing = await this.ctx.storage.getAlarm();
+      if (!existing) {
+        await this.ctx.storage.setAlarm(Date.now() + 50_000);
+      }
+    });
 
     // Internal Hono router for DO-internal routing
     this.router = new Hono();
@@ -624,6 +662,27 @@ export class NewsDO extends DurableObject<Env> {
 
       const signals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
 
+      return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
+    });
+
+    // GET /signals/front-page — all approved + brief_included signals in a single query
+    // Eliminates the need for two separate /signals calls from the Worker route.
+    // LIMIT 500 preserves the old behavior (200 approved + 200 brief_included = up to 400).
+    this.router.get("/signals/front-page", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+           FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN signal_tags st ON s.id = st.signal_id
+           WHERE s.status IN ('approved', 'brief_included')
+           GROUP BY s.id
+           ORDER BY s.created_at DESC
+           LIMIT 500`
+        )
+        .toArray();
+
+      const signals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
       return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
     });
 
@@ -2383,6 +2442,168 @@ export class NewsDO extends DurableObject<Env> {
     // Leaderboard v2 — weighted scoring with 30-day rolling window
     // -------------------------------------------------------------------------
 
+    // GET /correspondents-bundle — correspondents + beats + leaderboard in a single DO call.
+    // Eliminates 3 separate HTTP round-trips from the Worker route, which serialize
+    // inside the DO anyway. Returns all data the correspondents route needs.
+    this.router.get("/correspondents-bundle", (c) => {
+      const correspondents = this.ctx.storage.sql
+        .exec(
+          `SELECT s.btc_address,
+                  COUNT(s.id) as signal_count,
+                  MAX(s.created_at) as last_signal,
+                  COUNT(DISTINCT date(s.created_at)) as days_active,
+                  st.current_streak,
+                  st.longest_streak,
+                  st.total_signals,
+                  st.last_signal_date
+           FROM signals s
+           LEFT JOIN streaks st ON s.btc_address = st.btc_address
+           WHERE s.correction_of IS NULL
+           GROUP BY s.btc_address
+           ORDER BY signal_count DESC
+           LIMIT 200`
+        )
+        .toArray();
+
+      const beats = this.ctx.storage.sql
+        .exec(
+          `SELECT b.*, MAX(s.created_at) as last_signal_at
+           FROM beats b
+           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           GROUP BY b.slug
+           ORDER BY b.name`
+        )
+        .toArray();
+
+      // Leaderboard — wrapped in try/catch so a leaderboard failure
+      // doesn't break the correspondents endpoint (preserves old .catch(() => []) behavior)
+      let leaderboard: Array<Record<string, unknown>> = [];
+      try {
+        leaderboard = this.queryLeaderboard(200);
+      } catch (e) {
+        console.error("Leaderboard query failed in correspondents bundle:", e);
+      }
+
+      return c.json({
+        ok: true,
+        data: { correspondents, beats, leaderboard },
+      } satisfies DOResult<{ correspondents: unknown[]; beats: unknown[]; leaderboard: unknown[] }>);
+    });
+
+    // GET /init — all data needed for the initial page load in a single DO call.
+    // Replaces 5+ separate HTTP round-trips (brief, beats, classifieds, correspondents,
+    // front-page signals) with one synchronous pass through SQLite.
+    this.router.get("/init", (c) => {
+      // Brief
+      const briefRows = this.ctx.storage.sql
+        .exec("SELECT * FROM briefs ORDER BY date DESC LIMIT 1")
+        .toArray();
+      const latestBrief = briefRows.length > 0 ? (briefRows[0] as unknown as Brief) : null;
+
+      const briefDateRows = this.ctx.storage.sql
+        .exec("SELECT date FROM briefs ORDER BY date DESC")
+        .toArray();
+      const briefDates = briefDateRows.map((r) => (r as { date: string }).date);
+
+      // Beats (with status computation)
+      const beatRows = this.ctx.storage.sql
+        .exec(
+          `SELECT b.*, MAX(s.created_at) as last_signal_at
+           FROM beats b
+           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           GROUP BY b.slug
+           ORDER BY b.name`
+        )
+        .toArray();
+      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+      const now = Date.now();
+      const beats = beatRows.map((r) => {
+        const row = r as Record<string, unknown>;
+        const lastSignalAt = row.last_signal_at as string | null;
+        const status: "active" | "inactive" =
+          lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
+            ? "active"
+            : "inactive";
+        return {
+          slug: row.slug,
+          name: row.name,
+          description: row.description,
+          color: row.color,
+          created_by: row.created_by,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          status,
+        } as Beat;
+      });
+
+      // Classifieds (active approved only)
+      const classifiedRows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM classifieds
+           WHERE expires_at > datetime('now')
+             AND status = 'approved'
+           ORDER BY created_at DESC
+           LIMIT 50`
+        )
+        .toArray() as unknown as Classified[];
+
+      // Correspondents
+      const correspondentRows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.btc_address,
+                  COUNT(s.id) as signal_count,
+                  MAX(s.created_at) as last_signal,
+                  COUNT(DISTINCT date(s.created_at)) as days_active,
+                  st.current_streak,
+                  st.longest_streak,
+                  st.total_signals,
+                  st.last_signal_date
+           FROM signals s
+           LEFT JOIN streaks st ON s.btc_address = st.btc_address
+           WHERE s.correction_of IS NULL
+           GROUP BY s.btc_address
+           ORDER BY signal_count DESC
+           LIMIT 200`
+        )
+        .toArray();
+
+      // Leaderboard — wrapped in try/catch to preserve partial results on failure
+      let leaderboard: Array<Record<string, unknown>> = [];
+      try {
+        leaderboard = this.queryLeaderboard(200);
+      } catch (e) {
+        console.error("Leaderboard query failed in init bundle:", e);
+      }
+
+      // Front-page signals (approved + brief_included)
+      const signalRows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+           FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN signal_tags st ON s.id = st.signal_id
+           WHERE s.status IN ('approved', 'brief_included')
+           GROUP BY s.id
+           ORDER BY s.created_at DESC
+           LIMIT 500`
+        )
+        .toArray();
+      const signals = signalRows.map((r) => rowToSignal(r as Record<string, unknown>));
+
+      return c.json({
+        ok: true,
+        data: {
+          brief: latestBrief,
+          briefDates,
+          beats,
+          classifieds: classifiedRows,
+          correspondents: correspondentRows,
+          leaderboard,
+          signals,
+        },
+      });
+    });
+
     // GET /leaderboard — weighted scores across all roles
     this.router.get("/leaderboard", (c) => {
       const rows = this.queryLeaderboard(200);
@@ -2444,6 +2665,11 @@ export class NewsDO extends DurableObject<Env> {
         limit
       )
       .toArray();
+  }
+
+  /** Keep-alive alarm — reschedules itself every 50 seconds to prevent DO eviction. */
+  async alarm(): Promise<void> {
+    await this.ctx.storage.setAlarm(Date.now() + 50_000);
   }
 
   async fetch(request: Request): Promise<Response> {

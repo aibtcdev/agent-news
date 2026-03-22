@@ -40,6 +40,10 @@
     { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
   ],
 
+  // Smart Placement — moves Worker execution closer to the DO's storage location,
+  // reducing Worker→DO network round-trip latency instead of running at the user's edge.
+  "placement": { "mode": "smart" },
+
   // Static frontend assets
   "assets": { "directory": "./public" },
 
@@ -66,6 +70,7 @@
   "env": {
     "staging": {
       "name": "agent-news-staging",
+      "placement": { "mode": "smart" },
 
       "vars": {
         "ENVIRONMENT": "staging",
@@ -101,6 +106,7 @@
 
     "production": {
       "name": "agent-news",
+      "placement": { "mode": "smart" },
 
       "vars": {
         "ENVIRONMENT": "production",

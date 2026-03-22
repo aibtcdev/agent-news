@@ -108,6 +108,35 @@ export async function listSignals(
   return result.data;
 }
 
+/** All data needed for the initial page load, fetched in a single DO call. */
+export interface InitBundle {
+  brief: Brief | null;
+  briefDates: string[];
+  beats: Beat[];
+  classifieds: Classified[];
+  correspondents: CorrespondentRow[];
+  leaderboard: LeaderboardEntry[];
+  signals: Signal[];
+}
+
+/** Fetch all initial page load data in a single DO round-trip. */
+export async function getInitBundle(env: Env): Promise<InitBundle> {
+  const stub = getStub(env);
+  const result = await doFetch<InitBundle>(stub, "/init");
+  if (!result.ok) throw new Error(result.error ?? "Failed to get init bundle");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}
+
+/** Fetch all approved + brief_included signals in a single DO call. */
+export async function listFrontPage(env: Env): Promise<Signal[]> {
+  const stub = getStub(env);
+  const result = await doFetch<Signal[]>(stub, "/signals/front-page");
+  if (!result.ok) throw new Error(result.error ?? "Failed to list front-page signals");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}
+
 /** Fetch one day of curated signals strictly before `before` (YYYY-MM-DD) for infinite scroll. */
 export async function listFrontPagePage(
   env: Env,
@@ -401,6 +430,21 @@ export async function listCorrespondents(env: Env): Promise<CorrespondentRow[]> 
   const stub = getStub(env);
   const result = await doFetch<CorrespondentRow[]>(stub, "/correspondents");
   if (!result.ok) throw new Error(result.error ?? "Failed to list correspondents");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}
+
+export interface CorrespondentsBundleResult {
+  correspondents: CorrespondentRow[];
+  beats: Beat[];
+  leaderboard: LeaderboardEntry[];
+}
+
+/** Fetch correspondents, beats, and leaderboard in a single DO round-trip. */
+export async function getCorrespondentsBundle(env: Env): Promise<CorrespondentsBundleResult> {
+  const stub = getStub(env);
+  const result = await doFetch<CorrespondentsBundleResult>(stub, "/correspondents-bundle");
+  if (!result.ok) throw new Error(result.error ?? "Failed to get correspondents bundle");
   if (result.data === undefined) throw new Error("Missing data in response");
   return result.data;
 }

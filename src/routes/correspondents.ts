@@ -4,7 +4,7 @@
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { listCorrespondents, listBeats, getLeaderboard } from "../lib/do-client";
+import { getCorrespondentsBundle } from "../lib/do-client";
 import { resolveAgentNames } from "../services/agent-resolver";
 
 function truncAddr(addr: string): string {
@@ -19,11 +19,11 @@ const correspondentsRouter = new Hono<{
 
 // GET /api/correspondents — ranked correspondents with signal counts, streaks, and names
 correspondentsRouter.get("/api/correspondents", async (c) => {
-  const [rows, beats, leaderboardEntries] = await Promise.all([
-    listCorrespondents(c.env),
-    listBeats(c.env),
-    getLeaderboard(c.env).catch(() => []),
-  ]);
+  // Single DO round-trip fetches correspondents, beats, and leaderboard together
+  const bundle = await getCorrespondentsBundle(c.env);
+  const rows = bundle.correspondents;
+  const beats = bundle.beats;
+  const leaderboardEntries = bundle.leaderboard;
 
   // Build address → leaderboard score map
   const scoreMap = new Map<string, number>();
@@ -43,9 +43,15 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     });
   }
 
-  // Resolve agent display names
+  // Resolve agent display names with a 3-second timeout.
+  // If aibtc.com is slow, return without names rather than blocking the response.
   const addresses = rows.map((r) => r.btc_address);
-  const nameMap = await resolveAgentNames(c.env.NEWS_KV, addresses);
+  const nameResolution = resolveAgentNames(c.env.NEWS_KV, addresses);
+  const timeout = new Promise<Map<string, import("../services/agent-resolver").AgentInfo>>(
+    (resolve) => setTimeout(() => resolve(new Map()), 3000)
+  );
+  const nameMap = await Promise.race([nameResolution, timeout]);
+  c.executionCtx.waitUntil(nameResolution.catch(() => {}));
 
   // Transform to match frontend expectations (camelCase, computed fields)
   const correspondents = rows.map((row) => {
