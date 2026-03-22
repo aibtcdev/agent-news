@@ -1,11 +1,30 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL } from "./schema";
+
+// ── State machine transition maps ──
+// Hoisted to module level so they are created once and are testable.
+
+/** Valid editorial transitions for signals: submitted → in_review → approved/rejected → brief_included */
+export const SIGNAL_VALID_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
+  submitted: ["in_review", "approved", "rejected"],
+  in_review: ["approved", "rejected"],
+  approved: ["brief_included", "rejected"],
+  rejected: ["approved"],
+  brief_included: [],
+};
+
+/** Valid editorial transitions for classifieds: pending_review → approved/rejected */
+export const CLASSIFIED_VALID_TRANSITIONS: Record<ClassifiedStatus, ClassifiedStatus[]> = {
+  pending_review: ["approved", "rejected"],
+  rejected: ["approved"],
+  approved: [], // terminal — TTL is already running
+};
 
 /**
  * Raw SQL row returned by signal SELECT queries.
@@ -269,20 +288,13 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       // State machine: prevent editorial regressions
-      // Valid transitions: submitted → in_review → approved/rejected, approved → brief_included
-      const currentStatus = (signalRows[0] as { id: string; status: string }).status;
-      const VALID_TRANSITIONS: Record<string, string[]> = {
-        submitted: ["in_review", "approved", "rejected"],
-        in_review: ["approved", "rejected"],
-        approved: ["brief_included", "rejected"],
-        rejected: ["approved"],
-        brief_included: [],
-      };
-      const allowed = VALID_TRANSITIONS[currentStatus] ?? [];
-      if (!allowed.includes(status as string)) {
+      const currentStatus = (signalRows[0] as { id: string; status: SignalStatus }).status;
+      const newStatus = status as SignalStatus; // validated above against SIGNAL_STATUSES
+      const allowed = SIGNAL_VALID_TRANSITIONS[currentStatus] ?? [];
+      if (!allowed.includes(newStatus)) {
         return c.json({
           ok: false,
-          error: `Invalid transition: "${currentStatus}" → "${status}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
+          error: `Invalid transition: "${currentStatus}" → "${newStatus}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
         } satisfies DOResult<Signal>, 400);
       }
 
@@ -290,7 +302,7 @@ export class NewsDO extends DurableObject<Env> {
       this.ctx.storage.sql.exec(
         `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
          WHERE id = ?`,
-        status as string,
+        newStatus,
         feedback ? sanitizeString(feedback, 1000) : null,
         now,
         now,
@@ -1407,24 +1419,20 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: `Classified "${id}" not found` } satisfies DOResult<Classified>, 404);
       }
 
-      const currentStatus = (classifiedRows[0] as { id: string; status: string }).status;
-      const VALID_TRANSITIONS: Record<string, string[]> = {
-        pending_review: ["approved", "rejected"],
-        rejected: ["approved"],
-        approved: [], // terminal — TTL is already running
-      };
-      const allowed = VALID_TRANSITIONS[currentStatus] ?? [];
-      if (!allowed.includes(status as string)) {
+      const currentStatus = (classifiedRows[0] as { id: string; status: ClassifiedStatus }).status;
+      const newStatus = status as ClassifiedStatus; // validated above against CLASSIFIED_STATUSES
+      const allowed = CLASSIFIED_VALID_TRANSITIONS[currentStatus] ?? [];
+      if (!allowed.includes(newStatus)) {
         return c.json({
           ok: false,
-          error: `Invalid transition: "${currentStatus}" → "${status}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
+          error: `Invalid transition: "${currentStatus}" → "${newStatus}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
         } satisfies DOResult<Classified>, 400);
       }
 
       const now = new Date();
       const nowIso = now.toISOString();
 
-      if (status === "approved") {
+      if (newStatus === "approved") {
         // TTL starts now
         const expiresAt = new Date(now);
         expiresAt.setDate(expiresAt.getDate() + CLASSIFIED_DURATION_DAYS);
