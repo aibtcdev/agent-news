@@ -199,6 +199,16 @@ export class NewsDO extends DurableObject<Env> {
       );
     }
 
+    // Schedule a keep-alive alarm if none exists. The alarm fires every 50 seconds,
+    // preventing the DO from being evicted after 70-140 seconds of inactivity.
+    // This eliminates cold start overhead for the singleton DO that serves all traffic.
+    this.ctx.blockConcurrencyWhile(async () => {
+      const existing = await this.ctx.storage.getAlarm();
+      if (!existing) {
+        await this.ctx.storage.setAlarm(Date.now() + 50_000);
+      }
+    });
+
     // Internal Hono router for DO-internal routing
     this.router = new Hono();
 
@@ -2464,6 +2474,115 @@ export class NewsDO extends DurableObject<Env> {
       } satisfies DOResult<{ correspondents: unknown[]; beats: unknown[]; leaderboard: unknown[] }>);
     });
 
+    // GET /init — all data needed for the initial page load in a single DO call.
+    // Replaces 5+ separate HTTP round-trips (brief, beats, classifieds, correspondents,
+    // front-page signals) with one synchronous pass through SQLite.
+    this.router.get("/init", (c) => {
+      // Brief
+      const briefRows = this.ctx.storage.sql
+        .exec("SELECT * FROM briefs ORDER BY date DESC LIMIT 1")
+        .toArray();
+      const latestBrief = briefRows.length > 0 ? (briefRows[0] as unknown as Brief) : null;
+
+      const briefDateRows = this.ctx.storage.sql
+        .exec("SELECT date FROM briefs ORDER BY date DESC")
+        .toArray();
+      const briefDates = briefDateRows.map((r) => (r as { date: string }).date);
+
+      // Beats (with status computation)
+      const beatRows = this.ctx.storage.sql
+        .exec(
+          `SELECT b.*, MAX(s.created_at) as last_signal_at
+           FROM beats b
+           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           GROUP BY b.slug
+           ORDER BY b.name`
+        )
+        .toArray();
+      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+      const now = Date.now();
+      const beats = beatRows.map((r) => {
+        const row = r as Record<string, unknown>;
+        const lastSignalAt = row.last_signal_at as string | null;
+        const status: "active" | "inactive" =
+          lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
+            ? "active"
+            : "inactive";
+        return {
+          slug: row.slug,
+          name: row.name,
+          description: row.description,
+          color: row.color,
+          created_by: row.created_by,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+          status,
+        } as Beat;
+      });
+
+      // Classifieds (active approved only)
+      const classifiedRows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM classifieds
+           WHERE expires_at > datetime('now')
+             AND status = 'approved'
+           ORDER BY created_at DESC
+           LIMIT 50`
+        )
+        .toArray() as unknown as Classified[];
+
+      // Correspondents
+      const correspondentRows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.btc_address,
+                  COUNT(s.id) as signal_count,
+                  MAX(s.created_at) as last_signal,
+                  COUNT(DISTINCT date(s.created_at)) as days_active,
+                  st.current_streak,
+                  st.longest_streak,
+                  st.total_signals,
+                  st.last_signal_date
+           FROM signals s
+           LEFT JOIN streaks st ON s.btc_address = st.btc_address
+           WHERE s.correction_of IS NULL
+           GROUP BY s.btc_address
+           ORDER BY signal_count DESC
+           LIMIT 200`
+        )
+        .toArray();
+
+      // Leaderboard
+      const leaderboard = this.queryLeaderboard(200);
+
+      // Front-page signals (approved + brief_included)
+      const signalRows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+           FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN signal_tags st ON s.id = st.signal_id
+           WHERE s.status IN ('approved', 'brief_included')
+           GROUP BY s.id
+           ORDER BY s.created_at DESC
+           LIMIT 200`
+        )
+        .toArray();
+      const signals = signalRows.map((r) => rowToSignal(r as Record<string, unknown>));
+
+      return c.json({
+        ok: true,
+        data: {
+          brief: latestBrief,
+          briefDates,
+          beats,
+          classifieds: classifiedRows,
+          correspondents: correspondentRows,
+          leaderboard,
+          signals,
+        },
+      });
+    });
+
     // GET /leaderboard — weighted scores across all roles
     this.router.get("/leaderboard", (c) => {
       const rows = this.queryLeaderboard(200);
@@ -2525,6 +2644,11 @@ export class NewsDO extends DurableObject<Env> {
         limit
       )
       .toArray();
+  }
+
+  /** Keep-alive alarm — reschedules itself every 50 seconds to prevent DO eviction. */
+  async alarm(): Promise<void> {
+    await this.ctx.storage.setAlarm(Date.now() + 50_000);
   }
 
   async fetch(request: Request): Promise<Response> {

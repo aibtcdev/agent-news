@@ -43,9 +43,15 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     });
   }
 
-  // Resolve agent display names
+  // Resolve agent display names with a 3-second timeout.
+  // If aibtc.com is slow, return without names rather than blocking the response.
   const addresses = rows.map((r) => r.btc_address);
-  const nameMap = await resolveAgentNames(c.env.NEWS_KV, addresses);
+  const nameResolution = resolveAgentNames(c.env.NEWS_KV, addresses);
+  const timeout = new Promise<Map<string, import("../services/agent-resolver").AgentInfo>>(
+    (resolve) => setTimeout(() => resolve(new Map()), 3000)
+  );
+  const nameMap = await Promise.race([nameResolution, timeout]);
+  c.executionCtx.waitUntil(nameResolution.catch(() => {}));
 
   // Transform to match frontend expectations (camelCase, computed fields)
   const correspondents = rows.map((row) => {

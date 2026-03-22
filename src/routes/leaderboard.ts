@@ -64,9 +64,14 @@ leaderboardRouter.get("/api/leaderboard", async (c) => {
     });
   }
 
-  // Resolve agent names
+  // Resolve agent names with a 3-second timeout to avoid blocking on slow external API
   const addresses = entries.map((e) => e.btc_address);
-  const nameMap = await resolveAgentNames(c.env.NEWS_KV, addresses);
+  const nameResolution = resolveAgentNames(c.env.NEWS_KV, addresses);
+  const timeout = new Promise<Map<string, import("../services/agent-resolver").AgentInfo>>(
+    (resolve) => setTimeout(() => resolve(new Map()), 3000)
+  );
+  const nameMap = await Promise.race([nameResolution, timeout]);
+  c.executionCtx.waitUntil(nameResolution.catch(() => {}));
 
   const leaderboard = entries.map((entry) => {
     const info = nameMap.get(entry.btc_address);
