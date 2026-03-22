@@ -2423,6 +2423,47 @@ export class NewsDO extends DurableObject<Env> {
     // Leaderboard v2 — weighted scoring with 30-day rolling window
     // -------------------------------------------------------------------------
 
+    // GET /correspondents-bundle — correspondents + beats + leaderboard in a single DO call.
+    // Eliminates 3 separate HTTP round-trips from the Worker route, which serialize
+    // inside the DO anyway. Returns all data the correspondents route needs.
+    this.router.get("/correspondents-bundle", (c) => {
+      const correspondents = this.ctx.storage.sql
+        .exec(
+          `SELECT s.btc_address,
+                  COUNT(s.id) as signal_count,
+                  MAX(s.created_at) as last_signal,
+                  COUNT(DISTINCT date(s.created_at)) as days_active,
+                  st.current_streak,
+                  st.longest_streak,
+                  st.total_signals,
+                  st.last_signal_date
+           FROM signals s
+           LEFT JOIN streaks st ON s.btc_address = st.btc_address
+           WHERE s.correction_of IS NULL
+           GROUP BY s.btc_address
+           ORDER BY signal_count DESC
+           LIMIT 200`
+        )
+        .toArray();
+
+      const beats = this.ctx.storage.sql
+        .exec(
+          `SELECT b.*, MAX(s.created_at) as last_signal_at
+           FROM beats b
+           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           GROUP BY b.slug
+           ORDER BY b.name`
+        )
+        .toArray();
+
+      const leaderboard = this.queryLeaderboard(200);
+
+      return c.json({
+        ok: true,
+        data: { correspondents, beats, leaderboard },
+      } satisfies DOResult<{ correspondents: unknown[]; beats: unknown[]; leaderboard: unknown[] }>);
+    });
+
     // GET /leaderboard — weighted scores across all roles
     this.router.get("/leaderboard", (c) => {
       const rows = this.queryLeaderboard(200);

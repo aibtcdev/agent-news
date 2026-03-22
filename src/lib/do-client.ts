@@ -414,6 +414,21 @@ export async function listCorrespondents(env: Env): Promise<CorrespondentRow[]> 
   return result.data;
 }
 
+export interface CorrespondentsBundleResult {
+  correspondents: CorrespondentRow[];
+  beats: Beat[];
+  leaderboard: LeaderboardEntry[];
+}
+
+/** Fetch correspondents, beats, and leaderboard in a single DO round-trip. */
+export async function getCorrespondentsBundle(env: Env): Promise<CorrespondentsBundleResult> {
+  const stub = getStub(env);
+  const result = await doFetch<CorrespondentsBundleResult>(stub, "/correspondents-bundle");
+  if (!result.ok) throw new Error(result.error ?? "Failed to get correspondents bundle");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}
+
 // ---------------------------------------------------------------------------
 // Streaks
 // ---------------------------------------------------------------------------
