@@ -8,7 +8,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, SignalStatus } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { reviewSignal, listSignals, listFrontPagePage } from "../lib/do-client";
+import { reviewSignal, listSignals, listFrontPagePage, listFrontPage } from "../lib/do-client";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 import { REVIEW_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
@@ -141,13 +141,8 @@ signalReviewRouter.get("/api/front-page", async (c) => {
     });
   }
 
-  // Default mode: return all approved + brief_included signals (today's feed)
-  const approved = await listSignals(c.env, { status: "approved", limit: 200 });
-  const included = await listSignals(c.env, { status: "brief_included", limit: 200 });
-
-  const all = [...approved, ...included];
-  // Sort by created_at desc (most recent first)
-  all.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  // Default mode: single DO query for all approved + brief_included signals
+  const all = await listFrontPage(c.env);
 
   const transformed = all.map((s) => ({
     id: s.id,
