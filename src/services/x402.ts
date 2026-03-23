@@ -148,11 +148,9 @@ export async function verifyPayment(
   }
 
   // Relay returns 200 for both success and failure — check the success field.
-  // 400/409 are schema or idempotency errors, not transient relay failures.
+  // 4xx = schema/idempotency error; 2xx + !success = payment rejected by relay.
+  // Both are payment-invalid, not transient relay errors (5xx handled above).
   if (!result.success) {
-    if (settleRes.status >= 400 && settleRes.status < 500) {
-      return { valid: false };
-    }
     return { valid: false };
   }
 
