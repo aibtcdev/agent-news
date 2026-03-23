@@ -77,14 +77,22 @@ export async function resolveAgentName(
 	return { name: null, btcAddress: null };
 }
 
+interface BulkFetchResult {
+	agents: Map<string, AgentInfo>;
+	/** True only when all pages were fetched successfully (no errors, no truncation). */
+	complete: boolean;
+}
+
 /**
  * Fetch all agents from the paginated bulk list endpoint.
- * Returns a Map<btcAddress, AgentInfo> for every agent in the registry.
+ * Returns a Map<btcAddress, AgentInfo> for every agent in the registry,
+ * plus a `complete` flag indicating whether the full list was fetched.
  * Much faster than individual lookups: ~0.3s per 100 agents vs ~42s per individual call.
  */
-async function fetchBulkAgents(): Promise<Map<string, AgentInfo>> {
+async function fetchBulkAgents(): Promise<BulkFetchResult> {
 	const allAgents = new Map<string, AgentInfo>();
 	let offset = 0;
+	let complete = false;
 
 	for (let page = 0; page < BULK_MAX_PAGES; page++) {
 		try {
@@ -118,7 +126,10 @@ async function fetchBulkAgents(): Promise<Map<string, AgentInfo>> {
 				});
 			}
 
-			if (!data.pagination?.hasMore) break;
+			if (!data.pagination?.hasMore) {
+				complete = true;
+				break;
+			}
 			offset += BULK_PAGE_SIZE;
 		} catch {
 			// Network error on this page — return what we have so far
@@ -126,7 +137,7 @@ async function fetchBulkAgents(): Promise<Map<string, AgentInfo>> {
 		}
 	}
 
-	return allAgents;
+	return { agents: allAgents, complete };
 }
 
 /**
@@ -174,7 +185,7 @@ export async function resolveAgentNames(
 	if (uncached.length === 0) return infoMap;
 
 	// Step 3: Fetch bulk agent list and match against uncached addresses
-	const bulkAgents = await fetchBulkAgents();
+	const { agents: bulkAgents, complete } = await fetchBulkAgents();
 	const uncachedSet = new Set(uncached);
 
 	// Step 4: Populate KV cache for ALL fetched agents (pre-warm) and resolve our addresses
@@ -194,18 +205,22 @@ export async function resolveAgentNames(
 		}
 	}
 
-	// For any addresses not found in bulk list, cache as "not found" to avoid re-fetching
-	for (const addr of uncachedSet) {
-		const info: AgentInfo = { name: null, btcAddress: null };
-		infoMap.set(addr, info);
-		kvWrites.push(
-			kv.put(`${CACHE_KEY_PREFIX}${addr}`, JSON.stringify(info), {
-				expirationTtl: CACHE_TTL_SECONDS,
-			}),
-		);
+	// Only negative-cache addresses as "not found" when the bulk fetch completed fully.
+	// A partial fetch (network error, pagination cap) might have missed real agents,
+	// and we don't want to incorrectly cache them as absent for 24 hours.
+	if (complete) {
+		for (const addr of uncachedSet) {
+			const info: AgentInfo = { name: null, btcAddress: null };
+			infoMap.set(addr, info);
+			kvWrites.push(
+				kv.put(`${CACHE_KEY_PREFIX}${addr}`, JSON.stringify(info), {
+					expirationTtl: CACHE_TTL_SECONDS,
+				}),
+			);
+		}
 	}
 
-	// Fire KV writes in parallel (don't block on them)
+	// Fire KV writes in parallel and wait for all of them to settle
 	await Promise.allSettled(kvWrites);
 
 	return infoMap;
