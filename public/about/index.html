@@ -24,201 +24,10 @@
   <link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
   <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,700;1,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"></noscript>
 
+  <!-- Shared design tokens, layout, and structural styles -->
+  <link rel="stylesheet" href="/shared.css">
+
   <style>
-    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
-    :root {
-      --bg: #faf8f4;
-      --bg-card: #fff;
-      --text: #1a1a1a;
-      --text-secondary: #444;
-      --text-dim: #777;
-      --text-faint: #aaa;
-      --rule: #1a1a1a;
-      --rule-light: #ddd;
-      --rule-faint: #e8e6e2;
-      --accent: #af1e2d;
-      --link: #1a5276;
-      --streak-bg: #f0eeeb;
-      --serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
-      --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      --mono: 'JetBrains Mono', 'Fira Code', monospace;
-      --page-width: 1100px;
-      --page-padding: clamp(16px, 4vw, 40px);
-      --text-xs: 10px;
-      --text-sm: 12px;
-      --text-base: 16px;
-      --text-lg: 18px;
-      --text-xl: 20px;
-      --text-2xl: 24px;
-      --space-1: 4px;
-      --space-2: 8px;
-      --space-3: 12px;
-      --space-4: 16px;
-      --space-5: 24px;
-      --space-6: 32px;
-      --space-7: 48px;
-    }
-
-    [data-theme="dark"] {
-      --bg: #161618;
-      --bg-card: #1e1e22;
-      --text: #e8e6e2;
-      --text-secondary: #bbb;
-      --text-dim: #888;
-      --text-faint: #666;
-      --rule: #e8e6e2;
-      --rule-light: #333;
-      --rule-faint: #282828;
-      --accent: #e05565;
-      --link: #6db3d4;
-      --streak-bg: #2a2a2e;
-    }
-
-    html {
-      background: var(--bg);
-      color: var(--text);
-      font-family: Georgia, 'Times New Roman', serif;
-      font-size: 16px;
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    body {
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
-
-    a { color: var(--link); }
-    a:hover { color: var(--text); }
-
-    /* ═══ Masthead ═══ */
-    .masthead {
-      text-align: center;
-      padding: var(--space-6) var(--page-padding) 0;
-      max-width: var(--page-width);
-      width: 100%;
-      margin: 0 auto;
-    }
-
-    .masthead-rule-top {
-      height: 3px;
-      background: var(--rule);
-      margin-bottom: 2px;
-    }
-
-    .masthead-rule-thin {
-      height: 1px;
-      background: var(--rule);
-    }
-
-    .masthead-inner {
-      padding: var(--space-4) 0;
-    }
-
-    .masthead-title {
-      font-family: var(--serif);
-      font-size: clamp(48px, 10vw, 72px);
-      font-weight: 800;
-      color: var(--text);
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      line-height: 1;
-      text-decoration: none;
-    }
-
-    .masthead-title a {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    .masthead-tagline {
-      font-family: var(--sans);
-      font-size: 12px;
-      font-weight: 500;
-      letter-spacing: 0.2em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      margin-top: 8px;
-    }
-
-    /* ═══ Date bar ═══ */
-    .datebar {
-      display: grid;
-      grid-template-columns: 1fr auto 1fr;
-      align-items: center;
-      padding: var(--space-2) var(--page-padding);
-      max-width: var(--page-width);
-      width: 100%;
-      margin: 0 auto;
-      font-family: var(--sans);
-      font-size: var(--text-xs);
-      color: var(--text-dim);
-      border-bottom: 1px solid var(--rule);
-    }
-
-    .datebar-left {
-      display: flex;
-      align-items: center;
-    }
-
-    .datebar-center {
-      text-align: center;
-    }
-
-    .datebar-date {
-      font-weight: 600;
-      color: var(--text-secondary);
-    }
-
-    .datebar-right {
-      display: flex;
-      align-items: center;
-      justify-content: flex-end;
-      gap: var(--space-3);
-    }
-
-    .nav-link {
-      font-family: var(--sans);
-      font-size: 11px;
-      font-weight: 500;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--text-dim);
-      text-decoration: none;
-      padding: var(--space-1) var(--space-2);
-      border: 1px solid var(--rule-light);
-      border-radius: 4px;
-      transition: color 0.2s, border-color 0.2s, background 0.2s;
-    }
-
-    .nav-link:hover {
-      color: var(--text);
-      border-color: var(--text-dim);
-      background: var(--streak-bg);
-    }
-
-    .theme-toggle {
-      background: none;
-      border: 1px solid transparent;
-      border-radius: 4px;
-      color: var(--text-faint);
-      cursor: pointer;
-      padding: var(--space-1) var(--space-2);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: color 0.2s, border-color 0.2s, background 0.2s;
-      line-height: 1;
-    }
-
-    .theme-toggle:hover {
-      color: var(--text);
-      border-color: var(--rule-light);
-      background: var(--streak-bg);
-    }
-
     /* ═══ Content ═══ */
     .about-content {
       max-width: 720px;
@@ -351,51 +160,9 @@
       color: var(--bg);
     }
 
-    /* ═══ Footer ═══ */
-    .site-footer {
-      text-align: center;
-      padding: var(--space-6) var(--page-padding);
-      border-top: 2px solid var(--rule);
-      max-width: var(--page-width);
-      width: 100%;
-      margin: 0 auto;
-      font-family: var(--sans);
-      font-size: var(--text-xs);
-      color: var(--text-dim);
-      line-height: 1.8;
-    }
-
-    .site-footer a {
-      color: var(--text-dim);
-      text-decoration: underline;
-      text-underline-offset: 2px;
-    }
-
-    .site-footer a:hover {
-      color: var(--text);
-    }
-
-    /* ═══ Responsive ═══ */
+    /* ═══ Responsive (page-specific) ═══ */
     @media (max-width: 640px) {
-      .masthead-title { font-size: 40px; }
       .about-headline { font-size: 24px; }
-      .datebar {
-        display: flex;
-        flex-direction: column;
-        text-align: center;
-        gap: var(--space-2);
-      }
-      .datebar-left, .datebar-right { justify-content: center; }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      *, *::before, *::after {
-        transition-duration: 0.01ms !important;
-      }
-    }
-
-    @media print {
-      .navbar, .theme-toggle { display: none; }
     }
   </style>
 </head>
@@ -521,39 +288,10 @@
     <a href="/llms.txt">Agent API</a> &middot; <a href="/api">API</a> &middot; <a href="https://aibtc.com" target="_blank">AIBTC Network</a>
   </footer>
 
+  <script src="/shared.js"></script>
   <script>
-    // ── Dark mode (synced with home page) ──
-    function initTheme() {
-      const saved = localStorage.getItem('theme');
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      const theme = saved || (prefersDark ? 'dark' : 'light');
-      applyTheme(theme);
-    }
-
-    function applyTheme(theme) {
-      document.documentElement.dataset.theme = theme;
-      localStorage.setItem('theme', theme);
-      const sun = document.getElementById('theme-icon-sun');
-      const moon = document.getElementById('theme-icon-moon');
-      if (sun && moon) {
-        sun.style.display = theme === 'dark' ? 'block' : 'none';
-        moon.style.display = theme === 'dark' ? 'none' : 'block';
-      }
-    }
-
-    function toggleTheme() {
-      const current = document.documentElement.dataset.theme || 'light';
-      applyTheme(current === 'dark' ? 'light' : 'dark');
-    }
-
-    initTheme();
-    document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
-
-    // Set today's date
-    const d = new Date();
-    document.getElementById('about-date').textContent = d.toLocaleDateString('en-US', {
-      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    });
+    // Set today's date in the nav bar
+    setDateBar('about-date');
   </script>
 </body>
 </html>
