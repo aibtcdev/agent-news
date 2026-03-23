@@ -2760,6 +2760,82 @@ export class NewsDO extends DurableObject<Env> {
       } satisfies DOResult<unknown>);
     });
 
+    // POST /leaderboard/reset — Publisher-only: snapshot leaderboard, clear 5 scoring tables, prune old snapshots
+    // Preserves all signal history. Prunes snapshots to keep only the 10 most recent.
+    this.router.post("/leaderboard/reset", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>, 400);
+      }
+
+      const { btc_address } = body as { btc_address?: unknown };
+      if (typeof btc_address !== "string") {
+        return c.json({ ok: false, error: "btc_address is required and must be a string" } satisfies DOResult<unknown>, 400);
+      }
+
+      const pub = verifyPublisher(this.ctx.storage.sql, btc_address);
+      if (!pub.ok) {
+        return c.json({ ok: false, error: pub.error } satisfies DOResult<unknown>, pub.status);
+      }
+
+      const now = new Date().toISOString();
+      const snapshotId = generateId();
+
+      // Snapshot the full leaderboard before clearing scoring tables.
+      const allEntries = this.queryLeaderboard(10_000);
+      try {
+        this.ctx.storage.sql.exec(
+          `INSERT INTO leaderboard_snapshots (id, snapshot_type, week, snapshot_data, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          snapshotId,
+          "launch_reset",
+          null,
+          JSON.stringify(allEntries),
+          now
+        );
+      } catch (e) {
+        console.error("Failed to save launch_reset snapshot:", e);
+        return c.json({ ok: false, error: "Failed to create snapshot before reset" } satisfies DOResult<unknown>, 500);
+      }
+
+      // Delete rows from each of the 5 scoring tables, preserving signal history.
+      try {
+        const briefSignalsCursor = this.ctx.storage.sql.exec("DELETE FROM brief_signals");
+        const streaksCursor = this.ctx.storage.sql.exec("DELETE FROM streaks");
+        const correctionsCursor = this.ctx.storage.sql.exec("DELETE FROM corrections");
+        const referralCreditsCursor = this.ctx.storage.sql.exec("DELETE FROM referral_credits");
+        const earningsCursor = this.ctx.storage.sql.exec("DELETE FROM earnings");
+
+        // Prune snapshots to keep only the 10 most recent by created_at DESC.
+        const pruneCursor = this.ctx.storage.sql.exec(
+          `DELETE FROM leaderboard_snapshots
+           WHERE id NOT IN (
+             SELECT id FROM leaderboard_snapshots
+             ORDER BY created_at DESC
+             LIMIT 10
+           )`
+        );
+
+        return c.json({
+          ok: true,
+          data: {
+            snapshot_id: snapshotId,
+            deleted: {
+              brief_signals: briefSignalsCursor.rowsWritten,
+              streaks: streaksCursor.rowsWritten,
+              corrections: correctionsCursor.rowsWritten,
+              referral_credits: referralCreditsCursor.rowsWritten,
+              earnings: earningsCursor.rowsWritten,
+            },
+            pruned_snapshots: pruneCursor.rowsWritten,
+          },
+        } satisfies DOResult<unknown>);
+      } catch (e) {
+        console.error("Failed to reset leaderboard scoring tables:", e);
+        return c.json({ ok: false, error: "Failed to reset leaderboard scoring tables" } satisfies DOResult<unknown>, 500);
+      }
+    });
+
     // -------------------------------------------------------------------------
     // Test-only seed endpoint — NOT available in production
     // Allows integration tests to insert rows with arbitrary timestamps so that

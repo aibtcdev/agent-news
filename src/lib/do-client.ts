@@ -877,3 +877,29 @@ export async function getLeaderboardSnapshot(
   return doFetch<SnapshotFull>(stub, `/leaderboard/snapshots/${encodeURIComponent(id)}?${params}`);
 }
 
+/** Result of a leaderboard reset operation. */
+export interface ResetLeaderboardResult {
+  snapshot_id: string;
+  deleted: {
+    brief_signals: number;
+    streaks: number;
+    corrections: number;
+    referral_credits: number;
+    earnings: number;
+  };
+  pruned_snapshots: number;
+}
+
+/** Snapshot the leaderboard, clear 5 scoring tables, and prune old snapshots to keep 10. Publisher-only. */
+export async function resetLeaderboard(
+  env: Env,
+  publisherAddress: string
+): Promise<DOResult<ResetLeaderboardResult>> {
+  const stub = getStub(env);
+  return doFetch<ResetLeaderboardResult>(stub, "/leaderboard/reset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ btc_address: publisherAddress }),
+  });
+}
+
