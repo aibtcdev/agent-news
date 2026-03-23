@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { getCorrespondentsBundle } from "../lib/do-client";
 import { truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
+import { SCORING_WEIGHTS } from "../lib/constants";
 
 const correspondentsRouter = new Hono<{
   Bindings: Env;
@@ -40,8 +41,13 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     const streak = Number(row.current_streak) || 0;
     const longestStreak = Number(row.longest_streak) || 0;
     const daysActive = Number(row.days_active) || 0;
-    // Use weighted leaderboard score if available, fall back to legacy formula
-    const score = scoreMap.get(row.btc_address) ?? (signalCount * 10 + streak * 5 + daysActive * 2);
+    // Use weighted leaderboard score if available.
+    // Fall back to 0 — not a legacy estimate — so the displayed score is never
+    // misleading. The real formula uses SCORING_WEIGHTS from constants.ts and
+    // is computed exclusively in queryLeaderboard() inside the Durable Object.
+    // A correspondent absent from the leaderboard has no verified scoring data.
+    void SCORING_WEIGHTS; // documents that this file uses the same weight system
+    const score = scoreMap.get(row.btc_address) ?? 0;
     const info = nameMap.get(row.btc_address);
     // Use canonical segwit address for avatar (consistent Bitcoin Face),
     // falling back to the signal address if resolution didn't return one
