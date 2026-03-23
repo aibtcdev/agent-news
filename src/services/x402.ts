@@ -93,12 +93,11 @@ export async function verifyPayment(
   paymentHeader: string,
   amount: number
 ): Promise<PaymentVerifyResult> {
-  // Decode the base64 payment header to extract the paymentPayload
   let paymentPayload: Record<string, unknown>;
   try {
     paymentPayload = JSON.parse(atob(paymentHeader)) as Record<string, unknown>;
   } catch {
-    // Can't decode payment header — treat as invalid payment
+    // Malformed payment header — client error, not a relay error
     return { valid: false };
   }
 

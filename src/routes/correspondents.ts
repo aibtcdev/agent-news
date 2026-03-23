@@ -40,12 +40,9 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     const streak = Number(row.current_streak) || 0;
     const longestStreak = Number(row.longest_streak) || 0;
     const daysActive = Number(row.days_active) || 0;
-    // Use weighted leaderboard score if available.
-    // Return null for correspondents absent from the leaderboard so consumers
-    // can distinguish "no scoring data yet" from a real score of 0.
-    // Weights are defined in SCORING_WEIGHTS (src/lib/constants.ts) and applied
-    // exclusively in queryLeaderboard() inside the Durable Object.
-    const score = scoreMap.has(row.btc_address) ? (scoreMap.get(row.btc_address) as number) : null;
+    // null = no leaderboard data yet; distinguishes from a real score of 0
+    const rawScore = scoreMap.get(row.btc_address);
+    const score = rawScore !== undefined ? rawScore : null;
     const info = nameMap.get(row.btc_address);
     // Use canonical segwit address for avatar (consistent Bitcoin Face),
     // falling back to the signal address if resolution didn't return one
