@@ -23,7 +23,6 @@ import {
   getClassifiedsRotation,
 } from "../lib/do-client";
 import { buildPaymentRequired, verifyPayment } from "../services/x402";
-import { verifyAuth } from "../services/auth";
 
 /** Transform a Classified row to the camelCase API response shape. */
 export function transformClassified(cl: Classified) {
@@ -125,32 +124,23 @@ classifiedsRouter.post(
       return c.json({ error: "Invalid JSON body" }, 400);
     }
 
-    const {
-      btc_address,
-      category,
-      headline,
-      body: adBody,
-    } = body;
+    // Accept both field naming conventions: title/headline, contact/btc_address
+    const headline = (body.headline ?? body.title) as string | undefined;
+    const category = body.category as string | undefined;
+    const adBody = (body.body as string | undefined) ?? null;
 
-    // Required fields
-    if (!btc_address || !category || !headline) {
+    // Required fields (btc_address derived from x402 payer after payment verification)
+    if (!category || !headline) {
       return c.json(
         {
           error:
-            "Missing required fields: btc_address, category, headline",
+            "Missing required fields: category, title (or headline)",
         },
         400
       );
     }
 
-    if (!validateBtcAddress(btc_address)) {
-      return c.json(
-        { error: "Invalid BTC address format (expected bech32 bc1...)" },
-        400
-      );
-    }
-
-    if (!isClassifiedCategory(category as string)) {
+    if (!isClassifiedCategory(category)) {
       return c.json(
         {
           error: `Invalid category. Must be one of: ${CLASSIFIED_CATEGORIES.join(", ")}`,
@@ -159,29 +149,14 @@ classifiedsRouter.post(
       );
     }
 
-    // BIP-322 auth: verify signature from btc_address before payment
-    const authResult = verifyAuth(
-      c.req.raw.headers,
-      btc_address as string,
-      "POST",
-      "/api/classifieds"
-    );
-    if (!authResult.valid) {
-      const logger = c.get("logger");
-      logger.warn("auth failure on POST /api/classifieds", {
-        code: authResult.code,
-        btc_address,
-      });
-      return c.json({ error: authResult.error, code: authResult.code }, 401);
-    }
-
     // Verify payment via x402 relay
     const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS);
     if (!verification.valid) {
       const logger = c.get("logger");
       if (verification.relayError) {
         logger.error("relay error during payment verification for POST /api/classifieds", {
-          btc_address,
+          category,
+          headline,
         });
         return c.json(
           { error: "Payment relay unavailable. Your payment was not consumed — please retry shortly." },
@@ -189,12 +164,35 @@ classifiedsRouter.post(
         );
       }
       logger.warn("payment verification failed for POST /api/classifieds", {
-        btc_address,
+        category,
+        headline,
       });
       return buildPaymentRequired({
         amount: CLASSIFIED_PRICE_SATS,
         description: `Payment verification failed. Please pay ${CLASSIFIED_PRICE_SATS} sats sBTC to place a classified ad.`,
       });
+    }
+
+    // Derive btc_address: prefer body-provided address (validated), fall back to x402 payer identity.
+    // The x402 payer is a Stacks address (SP...), not a bech32 BTC address, so we only
+    // validate body-provided values against the bc1 format.
+    const bodyAddress = (body.btc_address as string | undefined)
+      ?? (body.contact as string | undefined);
+
+    if (bodyAddress && !validateBtcAddress(bodyAddress)) {
+      return c.json(
+        { error: "Invalid BTC address format (expected bech32 bc1...)" },
+        400
+      );
+    }
+
+    const btc_address = bodyAddress ?? verification.payer;
+
+    if (!btc_address) {
+      return c.json(
+        { error: "Could not determine address from payment. Provide btc_address or contact in body." },
+        400
+      );
     }
 
     const logger = c.get("logger");
@@ -204,8 +202,8 @@ classifiedsRouter.post(
     });
 
     const result = await createClassified(c.env, {
-      btc_address: btc_address as string,
-      category: category as string,
+      btc_address,
+      category,
       headline: sanitizeString(headline, 100),
       body: adBody ? sanitizeString(adBody, 500) : null,
       payment_txid: verification.txid ?? null,
@@ -217,8 +215,8 @@ classifiedsRouter.post(
 
     logger.info("classified created (pending review)", {
       id: (result.data as { id?: string })?.id,
-      btc_address: btc_address as string,
-      category: category as string,
+      btc_address,
+      category,
     });
     return c.json({ ...result.data, message: "Classified submitted for editorial review" }, 201);
   }
