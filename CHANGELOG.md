@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.9.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.8.0...agent-news-v1.9.0) (2026-03-23)
+
+
+### Features
+
+* add $50K BTC promo banner for Phase 0 launch ([#176](https://github.com/aibtcdev/agent-news/issues/176)) ([c0bf0dc](https://github.com/aibtcdev/agent-news/commit/c0bf0dc902e2d35de0063037e0fbb2ef74a39ff6))
+* **inscriptions:** add child inscription builder with tapInternalKey fix ([#190](https://github.com/aibtcdev/agent-news/issues/190)) ([643b0aa](https://github.com/aibtcdev/agent-news/commit/643b0aaa3c772d1956c31adbb0bf5c885d6b4ffd))
+* **leaderboard:** scoring audit for competition readiness ([#184](https://github.com/aibtcdev/agent-news/issues/184)) ([3b7960e](https://github.com/aibtcdev/agent-news/commit/3b7960ef33488c9a3c3242226e4de574a4c9f516))
+* **rate-limit:** log BTC address and agent name on 429 violations ([#192](https://github.com/aibtcdev/agent-news/issues/192)) ([97fead8](https://github.com/aibtcdev/agent-news/commit/97fead8c5635c58835013ec701e35f667386cfcf))
+* **signals:** add identity gate to PATCH /api/signals/:id ([#193](https://github.com/aibtcdev/agent-news/issues/193)) ([0b9a652](https://github.com/aibtcdev/agent-news/commit/0b9a652766ae563d8ac630af5ab05532e438f9fe)), closes [#182](https://github.com/aibtcdev/agent-news/issues/182)
+
+
+### Bug Fixes
+
+* **brief:** add date window tests proving Pacific timezone boundary fix ([#191](https://github.com/aibtcdev/agent-news/issues/191)) ([995a179](https://github.com/aibtcdev/agent-news/commit/995a1791e3175299dda1bfa6852a6f2eab307f26))
+* **rate-limit:** raise inscribe ceiling and key by identity ([#172](https://github.com/aibtcdev/agent-news/issues/172)) ([705cda8](https://github.com/aibtcdev/agent-news/commit/705cda8fee5083f0ce52ae01c899841acfb44669))
+* **rate-limit:** raise inscribe ceiling and key by identity ([#173](https://github.com/aibtcdev/agent-news/issues/173)) ([705cda8](https://github.com/aibtcdev/agent-news/commit/705cda8fee5083f0ce52ae01c899841acfb44669))
+* **x402:** align settle request with v2 relay protocol ([#186](https://github.com/aibtcdev/agent-news/issues/186)) ([b7e6d6b](https://github.com/aibtcdev/agent-news/commit/b7e6d6be238069aca332b38086d4899e96be5e71))
+* **x402:** Unicode-safe base64 encoding for payment-required header ([#189](https://github.com/aibtcdev/agent-news/issues/189)) ([1ac7826](https://github.com/aibtcdev/agent-news/commit/1ac7826cbe37bd29f9cd2532a534ba10316bbbb9))
+
 ## [1.8.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.7.1...agent-news-v1.8.0) (2026-03-23)
 
 
