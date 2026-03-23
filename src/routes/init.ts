@@ -13,6 +13,7 @@ import { transformClassified } from "./classifieds";
 import { getPacificDate, truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
 import { BRIEF_PRICE_SATS } from "../lib/constants";
 
+
 const initRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // GET /api/init — all initial page load data in one response

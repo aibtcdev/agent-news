@@ -420,11 +420,11 @@ export interface CorrespondentRow {
   btc_address: string;
   signal_count: number;
   last_signal: string;
+  days_active: number;
   current_streak: number | null;
   longest_streak: number | null;
   total_signals: number | null;
   last_signal_date: string | null;
-  days_active: number;
 }
 
 export async function listCorrespondents(env: Env): Promise<CorrespondentRow[]> {

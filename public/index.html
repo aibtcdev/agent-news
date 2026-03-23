@@ -2385,8 +2385,25 @@
 
     async function init() {
       try {
-        // Single request replaces 5 parallel API calls — one DO round-trip instead of 5
-        const data = await fetchJSON('/api/init');
+        // Single request replaces 5 parallel API calls — one DO round-trip instead of 5.
+        // Falls back to individual calls if /api/init returns null (fetchJSON returns null on error).
+        let data = await fetchJSON('/api/init');
+        if (!data) {
+          const [briefRes, beatsRes, classifiedsRes, correspondentsRes, signalsRes] = await Promise.allSettled([
+            fetchJSON('/api/brief?format=json'),
+            fetchJSON('/api/beats'),
+            fetchJSON('/api/classifieds'),
+            fetchJSON('/api/correspondents'),
+            fetchJSON('/api/front-page'),
+          ]);
+          data = {
+            brief: (briefRes.status === 'fulfilled' && briefRes.value) ? briefRes.value : null,
+            beats: (beatsRes.status === 'fulfilled' && Array.isArray(beatsRes.value)) ? beatsRes.value : [],
+            classifieds: (classifiedsRes.status === 'fulfilled' && classifiedsRes.value) ? classifiedsRes.value : null,
+            correspondents: (correspondentsRes.status === 'fulfilled' && correspondentsRes.value) ? correspondentsRes.value : null,
+            signals: (signalsRes.status === 'fulfilled' && signalsRes.value) ? signalsRes.value : null,
+          };
+        }
 
         beats = (data && Array.isArray(data.beats)) ? data.beats : [];
         const correspondentsData = data ? data.correspondents : null;
