@@ -2775,6 +2775,33 @@ export class NewsDO extends DurableObject<Env> {
    * Multipliers below correspond to SCORING_WEIGHTS in src/lib/constants.ts.
    * Update both places when changing weights. SQL literals are used directly
    * because SQLite bind parameters cannot substitute column expressions.
+   *
+   * ── Scoring timeline (Pacific time) ──────────────────────────────────────
+   * This system is operated by a Pacific-based publisher. All streak and day
+   * boundaries use Pacific time (America/Los_Angeles), so a scout's "day" runs
+   * midnight-to-midnight PT regardless of UTC offset.
+   *
+   * Daily editorial cycle:
+   *   - Scouts file signals any time during the Pacific day.
+   *   - The publisher compiles the brief at ~11 pm PT each night.
+   *   - Signals approved before the 11 pm PT cutoff are eligible for that
+   *     day's brief inclusion (brief_inclusions_30d).
+   *   - Streak logic (in POST /signals) uses getPacificDate() / getPacificYesterday()
+   *     to determine whether today or yesterday (Pacific) already has a signal.
+   *
+   * Rolling window:
+   *   - signal_count, days_active, approved_corrections, and referral_credits
+   *     all use datetime('now', '-30 days') which is UTC-based.
+   *   - brief_inclusions uses the same UTC window on brief_signals.created_at.
+   *   - Streaks are NOT windowed — current_streak reflects unbroken consecutive
+   *     Pacific days up to the most recent signal, regardless of the 30-day limit.
+   *
+   * ── Tie-breaking order ────────────────────────────────────────────────────
+   * To ensure the leaderboard is fully deterministic (critical for prize payouts):
+   *   1. score DESC            — highest weighted score wins
+   *   2. current_streak DESC   — longest current streak breaks score ties
+   *   3. first_signal_at ASC   — earliest ever signal (longest tenure) breaks streak ties
+   *   4. btc_address ASC       — alphabetical fallback; always unique
    */
   private queryLeaderboard(limit: number): Array<Record<string, unknown>> {
     // Reference SCORING_WEIGHTS so TypeScript tracks the import and tests can
@@ -2823,7 +2850,19 @@ export class NewsDO extends DurableObject<Env> {
            FROM referral_credits WHERE credited_at IS NOT NULL AND credited_at > datetime('now', '-30 days')
            GROUP BY scout_address
          ) rf ON a.btc_address = rf.btc_address
-         ORDER BY score DESC, a.btc_address ASC
+         LEFT JOIN (
+           -- Earliest-ever non-correction signal per scout — used as tenure tie-breaker.
+           -- Not windowed: a scout who joined 2 years ago always beats a newcomer with the same score.
+           SELECT btc_address, MIN(created_at) AS first_signal_at
+           FROM signals WHERE correction_of IS NULL
+           GROUP BY btc_address
+         ) fs ON a.btc_address = fs.btc_address
+         -- 4-level deterministic tie-breaking for competition fairness:
+         --   1. score DESC          — highest score wins
+         --   2. current_streak DESC — longest active streak breaks score ties
+         --   3. first_signal_at ASC — earliest tenure breaks streak ties (COALESCE to 'z' so NULLs sort last)
+         --   4. btc_address ASC     — alphabetical fallback; always unique
+         ORDER BY score DESC, COALESCE(st.current_streak, 0) DESC, COALESCE(fs.first_signal_at, 'z') ASC, a.btc_address ASC
          LIMIT ?`,
         limit
       )
