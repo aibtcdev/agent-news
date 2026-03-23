@@ -72,11 +72,12 @@ async function verifyPublisher(
   if (!publisherConfig || !publisherConfig.value) {
     return c.json({ error: "No publisher designated — set publisher_btc_address in config first" }, 403);
   }
-  if (btcAddress.toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
+  const canonicalAddress = publisherConfig.value.trim();
+  if (btcAddress.toLowerCase().trim() !== canonicalAddress.toLowerCase()) {
     return c.json({ error: "Only the designated Publisher can access this endpoint" }, 403);
   }
 
-  return btcAddress;
+  return canonicalAddress;
 }
 
 /** Convenience: read btc_address from query param and verify publisher. */
@@ -264,7 +265,8 @@ leaderboardRouter.post("/api/leaderboard/reset", async (c) => {
 
   const result = await resetLeaderboard(c.env, pubResult.address);
   if (!result.ok) {
-    return c.json({ error: result.error ?? "Failed to reset leaderboard" }, 500);
+    const status = typeof result.status === "number" ? result.status : 500;
+    return c.json({ error: result.error ?? "Failed to reset leaderboard" }, status);
   }
 
   return c.json({ ok: true, ...result.data }, 200);

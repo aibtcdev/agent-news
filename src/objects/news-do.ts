@@ -2768,8 +2768,12 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>, 400);
       }
 
-      const { btc_address } = body;
-      const pub = verifyPublisher(this.ctx.storage.sql, btc_address as string);
+      const { btc_address } = body as { btc_address?: unknown };
+      if (typeof btc_address !== "string") {
+        return c.json({ ok: false, error: "btc_address is required and must be a string" } satisfies DOResult<unknown>, 400);
+      }
+
+      const pub = verifyPublisher(this.ctx.storage.sql, btc_address);
       if (!pub.ok) {
         return c.json({ ok: false, error: pub.error } satisfies DOResult<unknown>, pub.status);
       }
@@ -2795,22 +2799,33 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       // Delete rows from each of the 5 scoring tables, preserving signal history.
-      const briefSignalsCursor = this.ctx.storage.sql.exec("DELETE FROM brief_signals");
-      const streaksCursor = this.ctx.storage.sql.exec("DELETE FROM streaks");
-      const correctionsCursor = this.ctx.storage.sql.exec("DELETE FROM corrections");
-      const referralCreditsCursor = this.ctx.storage.sql.exec("DELETE FROM referral_credits");
-      const earningsCursor = this.ctx.storage.sql.exec("DELETE FROM earnings");
+      let briefSignalsCursor;
+      let streaksCursor;
+      let correctionsCursor;
+      let referralCreditsCursor;
+      let earningsCursor;
+      let prunedSnapshots;
+      try {
+        briefSignalsCursor = this.ctx.storage.sql.exec("DELETE FROM brief_signals");
+        streaksCursor = this.ctx.storage.sql.exec("DELETE FROM streaks");
+        correctionsCursor = this.ctx.storage.sql.exec("DELETE FROM corrections");
+        referralCreditsCursor = this.ctx.storage.sql.exec("DELETE FROM referral_credits");
+        earningsCursor = this.ctx.storage.sql.exec("DELETE FROM earnings");
 
-      // Prune snapshots to keep only the 10 most recent by created_at DESC.
-      const pruneCursor = this.ctx.storage.sql.exec(
-        `DELETE FROM leaderboard_snapshots
-         WHERE id NOT IN (
-           SELECT id FROM leaderboard_snapshots
-           ORDER BY created_at DESC
-           LIMIT 10
-         )`
-      );
-      const prunedSnapshots = pruneCursor.rowsWritten;
+        // Prune snapshots to keep only the 10 most recent by created_at DESC.
+        const pruneCursor = this.ctx.storage.sql.exec(
+          `DELETE FROM leaderboard_snapshots
+           WHERE id NOT IN (
+             SELECT id FROM leaderboard_snapshots
+             ORDER BY created_at DESC
+             LIMIT 10
+           )`
+        );
+        prunedSnapshots = pruneCursor.rowsWritten;
+      } catch (e) {
+        console.error("Failed to reset leaderboard scoring tables:", e);
+        return c.json({ ok: false, error: "Failed to reset leaderboard scoring tables" } satisfies DOResult<unknown>, 500);
+      }
 
       return c.json({
         ok: true,
