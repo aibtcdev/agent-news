@@ -7,7 +7,7 @@
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getLeaderboard, listBeats, recordWeeklyPayouts, getConfig } from "../lib/do-client";
+import { getLeaderboard, listBeats, recordWeeklyPayouts, getConfig, getLeaderboardBreakdown, verifyLeaderboardScore, listLeaderboardSnapshots, getLeaderboardSnapshot } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { CONFIG_PUBLISHER_ADDRESS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { validateBtcAddress } from "../lib/validators";
@@ -170,6 +170,149 @@ leaderboardRouter.post("/api/leaderboard/payout", async (c) => {
     },
     201
   );
+});
+
+// GET /api/leaderboard/breakdown — Publisher-only: full component breakdown for all scouts
+// ?btc_address=<publisher> required for auth.
+leaderboardRouter.get("/api/leaderboard/breakdown", async (c) => {
+  const btcAddress = c.req.query("btc_address") ?? "";
+
+  if (!btcAddress) {
+    return c.json({ error: "Missing required query param: btc_address" }, 400);
+  }
+
+  if (!validateBtcAddress(btcAddress)) {
+    return c.json({ error: "Invalid BTC address format (expected bech32 bc1...)" }, 400);
+  }
+
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btcAddress,
+    "GET",
+    "/api/leaderboard/breakdown"
+  );
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
+  try {
+    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  } catch {
+    return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
+  }
+  if (!publisherConfig || !publisherConfig.value) {
+    return c.json({ error: "No publisher designated — set publisher_btc_address in config first" }, 403);
+  }
+  if (btcAddress.toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
+    return c.json({ error: "Only the designated Publisher can access the breakdown" }, 403);
+  }
+
+  const entries = await getLeaderboardBreakdown(c.env, btcAddress);
+  return c.json({ ok: true, entries, total: entries.length });
+});
+
+// GET /api/leaderboard/verify/:address — public: recalculate a single scout's score from raw tables
+leaderboardRouter.get("/api/leaderboard/verify/:address", async (c) => {
+  const address = c.req.param("address");
+
+  if (!validateBtcAddress(address)) {
+    return c.json({ error: "Invalid BTC address format (expected bech32 bc1...)" }, 400);
+  }
+
+  const result = await verifyLeaderboardScore(c.env, address);
+  if (!result.ok) {
+    const status = result.status === 404 ? 404 : 500;
+    return c.json({ error: result.error ?? "Failed to verify score" }, status);
+  }
+
+  return c.json(result.data);
+});
+
+// GET /api/leaderboard/snapshots — Publisher-only: list stored snapshots (metadata only)
+// ?btc_address=<publisher> required for auth.
+leaderboardRouter.get("/api/leaderboard/snapshots", async (c) => {
+  const btcAddress = c.req.query("btc_address") ?? "";
+
+  if (!btcAddress) {
+    return c.json({ error: "Missing required query param: btc_address" }, 400);
+  }
+
+  if (!validateBtcAddress(btcAddress)) {
+    return c.json({ error: "Invalid BTC address format (expected bech32 bc1...)" }, 400);
+  }
+
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btcAddress,
+    "GET",
+    "/api/leaderboard/snapshots"
+  );
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
+  try {
+    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  } catch {
+    return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
+  }
+  if (!publisherConfig || !publisherConfig.value) {
+    return c.json({ error: "No publisher designated — set publisher_btc_address in config first" }, 403);
+  }
+  if (btcAddress.toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
+    return c.json({ error: "Only the designated Publisher can list snapshots" }, 403);
+  }
+
+  const snapshots = await listLeaderboardSnapshots(c.env, btcAddress);
+  return c.json({ ok: true, snapshots, total: snapshots.length });
+});
+
+// GET /api/leaderboard/snapshots/:id — Publisher-only: retrieve a specific snapshot with full data
+// ?btc_address=<publisher> required for auth.
+leaderboardRouter.get("/api/leaderboard/snapshots/:id", async (c) => {
+  const btcAddress = c.req.query("btc_address") ?? "";
+  const id = c.req.param("id");
+
+  if (!btcAddress) {
+    return c.json({ error: "Missing required query param: btc_address" }, 400);
+  }
+
+  if (!validateBtcAddress(btcAddress)) {
+    return c.json({ error: "Invalid BTC address format (expected bech32 bc1...)" }, 400);
+  }
+
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btcAddress,
+    "GET",
+    `/api/leaderboard/snapshots/${id}`
+  );
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
+  try {
+    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  } catch {
+    return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
+  }
+  if (!publisherConfig || !publisherConfig.value) {
+    return c.json({ error: "No publisher designated — set publisher_btc_address in config first" }, 403);
+  }
+  if (btcAddress.toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
+    return c.json({ error: "Only the designated Publisher can retrieve snapshots" }, 403);
+  }
+
+  const result = await getLeaderboardSnapshot(c.env, id, btcAddress);
+  if (!result.ok) {
+    const status = result.status === 404 ? 404 : 500;
+    return c.json({ error: result.error ?? "Failed to retrieve snapshot" }, status);
+  }
+
+  return c.json(result.data);
 });
 
 export { leaderboardRouter };
