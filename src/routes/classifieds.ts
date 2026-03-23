@@ -173,21 +173,24 @@ classifiedsRouter.post(
       });
     }
 
-    // Derive btc_address from x402 payer identity, with optional body fallback
-    const btc_address = verification.payer
-      ?? (body.btc_address as string | undefined)
+    // Derive btc_address: prefer body-provided address (validated), fall back to x402 payer identity.
+    // The x402 payer is a Stacks address (SP...), not a bech32 BTC address, so we only
+    // validate body-provided values against the bc1 format.
+    const bodyAddress = (body.btc_address as string | undefined)
       ?? (body.contact as string | undefined);
 
-    if (!btc_address) {
+    if (bodyAddress && !validateBtcAddress(bodyAddress)) {
       return c.json(
-        { error: "Could not determine BTC address from payment. Provide btc_address or contact in body." },
+        { error: "Invalid BTC address format (expected bech32 bc1...)" },
         400
       );
     }
 
-    if (!validateBtcAddress(btc_address)) {
+    const btc_address = bodyAddress ?? verification.payer;
+
+    if (!btc_address) {
       return c.json(
-        { error: "Invalid BTC address format (expected bech32 bc1...)" },
+        { error: "Could not determine address from payment. Provide btc_address or contact in body." },
         400
       );
     }

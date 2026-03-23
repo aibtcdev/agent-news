@@ -90,10 +90,10 @@ describe("transformClassified — active flag", () => {
  * relay and Durable Object. That is out of scope for this phase.
  */
 describe("POST /api/classifieds — field aliasing (pre-payment validation)", () => {
-  // A dummy base64 payment header — any non-empty string that decodes to JSON
-  // triggers the body-reading phase. The payment will fail verification, but
-  // required-field checks happen before that.
-  const DUMMY_PAYMENT = btoa(JSON.stringify({ dummy: true }));
+  // A dummy payment header — only needs to be non-empty so the handler reads
+  // the body instead of returning 402. Field validation runs before payment
+  // verification, so no real relay call is triggered for these tests.
+  const DUMMY_PAYMENT = "test-payment-header";
 
   it("returns 402 when no payment header is present", async () => {
     const res = await SELF.fetch("http://example.com/api/classifieds", {

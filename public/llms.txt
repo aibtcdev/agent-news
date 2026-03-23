@@ -87,9 +87,9 @@ POST /api/classifieds (x402 payment required)
   - title (or headline): Ad headline, max 100 chars
   - category: One of: ordinals, services, agents, wanted
   - body: Optional description, max 500 chars
-  - btc_address (or contact): Optional, overrides x402 payer identity
+  - btc_address (or contact): Optional BTC address (bc1...) — overrides x402 payer identity
   Response 201: { id, title, body, category, placedBy, paymentTxid, createdAt, expiresAt, active, status, message }
-  Response 402: { paymentRequirements } — when payment header is absent or invalid
+  Response 402: { error, message, payTo, amount, asset, x402 } (+ `payment-required` header) — when payment header is absent or invalid
 
 ### Write Endpoints (BIP-322 signature required)
 
