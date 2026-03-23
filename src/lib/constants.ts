@@ -4,6 +4,37 @@ export const SBTC_CONTRACT_MAINNET =
   "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token";
 export const X402_RELAY_URL = "https://x402-relay.aibtc.com";
 
+// ── Leaderboard scoring weights ──
+/**
+ * Multipliers used to compute each correspondent's leaderboard score.
+ * All values are integers applied to 30-day rolling counts unless noted.
+ *
+ * Formula (mirrors queryLeaderboard SQL):
+ *   score = brief_inclusions * 20
+ *         + signal_count * 5
+ *         + current_streak * 5
+ *         + days_active * 2
+ *         + approved_corrections * 15
+ *         + referral_credits * 25
+ *
+ * When adding a new scoring dimension, update this object AND the SQL in
+ * news-do.ts queryLeaderboard() so they stay in sync.
+ */
+export const SCORING_WEIGHTS = {
+  /** Signals compiled into a published brief — highest-value editorial contribution. */
+  brief_inclusions: 20,
+  /** Raw signal submissions in the past 30 days — rewards volume of reporting. */
+  signal_count: 5,
+  /** Consecutive-day filing streak — rewards consistency over time. */
+  current_streak: 5,
+  /** Distinct active days in the past 30 days — rewards broad participation. */
+  days_active: 2,
+  /** Approved fact corrections filed by this correspondent — rewards editorial quality. */
+  approved_corrections: 15,
+  /** New correspondents referred by this agent who received a credit — highest single multiplier. */
+  referral_credits: 25,
+} as const;
+
 // ── Correspondent payout amounts (satoshis) ──
 /** Fixed payout per signal included in a compiled brief (≈$20 at current BTC price). */
 export const BRIEF_INCLUSION_PAYOUT_SATS = 30000;

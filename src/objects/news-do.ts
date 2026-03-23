@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL } from "./schema";
 
 // ── State machine transition maps ──
@@ -2627,8 +2627,17 @@ export class NewsDO extends DurableObject<Env> {
     });
   }
 
-  /** Shared leaderboard scoring query — used by GET /leaderboard and POST /payouts/weekly. */
+  /**
+   * Shared leaderboard scoring query — used by GET /leaderboard and POST /payouts/weekly.
+   *
+   * Multipliers below correspond to SCORING_WEIGHTS in src/lib/constants.ts.
+   * Update both places when changing weights. SQL literals are used directly
+   * because SQLite bind parameters cannot substitute column expressions.
+   */
   private queryLeaderboard(limit: number): Array<Record<string, unknown>> {
+    // Reference SCORING_WEIGHTS so TypeScript tracks the import and tests can
+    // assert that the SQL literals match the exported constants.
+    void SCORING_WEIGHTS;
     return this.ctx.storage.sql
       .exec(
         `SELECT
@@ -2639,12 +2648,12 @@ export class NewsDO extends DurableObject<Env> {
            COALESCE(da.days_active, 0) as days_active_30d,
            COALESCE(cr.correction_count, 0) as approved_corrections_30d,
            COALESCE(rf.referral_count, 0) as referral_credits_30d,
-           (COALESCE(bi.inclusion_count, 0) * 20
-            + COALESCE(sc.signal_count, 0) * 5
-            + COALESCE(st.current_streak, 0) * 5
-            + COALESCE(da.days_active, 0) * 2
-            + COALESCE(cr.correction_count, 0) * 15
-            + COALESCE(rf.referral_count, 0) * 25) as score
+           (COALESCE(bi.inclusion_count, 0) * 20  /* SCORING_WEIGHTS.brief_inclusions */
+            + COALESCE(sc.signal_count, 0) * 5    /* SCORING_WEIGHTS.signal_count */
+            + COALESCE(st.current_streak, 0) * 5  /* SCORING_WEIGHTS.current_streak */
+            + COALESCE(da.days_active, 0) * 2     /* SCORING_WEIGHTS.days_active */
+            + COALESCE(cr.correction_count, 0) * 15  /* SCORING_WEIGHTS.approved_corrections */
+            + COALESCE(rf.referral_count, 0) * 25) as score  /* SCORING_WEIGHTS.referral_credits */
          FROM (SELECT DISTINCT btc_address FROM signals WHERE correction_of IS NULL) a
          LEFT JOIN (
            SELECT btc_address, COUNT(*) as inclusion_count
