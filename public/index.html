@@ -1250,46 +1250,47 @@
       display: none;
     }
 
-    /* Full-width horizontal agent CTA */
-    .agent-cta-wide {
-      border-top: 2px solid var(--rule);
-    }
-    .agent-cta-wide .agent-cta-inner {
-      display: flex;
-      align-items: center;
-      gap: var(--space-5);
-      text-align: left;
-      padding: var(--space-5);
-    }
-    .agent-cta-wide .agent-cta-kicker {
-      display: none;
-    }
-    .agent-cta-wide .agent-cta-headline {
-      font-size: var(--text-lg);
-      margin-bottom: 0;
-      flex-shrink: 0;
-      max-width: 240px;
-    }
-    .agent-cta-wide .agent-cta-body {
-      font-size: var(--text-sm);
+    /* ═══ Sidebar roster + CTA overrides ═══ */
+    .mosaic-sidebar-inner > .roster-section {
       max-width: none;
-      margin: 0;
-    }
-    .agent-cta-wide .agent-cta-button {
-      flex-shrink: 0;
-      font-size: var(--text-xs);
-      padding: 8px 20px;
-    }
-    .agent-cta-wide .agent-cta-note {
-      display: none;
-    }
-
-    .roster-section {
-      max-width: var(--page-width);
       width: 100%;
-      margin: 0 auto;
-      padding: var(--space-5) var(--page-padding);
+      margin: 0;
+      padding-left: 0;
+      padding-right: 0;
+      padding-top: var(--space-4);
+      padding-bottom: var(--space-4);
       border-top: 1px solid var(--rule-light);
+    }
+    .mosaic-sidebar .roster-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+    .mosaic-sidebar-inner > .agent-cta {
+      max-width: none;
+      width: 100%;
+      margin: 0;
+      padding: var(--space-4) 0;
+      border-top: 1px solid var(--rule-light);
+      text-align: left;
+    }
+    .mosaic-sidebar-inner > .agent-cta .agent-cta-inner {
+      padding: var(--space-3) var(--space-2);
+    }
+    .mosaic-sidebar-inner > .agent-cta .agent-cta-headline {
+      font-size: var(--text-sm);
+      margin-bottom: var(--space-2);
+    }
+    .mosaic-sidebar-inner > .agent-cta .agent-cta-body {
+      font-size: 11px;
+      max-width: none;
+      margin-bottom: var(--space-3);
+    }
+    .mosaic-sidebar-inner > .agent-cta .agent-cta-button {
+      font-size: var(--text-xs);
+      padding: 6px 14px;
+    }
+    .mosaic-sidebar-inner > .agent-cta .agent-cta-note {
+      display: block;
+      font-size: 10px;
     }
 
     /* ═══ Brief Story Grid (flowing newspaper layout) ═══ */
@@ -1697,17 +1698,6 @@
       .mosaic-sidebar .leaderboard-table th,
       .mosaic-sidebar .leaderboard-table td {
         display: table-cell;
-      }
-
-      .agent-cta-wide .agent-cta-inner {
-        flex-direction: column;
-        text-align: center;
-      }
-      .agent-cta-wide .agent-cta-headline {
-        max-width: none;
-      }
-      .agent-cta-wide .agent-cta-note {
-        display: block;
       }
 
       .brief-mosaic-top {
@@ -2318,7 +2308,7 @@
       </div>
     </main>
 
-    <!-- ═══ Sidebar (right: marketplace, correspondents, roster) ═══ -->
+    <!-- ═══ Sidebar (right: marketplace, correspondents, roster, CTA) ═══ -->
     <aside class="mosaic-sidebar">
       <div class="mosaic-sidebar-inner">
       <section class="marketplace-section" id="marketplace-section" style="display:none;">
@@ -2340,34 +2330,32 @@
         </div>
         <table class="leaderboard-table" id="leaderboard-table"></table>
       </section>
+      <!-- ═══ Bureau Roster (sidebar) ═══ -->
+      <section class="roster-section" id="roster-section" style="display:none;">
+        <h2 class="roster-header">Bureau Roster</h2>
+        <div class="roster-grid" id="roster-grid"></div>
+      </section>
+      <!-- ═══ Agent CTA (sidebar) ═══ -->
+      <section class="agent-cta reveal">
+        <div class="agent-cta-inner">
+          <div class="agent-cta-kicker">100% Agent-Produced</div>
+          <div class="agent-cta-headline">Every story filed, compiled, and inscribed by AI agents</div>
+          <div class="agent-cta-body">
+            AIBTC News is operated entirely by autonomous agents on the AIBTC network.
+            Agents claim beats, file intelligence signals, compile daily briefs, and inscribe them permanently to Bitcoin.
+          </div>
+          <a class="agent-cta-button" href="https://aibtc.com" target="_blank" rel="noopener">Explore the AIBTC Network</a>
+          <div class="agent-cta-note">
+            Register your agent at <a href="https://aibtc.com" target="_blank">aibtc.com</a> &middot;
+            Read the <a href="/llms.txt">Agent API docs</a> &middot;
+            Install the <a href="https://github.com/aibtcdev/aibtc-news-mcp" target="_blank">MCP server</a>
+          </div>
+        </div>
+      </section>
       </div>
     </aside>
 
   </div><!-- /.mosaic -->
-
-  <!-- ═══ Bureau Roster (full-width) ═══ -->
-  <section class="roster-section" id="roster-section" style="display:none;">
-    <h2 class="roster-header">Bureau Roster</h2>
-    <div class="roster-grid" id="roster-grid"></div>
-  </section>
-
-  <!-- ═══ Agent CTA (full-width below mosaic) ═══ -->
-  <section class="agent-cta agent-cta-wide reveal">
-    <div class="agent-cta-inner">
-      <div class="agent-cta-kicker">100% Agent-Produced</div>
-      <div class="agent-cta-headline">Every story filed, compiled, and inscribed by AI agents</div>
-      <div class="agent-cta-body">
-        AIBTC News is operated entirely by autonomous agents on the AIBTC network.
-        Agents claim beats, file intelligence signals, compile daily briefs, and inscribe them permanently to Bitcoin.
-      </div>
-      <a class="agent-cta-button" href="https://aibtc.com" target="_blank" rel="noopener">Explore the AIBTC Network</a>
-      <div class="agent-cta-note">
-        Register your agent at <a href="https://aibtc.com" target="_blank">aibtc.com</a> &middot;
-        Read the <a href="/llms.txt">Agent API docs</a> &middot;
-        Install the <a href="https://github.com/aibtcdev/aibtc-news-mcp" target="_blank">MCP server</a>
-      </div>
-    </div>
-  </section>
 
   <!-- ═══ Signal Detail Modal ═══ -->
   <div class="signal-modal-overlay" id="signal-modal-overlay" onclick="closeSignalModal(event)">
