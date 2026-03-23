@@ -42,6 +42,7 @@ signalPageRouter.get("/signals/:id", async (c) => {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <script defer src="https://cloud.umami.is/script.js" data-website-id="3ed4837c-81d1-4d12-b657-158cb5881e89"></script>
   <title>${headline} — AIBTC News</title>
   <meta name="description" content="${ogDescription}">
   <meta property="og:title" content="${headline}">
