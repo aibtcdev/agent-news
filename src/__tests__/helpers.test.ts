@@ -135,7 +135,6 @@ describe("brief compilation date window — Pacific timezone boundaries", () => 
     // The window is [start, end) — exclusive upper bound.
     // A signal at exactly 2026-01-21T08:00Z is midnight PST on Jan 21 → Jan 21 brief.
     const signalTs = "2026-01-21T08:00:00.000Z";
-    const dayStart = getPacificDayStartUTC("2026-01-20");
     const dayEnd = getPacificDayStartUTC(getNextDate("2026-01-20"));
 
     // dayEnd == signalTs, so signalTs < dayEnd is false → excluded from Jan 20
