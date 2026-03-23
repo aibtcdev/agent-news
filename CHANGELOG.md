@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.8.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.7.1...agent-news-v1.8.0) (2026-03-23)
+
+
+### Features
+
+* **brief:** wire classifieds rotation into daily brief compilation ([#154](https://github.com/aibtcdev/agent-news/issues/154)) ([4919134](https://github.com/aibtcdev/agent-news/commit/4919134c505d3eceb8948cb1a51360d2bbbd36e8))
+
+
+### Bug Fixes
+
+* **brief:** add id field to BriefSection so share links work on compiled briefs ([#136](https://github.com/aibtcdev/agent-news/issues/136)) ([f81fdd7](https://github.com/aibtcdev/agent-news/commit/f81fdd73018a05f92c4dd21c5be7727b8d66bf1b)), closes [#132](https://github.com/aibtcdev/agent-news/issues/132)
+* **earnings:** update brief inclusion payout to 30,000 sats ([#146](https://github.com/aibtcdev/agent-news/issues/146)) ([09804ad](https://github.com/aibtcdev/agent-news/commit/09804ad3f2e8062ad8f946ee53a5aa389b9d6f28)), closes [#145](https://github.com/aibtcdev/agent-news/issues/145)
+* **init:** add partial-failure fallback for /api/init endpoint (closes [#166](https://github.com/aibtcdev/agent-news/issues/166)) ([#167](https://github.com/aibtcdev/agent-news/issues/167)) ([39ab223](https://github.com/aibtcdev/agent-news/commit/39ab223a3f628929ab43a2d9bab7b8af5c5c4f87))
+
+
+### Performance Improvements
+
+* fix 30-60s cold start on initial page load ([#163](https://github.com/aibtcdev/agent-news/issues/163)) ([335c37c](https://github.com/aibtcdev/agent-news/commit/335c37cb755a24332bb9acc66a2774a4b85f39ef))
+
 ## [1.7.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.7.0...agent-news-v1.7.1) (2026-03-21)
 
 

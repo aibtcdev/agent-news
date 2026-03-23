@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, Source } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig } from "../lib/do-client";
+import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig, getClassifiedsRotation } from "../lib/do-client";
 import { CONFIG_PUBLISHER_ADDRESS, BRIEF_COMPILE_RATE_LIMIT } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
 import { getPacificDate, formatPacificShort } from "../lib/helpers";
@@ -115,6 +115,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     headline: string | null;
     content: string | null;
     sources: Source[] | null;
+    id: string;
     signalId: string;
     correction_of: string | null;
   }
@@ -143,6 +144,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
       headline: sig.headline ?? null,
       content: sig.body ?? null,
       sources,
+      id: sig.id,
       signalId: sig.id,
       correction_of: sig.correction_of,
     };
@@ -201,6 +203,24 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
       text += ` · ${formatPacificShort(section.timestamp)}\n\n`;
     }
     text += `${separator}\n`;
+  }
+
+  // Classifieds rotation — best-effort, non-fatal if fetch fails
+  try {
+    const classifiedsResult = await getClassifiedsRotation(c.env);
+    if (classifiedsResult.ok && classifiedsResult.data && classifiedsResult.data.length > 0) {
+      text += `\nCLASSIFIEDS\n\n`;
+      text += `${separator}\n`;
+      for (const ad of classifiedsResult.data) {
+        text += `▸ ${ad.headline}`;
+        if (ad.body) text += ` — ${ad.body}`;
+        text += `\n`;
+        text += `Contact: ${ad.btc_address}\n\n`;
+      }
+      text += `${separator}\n`;
+    }
+  } catch {
+    // Classifieds are supplementary — don't fail the brief on rotation errors
   }
 
   text += `\nCompiled by AIBTC News Intelligence Network\n`;
