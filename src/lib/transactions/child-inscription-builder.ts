@@ -31,12 +31,10 @@ import { hex } from "@scure/base";
 export const INSCRIPTION_CONTENT_TYPE = "text/plain;charset=utf-8";
 
 /** Ordinal envelope opcodes (from the ordinals protocol) */
-const OP_FALSE = 0x00;
+const OP_0 = 0x00; // also OP_FALSE — pushes empty vector
 const OP_IF = 0x63;
 const OP_PUSH_1 = 0x01;
 const OP_PUSH_3 = 0x03;
-const OP_PUSH_5 = 0x05;
-const OP_0 = 0x00;
 const OP_ENDIF = 0x68;
 const OP_CHECKSIG = 0xac;
 
@@ -52,7 +50,7 @@ export interface UTXO {
 }
 
 export interface CommitTxResult {
-  /** The unsigned commit transaction (hex-encoded PSBT) */
+  /** The unsigned commit transaction object */
   tx: Transaction;
   /** The P2TR address to fund the commit output */
   commitAddress: string;
@@ -63,7 +61,7 @@ export interface CommitTxResult {
 }
 
 export interface RevealTxResult {
-  /** The signed reveal transaction ready to broadcast (hex-encoded) */
+  /** The signed reveal transaction object */
   tx: Transaction;
   /** The reveal transaction hex */
   hex: string;
@@ -92,18 +90,17 @@ export interface BuildChildInscriptionParams {
  * Build an ordinals inscription envelope as a tapscript.
  *
  * Structure (from the ordinals protocol spec):
+ *   <pubkey> OP_CHECKSIG
  *   OP_FALSE OP_IF
  *     OP_PUSH "ord"
  *     OP_PUSH_1 OP_PUSH <content-type>
- *     OP_0
+ *     OP_0                               ← body separator (pushes empty vector)
  *     OP_PUSH <content-chunk-1>
  *     [OP_PUSH <content-chunk-n> ...]
  *   OP_ENDIF
- *   <pubkey> OP_CHECKSIG
  *
- * The OP_FALSE OP_IF block is never executed; it's a "dead branch" that stores
- * arbitrary data in the witness. The pubkey + OP_CHECKSIG is the actual spending
- * condition.
+ * The pubkey + OP_CHECKSIG is the spending condition. The OP_FALSE OP_IF block
+ * is a "dead branch" that stores arbitrary data in the witness.
  */
 export function buildInscriptionScript(
   pubKey: Uint8Array,
@@ -122,8 +119,8 @@ export function buildInscriptionScript(
   parts.push(...pubKey);
   parts.push(OP_CHECKSIG);
 
-  // Ordinal envelope: OP_FALSE OP_IF
-  parts.push(OP_FALSE);
+  // Ordinal envelope: OP_0 OP_IF (OP_0 = OP_FALSE)
+  parts.push(OP_0);
   parts.push(OP_IF);
 
   // Push "ord" marker
@@ -135,8 +132,7 @@ export function buildInscriptionScript(
   parts.push(OP_PUSH_1);
   parts.push(...pushData(contentTypeBytes));
 
-  // Field 0: body separator (tag 0x00)
-  parts.push(OP_PUSH_1);
+  // Body separator: OP_0 pushes empty vector (ordinals protocol convention)
   parts.push(OP_0);
 
   // Content data: push in 520-byte chunks (max script push size)
@@ -189,7 +185,8 @@ function pushData(data: Uint8Array): number[] {
  * Reveal tx structure:
  *   - 1 input: commit UTXO (P2TR script-path, ~300 vBytes witness)
  *   - 1 input: parent UTXO (P2TR key-path, 57.5 vBytes witness)
- *   - 1 output: change (P2TR, 43 vBytes)
+ *   - 1 output: inscription (P2TR, 43 vBytes)
+ *   - 1 output (optional): change (P2TR, 43 vBytes)
  *
  * Base: 10 vBytes overhead
  * Input 0 (script-path): 41 (non-witness) + ~300 (witness) / 4 = ~116 vBytes
@@ -313,7 +310,7 @@ export function buildChildCommitTransaction(
 
   return {
     tx,
-    commitAddress: commitP2tr.address ?? "",
+    commitAddress: commitP2tr.address ?? (() => { throw new Error("Failed to derive commit P2TR address"); })(),
     inscriptionScript,
     commitAmount,
   };
