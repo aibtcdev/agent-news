@@ -110,7 +110,7 @@ async function checkBucket(
       key: opts.key,
       ip,
       btc_address: btcAddress ?? undefined,
-      auth: btcAddress ? undefined : "unparseable",
+      auth: btcAddress ? undefined : "missing",
       bucket: rlKey,
       count: record.count,
       max: opts.maxRequests,
@@ -120,20 +120,22 @@ async function checkBucket(
     // Enrich the log with agent name asynchronously — KV hit is fast (cached edge),
     // but an external fetch on cache miss could take seconds. Never block the 429.
     if (btcAddress) {
-      resolveAgentName(c.env.NEWS_KV, btcAddress)
-        .then((info) => {
-          if (info.name) {
-            logger.warn("rate limit — agent identified", {
-              key: opts.key,
-              ip,
-              btc_address: btcAddress,
-              agent_name: info.name,
-            });
-          }
-        })
-        .catch(() => {
-          // Ignore resolution errors — name enrichment is best-effort
-        });
+      c.executionCtx.waitUntil(
+        resolveAgentName(c.env.NEWS_KV, btcAddress)
+          .then((info) => {
+            if (info.name) {
+              logger.warn("rate limit — agent identified", {
+                key: opts.key,
+                ip,
+                btc_address: btcAddress,
+                agent_name: info.name,
+              });
+            }
+          })
+          .catch(() => {
+            // Ignore resolution errors — name enrichment is best-effort
+          }),
+      );
     }
     c.header("Retry-After", String(retryAfter));
     return c.json(
