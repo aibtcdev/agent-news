@@ -2622,6 +2622,148 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
     });
 
+    // -------------------------------------------------------------------------
+    // Test-only seed endpoint — NOT available in production
+    // Allows integration tests to insert rows with arbitrary timestamps so that
+    // exact scoring math can be verified without fighting rate-limit constraints.
+    // -------------------------------------------------------------------------
+    this.router.post("/test-seed", async (c) => {
+      // Hard gate: refuse to serve this route in production
+      if (this.env.ENVIRONMENT === "production") {
+        return c.json({ ok: false, error: "Not found" }, 404);
+      }
+
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" }, 400);
+      }
+
+      const inserted: Record<string, number> = {
+        signals: 0,
+        brief_signals: 0,
+        corrections: 0,
+        referral_credits: 0,
+        streaks: 0,
+      };
+
+      // Seed signals
+      if (Array.isArray(body.signals)) {
+        for (const row of body.signals as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO signals
+               (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at,
+                correction_of, status, disclosure)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.beat_slug as string,
+              row.btc_address as string,
+              row.headline as string,
+              (row.body as string | null) ?? null,
+              (row.sources as string) ?? "[]",
+              row.created_at as string,
+              row.created_at as string,
+              (row.correction_of as string | null) ?? null,
+              (row.status as string) ?? "submitted",
+              (row.disclosure as string) ?? ""
+            );
+            inserted.signals++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed brief_signals (requires corresponding signals to exist for btc_address lookup)
+      if (Array.isArray(body.brief_signals)) {
+        for (const row of body.brief_signals as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO brief_signals
+               (brief_date, signal_id, btc_address, position, created_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              row.brief_date as string,
+              row.signal_id as string,
+              row.btc_address as string,
+              (row.position as number) ?? 0,
+              row.created_at as string
+            );
+            inserted.brief_signals++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed corrections
+      if (Array.isArray(body.corrections)) {
+        for (const row of body.corrections as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO corrections
+               (id, signal_id, btc_address, claim, correction, sources, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.signal_id as string,
+              row.btc_address as string,
+              (row.claim as string) ?? "test claim",
+              (row.correction as string) ?? "test correction",
+              (row.sources as string | null) ?? null,
+              (row.status as string) ?? "approved",
+              row.created_at as string
+            );
+            inserted.corrections++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed referral_credits
+      if (Array.isArray(body.referral_credits)) {
+        for (const row of body.referral_credits as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO referral_credits
+               (id, scout_address, recruit_address, credited_at, created_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.scout_address as string,
+              row.recruit_address as string,
+              row.credited_at as string,
+              row.created_at as string
+            );
+            inserted.referral_credits++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed streaks
+      if (Array.isArray(body.streaks)) {
+        for (const row of body.streaks as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO streaks
+               (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
+               VALUES (?, ?, ?, ?, ?)`,
+              row.btc_address as string,
+              (row.current_streak as number) ?? 0,
+              (row.longest_streak as number) ?? 0,
+              (row.last_signal_date as string | null) ?? null,
+              (row.total_signals as number) ?? 0
+            );
+            inserted.streaks++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      return c.json({ ok: true, data: { inserted } });
+    });
+
     this.router.all("*", (c) => {
       return c.json({ ok: false, error: "Not found" }, 404);
     });
