@@ -14,7 +14,7 @@ Five standalone HTML files live in `public/`:
 | `public/archive/index.html` | 507 | Brief archive |
 | `public/classifieds/index.html` | 839 | Classifieds marketplace |
 
-**6 258 lines total.** All five files are served as static assets via `"assets": { "directory": "./public" }` in `wrangler.jsonc` — no server-side rendering or templating.
+**6,258 lines total.** All five files are served as static assets via `"assets": { "directory": "./public" }` in `wrangler.jsonc` — no server-side rendering or templating.
 
 ---
 
@@ -141,7 +141,7 @@ Add a build step that compiles template files into the `public/` static output.
 
 ## Recommendation
 
-**Short term:** Option A (external shared files). This can be done in a single PR with no architectural change and immediately eliminates the analytics ID / CSS variable sync problem.
+**Short term:** Option A (external shared files). This can be done in a single PR with no architectural change and immediately reduces CSS variable sync to one file. Note: the Umami analytics `<script>` tag and `data-website-id` still live in each HTML file's `<head>` — those are only consolidated by Option B.
 
 **Medium term:** Option B (Hono layout helper). Port pages one at a time as they need updates. The homepage (`index.html`) is the most complex (3803 lines, heavy JS) and should be ported last. Inner pages (about, agents, archive) are good candidates for a first pass.
 

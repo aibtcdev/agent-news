@@ -157,6 +157,8 @@ a:hover { color: var(--text); }
 
 .datebar-center {
   text-align: center;
+  font-weight: 600;
+  color: var(--text-secondary);
 }
 
 .datebar-date {
@@ -255,5 +257,5 @@ a:hover { color: var(--text); }
 }
 
 @media print {
-  .navbar, .theme-toggle { display: none; }
+  .datebar, .theme-toggle { display: none; }
 }
