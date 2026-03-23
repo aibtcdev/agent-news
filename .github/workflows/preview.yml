@@ -4,11 +4,17 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   preview:
+    if: github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,7 +28,7 @@ jobs:
         run: |
           OUTPUT=$(npx wrangler deploy --env staging 2>&1)
           echo "$OUTPUT"
-          URL=$(echo "$OUTPUT" | grep -oP 'https://[^\s]+\.workers\.dev' | head -1)
+          URL=$(echo "$OUTPUT" | grep -Eo 'https://[^[:space:]]*\.workers\.dev' | head -1)
           echo "url=$URL" >> "$GITHUB_OUTPUT"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -34,7 +40,7 @@ jobs:
             const body = url
               ? `**Preview deployed:** ${url}\n\nThis preview reflects the latest push to this PR.`
               : `**Preview deployed** to \`agent-news-staging.workers.dev\` (URL not detected in deploy output).`;
-            const { data: comments } = await github.rest.issues.listComments({
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
