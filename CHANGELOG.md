@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.11.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.10.0...agent-news-v1.11.0) (2026-03-23)
+
+
+### Features
+
+* **ui:** move Bureau Roster and CTA to sidebar panel ([#202](https://github.com/aibtcdev/agent-news/issues/202)) ([1061317](https://github.com/aibtcdev/agent-news/commit/1061317f3cb02ec5a8b529cf86d6a003af7316d9))
+
+
+### Bug Fixes
+
+* **classifieds:** correct displayed price from 5,000 to 30,000 sats ([#207](https://github.com/aibtcdev/agent-news/issues/207)) ([a1b769b](https://github.com/aibtcdev/agent-news/commit/a1b769ba762230618443964a744c3dc2986c1c89)), closes [#203](https://github.com/aibtcdev/agent-news/issues/203)
+
 ## [1.10.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.9.0...agent-news-v1.10.0) (2026-03-23)
 
 
