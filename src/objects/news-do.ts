@@ -2802,24 +2802,15 @@ export class NewsDO extends DurableObject<Env> {
       const earningsCursor = this.ctx.storage.sql.exec("DELETE FROM earnings");
 
       // Prune snapshots to keep only the 10 most recent by created_at DESC.
-      const oldSnapshotRows = this.ctx.storage.sql
-        .exec(
-          `SELECT id FROM leaderboard_snapshots
-           WHERE id NOT IN (
-             SELECT id FROM leaderboard_snapshots
-             ORDER BY created_at DESC
-             LIMIT 10
-           )`
-        )
-        .toArray();
-      let prunedSnapshots = 0;
-      if (oldSnapshotRows.length > 0) {
-        const oldIds = oldSnapshotRows.map((r) => (r as { id: string }).id);
-        for (const oldId of oldIds) {
-          const pruneCursor = this.ctx.storage.sql.exec("DELETE FROM leaderboard_snapshots WHERE id = ?", oldId);
-          prunedSnapshots += pruneCursor.rowsWritten;
-        }
-      }
+      const pruneCursor = this.ctx.storage.sql.exec(
+        `DELETE FROM leaderboard_snapshots
+         WHERE id NOT IN (
+           SELECT id FROM leaderboard_snapshots
+           ORDER BY created_at DESC
+           LIMIT 10
+         )`
+      );
+      const prunedSnapshots = pruneCursor.rowsWritten;
 
       return c.json({
         ok: true,

@@ -3,6 +3,7 @@
  *
  * GET  /api/leaderboard         — ranked correspondents with breakdown
  * POST /api/leaderboard/payout  — Publisher-only: record top-3 weekly prizes
+ * POST /api/leaderboard/reset   — Publisher-only: snapshot + clear scoring tables
  */
 
 import { Hono } from "hono";
@@ -41,18 +42,17 @@ function getPreviousISOWeek(date: Date): string {
 }
 
 /**
- * Validate a btc_address query param, verify BIP-322 auth, and confirm publisher designation.
+ * Verify BIP-322 auth and confirm publisher designation for a given address.
  * Returns the validated address on success, or a Response on failure.
  */
-async function requirePublisher(
-  c: { req: { raw: Request; query: (k: string) => string | undefined }; env: Env; json: (data: unknown, status?: number) => Response },
+async function verifyPublisher(
+  c: { req: { raw: Request }; env: Env; json: (data: unknown, status?: number) => Response },
+  btcAddress: string,
   method: string,
   path: string
 ): Promise<string | Response> {
-  const btcAddress = c.req.query("btc_address") ?? "";
-
   if (!btcAddress) {
-    return c.json({ error: "Missing required query param: btc_address" }, 400);
+    return c.json({ error: "Missing required field: btc_address" }, 400);
   }
   if (!validateBtcAddress(btcAddress)) {
     return c.json({ error: "Invalid BTC address format (expected bech32 bc1...)" }, 400);
@@ -77,6 +77,34 @@ async function requirePublisher(
   }
 
   return btcAddress;
+}
+
+/** Convenience: read btc_address from query param and verify publisher. */
+async function requirePublisher(
+  c: { req: { raw: Request; query: (k: string) => string | undefined }; env: Env; json: (data: unknown, status?: number) => Response },
+  method: string,
+  path: string
+): Promise<string | Response> {
+  return verifyPublisher(c, c.req.query("btc_address") ?? "", method, path);
+}
+
+/** Parse btc_address from JSON body and verify publisher. */
+async function requirePublisherFromBody(
+  c: { req: { raw: Request; json: <T>() => Promise<T> }; env: Env; json: (data: unknown, status?: number) => Response },
+  method: string,
+  path: string
+): Promise<{ address: string; body: Record<string, unknown> } | Response> {
+  let body: Record<string, unknown> = {};
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    // Fall through to validation below
+  }
+
+  const result = await verifyPublisher(c, (body.btc_address as string) ?? "", method, path);
+  if (result instanceof Response) return result;
+
+  return { address: result, body };
 }
 
 const leaderboardRouter = new Hono<AppContext>();
@@ -128,47 +156,10 @@ leaderboardRouter.get("/api/leaderboard", async (c) => {
 // week defaults to the previous ISO week if omitted.
 // Prize amounts (defined in constants.ts): 1st=$WEEKLY_PRIZE_1ST_SATS, 2nd=..., 3rd=...
 leaderboardRouter.post("/api/leaderboard/payout", async (c) => {
-  let body: Record<string, unknown> = {};
-  try {
-    body = await c.req.json<Record<string, unknown>>();
-  } catch {
-    // Body is required for auth — fall through to validation below
-  }
+  const pubResult = await requirePublisherFromBody(c, "POST", "/api/leaderboard/payout");
+  if (pubResult instanceof Response) return pubResult;
 
-  const { btc_address, week } = body;
-
-  if (!btc_address) {
-    return c.json({ error: "Missing required field: btc_address" }, 400);
-  }
-
-  if (!validateBtcAddress(btc_address)) {
-    return c.json({ error: "Invalid BTC address format (expected bech32 bc1...)" }, 400);
-  }
-
-  // BIP-322 auth
-  const authResult = verifyAuth(
-    c.req.raw.headers,
-    btc_address as string,
-    "POST",
-    "/api/leaderboard/payout"
-  );
-  if (!authResult.valid) {
-    return c.json({ error: authResult.error, code: authResult.code }, 401);
-  }
-
-  // Publisher gate — fail closed if config lookup errors
-  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
-  try {
-    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
-  } catch {
-    return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
-  }
-  if (!publisherConfig || !publisherConfig.value) {
-    return c.json({ error: "No publisher designated — set publisher_btc_address in config first" }, 403);
-  }
-  if ((btc_address as string).toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
-    return c.json({ error: "Only the designated Publisher can issue weekly payouts" }, 403);
-  }
+  const { week } = pubResult.body;
 
   // Resolve week — default to previous ISO week
   let targetWeek: string;
@@ -268,49 +259,10 @@ leaderboardRouter.get("/api/leaderboard/snapshots/:id", async (c) => {
 // Body: { btc_address: string }
 // Signals are preserved. Snapshots are pruned to keep only the 10 most recent.
 leaderboardRouter.post("/api/leaderboard/reset", async (c) => {
-  let body: Record<string, unknown> = {};
-  try {
-    body = await c.req.json<Record<string, unknown>>();
-  } catch {
-    // Fall through to validation below
-  }
+  const pubResult = await requirePublisherFromBody(c, "POST", "/api/leaderboard/reset");
+  if (pubResult instanceof Response) return pubResult;
 
-  const { btc_address } = body;
-
-  if (!btc_address) {
-    return c.json({ error: "Missing required field: btc_address" }, 400);
-  }
-
-  if (!validateBtcAddress(btc_address)) {
-    return c.json({ error: "Invalid BTC address format (expected bech32 bc1...)" }, 400);
-  }
-
-  // BIP-322 auth
-  const authResult = verifyAuth(
-    c.req.raw.headers,
-    btc_address as string,
-    "POST",
-    "/api/leaderboard/reset"
-  );
-  if (!authResult.valid) {
-    return c.json({ error: authResult.error, code: authResult.code }, 401);
-  }
-
-  // Publisher gate — fail closed if config lookup errors
-  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
-  try {
-    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
-  } catch {
-    return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
-  }
-  if (!publisherConfig || !publisherConfig.value) {
-    return c.json({ error: "No publisher designated — set publisher_btc_address in config first" }, 403);
-  }
-  if ((btc_address as string).toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
-    return c.json({ error: "Only the designated Publisher can reset the leaderboard" }, 403);
-  }
-
-  const result = await resetLeaderboard(c.env, btc_address as string);
+  const result = await resetLeaderboard(c.env, pubResult.address);
   if (!result.ok) {
     return c.json({ error: result.error ?? "Failed to reset leaderboard" }, 500);
   }
