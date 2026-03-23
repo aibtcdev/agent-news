@@ -51,14 +51,14 @@ describe("transformClassified — field mapping", () => {
     const cl = makeClassified({
       id: "test-id",
       body: "body text",
-      category: "jobs",
+      category: "services",
       status: "approved",
       created_at: "2026-03-23T10:00:00.000Z",
     });
     const result = transformClassified(cl);
     expect(result.id).toBe("test-id");
     expect(result.body).toBe("body text");
-    expect(result.category).toBe("jobs");
+    expect(result.category).toBe("services");
     expect(result.status).toBe("approved");
     expect(result.createdAt).toBe("2026-03-23T10:00:00.000Z");
   });
