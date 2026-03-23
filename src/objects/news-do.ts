@@ -2109,6 +2109,24 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date().toISOString();
       const weekStr = week as string;
 
+      // Snapshot the full leaderboard before recording earnings.
+      // INSERT OR IGNORE — idempotent: if a snapshot for this week already exists it is kept as-is.
+      const allEntries = this.queryLeaderboard(200);
+      try {
+        this.ctx.storage.sql.exec(
+          `INSERT OR IGNORE INTO leaderboard_snapshots (id, snapshot_type, week, snapshot_data, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          generateId(),
+          "weekly_payout",
+          weekStr,
+          JSON.stringify(allEntries),
+          now
+        );
+      } catch (e) {
+        // Snapshot failure must not block the payout — log and continue.
+        console.error("Failed to save weekly payout snapshot:", e);
+      }
+
       const paid: PayoutRecord[] = [];
       const skipped: PayoutRecord[] = [];
 
@@ -2635,6 +2653,208 @@ export class NewsDO extends DurableObject<Env> {
     this.router.get("/leaderboard", (c) => {
       const rows = this.queryLeaderboard(200);
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Audit infrastructure — leaderboard breakdown, per-address verify, and snapshots
+    // -------------------------------------------------------------------------
+
+    // GET /leaderboard/breakdown — full component breakdown for all scouts (Publisher-only)
+    // ?btc_address=<publisher> is required so verifyPublisher can gate access.
+    this.router.get("/leaderboard/breakdown", (c) => {
+      const btcAddress = c.req.query("btc_address") ?? "";
+      const auth = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!auth.ok) {
+        return c.json({ ok: false, error: auth.error } satisfies DOResult<unknown>, auth.status);
+      }
+      const rows = this.queryLeaderboard(200);
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // GET /leaderboard/verify/:address — public endpoint: recalculate one scout's score from raw tables
+    // Returns component counts, component scores (count * weight), total score, and current rank.
+    this.router.get("/leaderboard/verify/:address", (c) => {
+      const address = c.req.param("address");
+
+      // Re-run the full leaderboard query limited to the target address for component values
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT
+             a.btc_address,
+             COALESCE(bi.inclusion_count, 0) as brief_inclusions_30d,
+             COALESCE(sc.signal_count, 0) as signal_count_30d,
+             COALESCE(st.current_streak, 0) as current_streak,
+             COALESCE(da.days_active, 0) as days_active_30d,
+             COALESCE(cr.correction_count, 0) as approved_corrections_30d,
+             COALESCE(rf.referral_count, 0) as referral_credits_30d,
+             (COALESCE(bi.inclusion_count, 0) * 20
+              + COALESCE(sc.signal_count, 0) * 5
+              + COALESCE(st.current_streak, 0) * 5
+              + COALESCE(da.days_active, 0) * 2
+              + COALESCE(cr.correction_count, 0) * 15
+              + COALESCE(rf.referral_count, 0) * 25) as score
+           FROM (SELECT DISTINCT btc_address FROM signals WHERE correction_of IS NULL AND btc_address = ?) a
+           LEFT JOIN (
+             SELECT btc_address, COUNT(*) as inclusion_count
+             FROM brief_signals WHERE created_at > datetime('now', '-30 days')
+             GROUP BY btc_address
+           ) bi ON a.btc_address = bi.btc_address
+           LEFT JOIN (
+             SELECT btc_address, COUNT(*) as signal_count
+             FROM signals WHERE correction_of IS NULL AND created_at > datetime('now', '-30 days')
+             GROUP BY btc_address
+           ) sc ON a.btc_address = sc.btc_address
+           LEFT JOIN streaks st ON a.btc_address = st.btc_address
+           LEFT JOIN (
+             SELECT btc_address, COUNT(DISTINCT date(created_at)) as days_active
+             FROM signals WHERE correction_of IS NULL AND created_at > datetime('now', '-30 days')
+             GROUP BY btc_address
+           ) da ON a.btc_address = da.btc_address
+           LEFT JOIN (
+             SELECT btc_address, COUNT(*) as correction_count
+             FROM corrections WHERE status = 'approved' AND created_at > datetime('now', '-30 days')
+             GROUP BY btc_address
+           ) cr ON a.btc_address = cr.btc_address
+           LEFT JOIN (
+             SELECT scout_address as btc_address, COUNT(*) as referral_count
+             FROM referral_credits WHERE credited_at IS NOT NULL AND credited_at > datetime('now', '-30 days')
+             GROUP BY scout_address
+           ) rf ON a.btc_address = rf.btc_address`,
+          address
+        )
+        .toArray();
+
+      if (rows.length === 0) {
+        return c.json({ ok: false, error: "Address not found on leaderboard" } satisfies DOResult<unknown>, 404);
+      }
+
+      const row = rows[0] as Record<string, unknown>;
+      const brief_inclusions = Number(row.brief_inclusions_30d);
+      const signal_count = Number(row.signal_count_30d);
+      const current_streak = Number(row.current_streak);
+      const days_active = Number(row.days_active_30d);
+      const approved_corrections = Number(row.approved_corrections_30d);
+      const referral_credits = Number(row.referral_credits_30d);
+      const total_score = Number(row.score);
+
+      // Compute rank: count of scouts with a strictly higher score
+      const rankRows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as ahead FROM (
+             SELECT
+               (COALESCE(bi.inclusion_count, 0) * 20
+                + COALESCE(sc.signal_count, 0) * 5
+                + COALESCE(st.current_streak, 0) * 5
+                + COALESCE(da.days_active, 0) * 2
+                + COALESCE(cr.correction_count, 0) * 15
+                + COALESCE(rf.referral_count, 0) * 25) as score
+             FROM (SELECT DISTINCT btc_address FROM signals WHERE correction_of IS NULL) a
+             LEFT JOIN (
+               SELECT btc_address, COUNT(*) as inclusion_count
+               FROM brief_signals WHERE created_at > datetime('now', '-30 days')
+               GROUP BY btc_address
+             ) bi ON a.btc_address = bi.btc_address
+             LEFT JOIN (
+               SELECT btc_address, COUNT(*) as signal_count
+               FROM signals WHERE correction_of IS NULL AND created_at > datetime('now', '-30 days')
+               GROUP BY btc_address
+             ) sc ON a.btc_address = sc.btc_address
+             LEFT JOIN streaks st ON a.btc_address = st.btc_address
+             LEFT JOIN (
+               SELECT btc_address, COUNT(DISTINCT date(created_at)) as days_active
+               FROM signals WHERE correction_of IS NULL AND created_at > datetime('now', '-30 days')
+               GROUP BY btc_address
+             ) da ON a.btc_address = da.btc_address
+             LEFT JOIN (
+               SELECT btc_address, COUNT(*) as correction_count
+               FROM corrections WHERE status = 'approved' AND created_at > datetime('now', '-30 days')
+               GROUP BY btc_address
+             ) cr ON a.btc_address = cr.btc_address
+             LEFT JOIN (
+               SELECT scout_address as btc_address, COUNT(*) as referral_count
+               FROM referral_credits WHERE credited_at IS NOT NULL AND credited_at > datetime('now', '-30 days')
+               GROUP BY scout_address
+             ) rf ON a.btc_address = rf.btc_address
+           ) WHERE score > ?`,
+          total_score
+        )
+        .toArray();
+
+      const rank = Number((rankRows[0] as Record<string, unknown>).ahead) + 1;
+
+      return c.json({
+        ok: true,
+        data: {
+          address,
+          components: {
+            brief_inclusions_30d: brief_inclusions,
+            signal_count_30d: signal_count,
+            current_streak,
+            days_active_30d: days_active,
+            approved_corrections_30d: approved_corrections,
+            referral_credits_30d: referral_credits,
+          },
+          component_scores: {
+            brief_inclusions: brief_inclusions * 20,
+            signal_count: signal_count * 5,
+            current_streak: current_streak * 5,
+            days_active: days_active * 2,
+            approved_corrections: approved_corrections * 15,
+            referral_credits: referral_credits * 25,
+          },
+          total_score,
+          rank,
+        },
+      } satisfies DOResult<unknown>);
+    });
+
+    // GET /leaderboard/snapshots — list stored snapshots (id, type, week, created_at — NOT full data)
+    this.router.get("/leaderboard/snapshots", (c) => {
+      const btcAddress = c.req.query("btc_address") ?? "";
+      const auth = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!auth.ok) {
+        return c.json({ ok: false, error: auth.error } satisfies DOResult<unknown>, auth.status);
+      }
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT id, snapshot_type, week, created_at
+           FROM leaderboard_snapshots
+           ORDER BY created_at DESC`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // GET /leaderboard/snapshots/:id — retrieve a specific snapshot with full data
+    this.router.get("/leaderboard/snapshots/:id", (c) => {
+      const btcAddress = c.req.query("btc_address") ?? "";
+      const auth = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!auth.ok) {
+        return c.json({ ok: false, error: auth.error } satisfies DOResult<unknown>, auth.status);
+      }
+      const id = c.req.param("id");
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT id, snapshot_type, week, snapshot_data, created_at
+           FROM leaderboard_snapshots
+           WHERE id = ?`,
+          id
+        )
+        .toArray();
+      if (rows.length === 0) {
+        return c.json({ ok: false, error: "Snapshot not found" } satisfies DOResult<unknown>, 404);
+      }
+      const row = rows[0] as Record<string, unknown>;
+      return c.json({
+        ok: true,
+        data: {
+          id: row.id,
+          snapshot_type: row.snapshot_type,
+          week: row.week,
+          snapshot_data: JSON.parse(row.snapshot_data as string),
+          created_at: row.created_at,
+        },
+      } satisfies DOResult<unknown>);
     });
 
     // -------------------------------------------------------------------------
