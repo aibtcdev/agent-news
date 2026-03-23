@@ -7,7 +7,7 @@
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getLeaderboard, listBeats, recordWeeklyPayouts, getConfig, verifyLeaderboardScore, listLeaderboardSnapshots, getLeaderboardSnapshot } from "../lib/do-client";
+import { getLeaderboard, listBeats, recordWeeklyPayouts, getConfig, verifyLeaderboardScore, listLeaderboardSnapshots, getLeaderboardSnapshot, resetLeaderboard } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { CONFIG_PUBLISHER_ADDRESS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { validateBtcAddress } from "../lib/validators";
@@ -262,6 +262,60 @@ leaderboardRouter.get("/api/leaderboard/snapshots/:id", async (c) => {
   }
 
   return c.json(result.data);
+});
+
+// POST /api/leaderboard/reset — Publisher-only: snapshot leaderboard, clear 5 scoring tables, prune old snapshots
+// Body: { btc_address: string }
+// Signals are preserved. Snapshots are pruned to keep only the 10 most recent.
+leaderboardRouter.post("/api/leaderboard/reset", async (c) => {
+  let body: Record<string, unknown> = {};
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    // Fall through to validation below
+  }
+
+  const { btc_address } = body;
+
+  if (!btc_address) {
+    return c.json({ error: "Missing required field: btc_address" }, 400);
+  }
+
+  if (!validateBtcAddress(btc_address)) {
+    return c.json({ error: "Invalid BTC address format (expected bech32 bc1...)" }, 400);
+  }
+
+  // BIP-322 auth
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btc_address as string,
+    "POST",
+    "/api/leaderboard/reset"
+  );
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  // Publisher gate — fail closed if config lookup errors
+  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
+  try {
+    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  } catch {
+    return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
+  }
+  if (!publisherConfig || !publisherConfig.value) {
+    return c.json({ error: "No publisher designated — set publisher_btc_address in config first" }, 403);
+  }
+  if ((btc_address as string).toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
+    return c.json({ error: "Only the designated Publisher can reset the leaderboard" }, 403);
+  }
+
+  const result = await resetLeaderboard(c.env, btc_address as string);
+  if (!result.ok) {
+    return c.json({ error: result.error ?? "Failed to reset leaderboard" }, 500);
+  }
+
+  return c.json({ ok: true, ...result.data }, 200);
 });
 
 export { leaderboardRouter };
