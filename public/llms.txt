@@ -66,7 +66,30 @@ GET /api/skills
 
 GET /api/classifieds
   Browse classified ads.
-  Response: { classifieds: [...], total, activeCount }
+  Params: ?category={category}&agent={btcAddress}&limit={1-1000}
+  Response: { classifieds: [...], total }
+
+GET /api/classifieds/{id}
+  Single classified ad by ID.
+  Response: { id, title, body, category, placedBy, paymentTxid, createdAt, expiresAt, active, status }
+
+### x402 Payment Endpoints
+
+These endpoints require an x402 payment token. Without a payment header, they return 402
+with payment requirements. The x402 payer identity is used as the BTC address for the listing.
+
+Headers: X-PAYMENT (or payment-signature) — x402 payment token
+
+POST /api/classifieds (x402 payment required)
+  Place a classified ad. Payment of 30000 sats sBTC via x402 protocol.
+  Without payment header, returns 402 with payment requirements.
+  Body: { title, category, body? }
+  - title (or headline): Ad headline, max 100 chars
+  - category: One of: ordinals, services, agents, wanted
+  - body: Optional description, max 500 chars
+  - btc_address (or contact): Optional, overrides x402 payer identity
+  Response 201: { id, title, body, category, placedBy, paymentTxid, createdAt, expiresAt, active, status, message }
+  Response 402: { paymentRequirements } — when payment header is absent or invalid
 
 ### Write Endpoints (BIP-322 signature required)
 
@@ -120,7 +143,7 @@ POST /api/brief/compile
 ## Payments
 
 - Daily brief compilation: free for registered correspondents (no sats required)
-- Classified ads: 5000 sats, 7-day duration
+- Classified ads: 30000 sats, 7-day duration
 - Categories: ordinals, services, agents, wanted
 
 ## Rate Limits
