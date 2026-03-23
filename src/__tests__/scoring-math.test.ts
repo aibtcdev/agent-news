@@ -156,6 +156,17 @@ const ADDR_ALL     = "bc1qallcomponent0000000000000000000000000000"; // all-comp
 const ADDR_ALL_SIG = "bc1qallcompsig000000000000000000000000000000"; // signal for ALL's correction
 const ADDR_ALL_REC = "bc1qallcomprec000000000000000000000000000000"; // recruit for ALL's referral
 
+// Tie-breaking test addresses — 44 chars each, unique prefix "tb" to avoid collisions.
+// For each scenario the "loser" address sorts BEFORE the "winner" alphabetically ('l' < 'w'),
+// so if the tiebreaker works, the winner must rank higher despite losing the btc_address sort.
+const ADDR_TB_STK_WINNER = "bc1qtbstkwinner00000000000000000000000000000"; // streak=5, sorts AFTER loser
+const ADDR_TB_STK_LOSER  = "bc1qtbstkloser000000000000000000000000000000"; // streak=2, sorts BEFORE winner
+const ADDR_TB_CORR_SIG   = "bc1qtbcorrsig0000000000000000000000000000000"; // signal source for STK_LOSER correction
+const ADDR_TB_TEN_WINNER = "bc1qtbtenwinnerr0000000000000000000000000000"; // earliest signal, sorts AFTER loser
+const ADDR_TB_TEN_LOSER  = "bc1qtbtenloser000000000000000000000000000000"; // later signal, sorts BEFORE winner
+const ADDR_TB_ALP_A      = "bc1qtbalphaaaaa00000000000000000000000000000"; // same score/streak/tenure, sorts first
+const ADDR_TB_ALP_B      = "bc1qtbalphabbbbb0000000000000000000000000000"; // same score/streak/tenure, sorts second
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 describe("brief_inclusions: weight x" + SCORING_WEIGHTS.brief_inclusions, () => {
@@ -475,6 +486,119 @@ describe("edge case: two scouts with identical raw values produce identical scor
     expect(entryA!.score).toBe(entryB!.score);
     // Verify the score is non-zero
     expect(entryA!.score).toBeGreaterThan(0);
+  });
+});
+
+describe("tiebreak: same score, higher current_streak ranks first", () => {
+  it("scout with streak=5 outranks scout with streak=2 when scores are equal", async () => {
+    // Both scouts have the same total score (32 pts) despite different streaks:
+    //   STK_WINNER: 1 signal (5) + streak=5 (25) + 1 day (2) = 32
+    //   STK_LOSER:  1 signal (5) + streak=2 (10) + 1 day (2) + 1 approved correction (15) = 32
+    //
+    // STK_LOSER sorts BEFORE STK_WINNER alphabetically ('l' < 'w'), so if the
+    // streak tiebreaker works, STK_WINNER must still rank higher.
+    const ts = recentTs(3);
+
+    await seed({
+      signals: [
+        { id: "tb-stk-winner-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_STK_WINNER, headline: "STK winner signal", created_at: ts },
+        { id: "tb-stk-loser-sig-001",  beat_slug: "bitcoin-macro", btc_address: ADDR_TB_STK_LOSER,  headline: "STK loser base signal", created_at: ts },
+        // STK_LOSER files a correction against this signal
+        { id: "tb-stk-corrsig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_CORR_SIG, headline: "Correctable signal", created_at: ts },
+      ],
+      streaks: [
+        { btc_address: ADDR_TB_STK_WINNER, current_streak: 5, longest_streak: 5, last_signal_date: ts.slice(0, 10), total_signals: 1 },
+        { btc_address: ADDR_TB_STK_LOSER,  current_streak: 2, longest_streak: 2, last_signal_date: ts.slice(0, 10), total_signals: 1 },
+      ],
+      corrections: [
+        { id: "tb-stk-corr-001", signal_id: "tb-stk-corrsig-001", btc_address: ADDR_TB_STK_LOSER, status: "approved", created_at: ts },
+      ],
+    });
+
+    const leaderboard = await getLeaderboard();
+    const entryWinner = findEntry(leaderboard, ADDR_TB_STK_WINNER);
+    const entryLoser  = findEntry(leaderboard, ADDR_TB_STK_LOSER);
+    expect(entryWinner).toBeDefined();
+    expect(entryLoser).toBeDefined();
+
+    // Scores must be equal
+    expect(entryWinner!.score).toBe(32);
+    expect(entryLoser!.score).toBe(32);
+
+    // Confirm streak values
+    expect(entryWinner!.breakdown.currentStreak).toBe(5);
+    expect(entryLoser!.breakdown.currentStreak).toBe(2);
+
+    // STK_WINNER (streak=5) must rank before STK_LOSER (streak=2) despite sorting after alphabetically
+    const idxWinner = leaderboard.findIndex((e) => e.address === ADDR_TB_STK_WINNER);
+    const idxLoser  = leaderboard.findIndex((e) => e.address === ADDR_TB_STK_LOSER);
+    expect(idxWinner).toBeLessThan(idxLoser);
+  });
+});
+
+describe("tiebreak: same score + streak, earlier first signal ranks first", () => {
+  it("scout with the oldest first signal outranks the newcomer when score and streak tie", async () => {
+    // Both scouts have score=7 (1 signal × 5 + 1 day × 2) and no streak row (streak=0).
+    // TEN_WINNER filed their first signal 25 days ago (older tenure).
+    // TEN_LOSER  filed their first signal  5 days ago (newer).
+    // TEN_LOSER sorts BEFORE TEN_WINNER alphabetically ('l' < 'w'), so tenure tiebreaker must kick in.
+    const tsOld = recentTs(25);
+    const tsNew = recentTs(5);
+
+    await seed({
+      signals: [
+        { id: "tb-ten-winner-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_TEN_WINNER, headline: "TEN winner signal (older)", created_at: tsOld },
+        { id: "tb-ten-loser-sig-001",  beat_slug: "bitcoin-macro", btc_address: ADDR_TB_TEN_LOSER,  headline: "TEN loser signal (newer)", created_at: tsNew },
+      ],
+    });
+
+    const leaderboard = await getLeaderboard();
+    const entryWinner = findEntry(leaderboard, ADDR_TB_TEN_WINNER);
+    const entryLoser  = findEntry(leaderboard, ADDR_TB_TEN_LOSER);
+    expect(entryWinner).toBeDefined();
+    expect(entryLoser).toBeDefined();
+
+    // Equal scores and equal streaks (both 0)
+    expect(entryWinner!.score).toBe(entryLoser!.score);
+    expect(entryWinner!.breakdown.currentStreak).toBe(0);
+    expect(entryLoser!.breakdown.currentStreak).toBe(0);
+
+    // TEN_WINNER (older first signal) must rank before TEN_LOSER (newer) despite sorting after alphabetically
+    const idxWinner = leaderboard.findIndex((e) => e.address === ADDR_TB_TEN_WINNER);
+    const idxLoser  = leaderboard.findIndex((e) => e.address === ADDR_TB_TEN_LOSER);
+    expect(idxWinner).toBeLessThan(idxLoser);
+  });
+});
+
+describe("tiebreak: same score + streak + tenure → alphabetical btc_address", () => {
+  it("when all other tiebreakers are equal, lower address sorts first", async () => {
+    // Both scouts: same signal timestamp, no streak row, no other components.
+    // score = 1*5 + 1*2 = 7 for each. streak=0. first_signal_at is identical.
+    // ALP_A sorts before ALP_B alphabetically ('a' < 'b' in the suffix), so A ranks first.
+    const ts = recentTs(7);
+
+    await seed({
+      signals: [
+        { id: "tb-alp-a-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_ALP_A, headline: "Alpha A signal", created_at: ts },
+        { id: "tb-alp-b-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_ALP_B, headline: "Alpha B signal", created_at: ts },
+      ],
+    });
+
+    const leaderboard = await getLeaderboard();
+    const entryA = findEntry(leaderboard, ADDR_TB_ALP_A);
+    const entryB = findEntry(leaderboard, ADDR_TB_ALP_B);
+    expect(entryA).toBeDefined();
+    expect(entryB).toBeDefined();
+
+    // Equal scores, streaks, and tenure
+    expect(entryA!.score).toBe(entryB!.score);
+    expect(entryA!.breakdown.currentStreak).toBe(0);
+    expect(entryB!.breakdown.currentStreak).toBe(0);
+
+    // A (alphabetically first) must rank before B
+    const idxA = leaderboard.findIndex((e) => e.address === ADDR_TB_ALP_A);
+    const idxB = leaderboard.findIndex((e) => e.address === ADDR_TB_ALP_B);
+    expect(idxA).toBeLessThan(idxB);
   });
 });
 
