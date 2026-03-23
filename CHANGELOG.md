@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.10.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.9.0...agent-news-v1.10.0) (2026-03-23)
+
+
+### Features
+
+* **leaderboard:** add publisher-only score reset endpoint ([#200](https://github.com/aibtcdev/agent-news/issues/200)) ([f04ab9e](https://github.com/aibtcdev/agent-news/commit/f04ab9ed9ba8fbad9b88d2048921fe61dd2493ff))
+
+
+### Bug Fixes
+
+* **classifieds:** accept field aliases and use x402 payer identity ([#198](https://github.com/aibtcdev/agent-news/issues/198)) ([f357693](https://github.com/aibtcdev/agent-news/commit/f3576933450cb551cf5bb06bdfd807519cfadd59))
+
 ## [1.9.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.8.0...agent-news-v1.9.0) (2026-03-23)
 
 
