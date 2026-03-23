@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -138,7 +138,8 @@ export class NewsDO extends DurableObject<Env> {
     // 4 = sBTC tracking (payout_txid column on earnings)
     // 5 = Classifieds cleanup (drop contact column)
     // 6 = Classifieds editorial review (status, publisher_feedback, reviewed_at, refund_txid)
-    const CURRENT_MIGRATION_VERSION = 6;
+    // 7 = Leaderboard snapshots (audit infrastructure for prize competitions)
+    const CURRENT_MIGRATION_VERSION = 7;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -218,6 +219,20 @@ export class NewsDO extends DurableObject<Env> {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes("duplicate column")) {
               console.error("Classifieds review migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run leaderboard snapshots migration — audit infrastructure for prize competitions.
+      if (appliedVersion < 7) {
+        for (const stmt of MIGRATION_SNAPSHOTS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error("Snapshots migration statement failed:", e);
             }
           }
         }

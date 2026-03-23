@@ -170,6 +170,25 @@ export const MIGRATION_PAYMENTS_SQL = [
 ] as const;
 
 /**
+ * Leaderboard snapshots migration — audit infrastructure.
+ * Creates a table for point-in-time leaderboard snapshots used for dispute
+ * resolution and score verification during prize competitions.
+ * The UNIQUE INDEX prevents duplicate snapshots for the same (type, week) pair.
+ */
+export const MIGRATION_SNAPSHOTS_SQL = [
+  `CREATE TABLE IF NOT EXISTS leaderboard_snapshots (
+    id            TEXT PRIMARY KEY,
+    snapshot_type TEXT NOT NULL,
+    week          TEXT,
+    snapshot_data TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshot_week
+     ON leaderboard_snapshots(snapshot_type, week)
+     WHERE week IS NOT NULL`,
+] as const;
+
+/**
  * Classifieds editorial review migration.
  * Adds status, publisher_feedback, reviewed_at, and refund_txid columns
  * so classifieds go through publisher review before going live.
