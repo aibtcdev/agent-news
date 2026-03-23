@@ -2799,18 +2799,12 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       // Delete rows from each of the 5 scoring tables, preserving signal history.
-      let briefSignalsCursor;
-      let streaksCursor;
-      let correctionsCursor;
-      let referralCreditsCursor;
-      let earningsCursor;
-      let prunedSnapshots;
       try {
-        briefSignalsCursor = this.ctx.storage.sql.exec("DELETE FROM brief_signals");
-        streaksCursor = this.ctx.storage.sql.exec("DELETE FROM streaks");
-        correctionsCursor = this.ctx.storage.sql.exec("DELETE FROM corrections");
-        referralCreditsCursor = this.ctx.storage.sql.exec("DELETE FROM referral_credits");
-        earningsCursor = this.ctx.storage.sql.exec("DELETE FROM earnings");
+        const briefSignalsCursor = this.ctx.storage.sql.exec("DELETE FROM brief_signals");
+        const streaksCursor = this.ctx.storage.sql.exec("DELETE FROM streaks");
+        const correctionsCursor = this.ctx.storage.sql.exec("DELETE FROM corrections");
+        const referralCreditsCursor = this.ctx.storage.sql.exec("DELETE FROM referral_credits");
+        const earningsCursor = this.ctx.storage.sql.exec("DELETE FROM earnings");
 
         // Prune snapshots to keep only the 10 most recent by created_at DESC.
         const pruneCursor = this.ctx.storage.sql.exec(
@@ -2821,26 +2815,25 @@ export class NewsDO extends DurableObject<Env> {
              LIMIT 10
            )`
         );
-        prunedSnapshots = pruneCursor.rowsWritten;
+
+        return c.json({
+          ok: true,
+          data: {
+            snapshot_id: snapshotId,
+            deleted: {
+              brief_signals: briefSignalsCursor.rowsWritten,
+              streaks: streaksCursor.rowsWritten,
+              corrections: correctionsCursor.rowsWritten,
+              referral_credits: referralCreditsCursor.rowsWritten,
+              earnings: earningsCursor.rowsWritten,
+            },
+            pruned_snapshots: pruneCursor.rowsWritten,
+          },
+        } satisfies DOResult<unknown>);
       } catch (e) {
         console.error("Failed to reset leaderboard scoring tables:", e);
         return c.json({ ok: false, error: "Failed to reset leaderboard scoring tables" } satisfies DOResult<unknown>, 500);
       }
-
-      return c.json({
-        ok: true,
-        data: {
-          snapshot_id: snapshotId,
-          deleted: {
-            brief_signals: briefSignalsCursor.rowsWritten,
-            streaks: streaksCursor.rowsWritten,
-            corrections: correctionsCursor.rowsWritten,
-            referral_credits: referralCreditsCursor.rowsWritten,
-            earnings: earningsCursor.rowsWritten,
-          },
-          pruned_snapshots: prunedSnapshots,
-        },
-      } satisfies DOResult<unknown>);
     });
 
     // -------------------------------------------------------------------------
