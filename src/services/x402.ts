@@ -51,12 +51,22 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
     ],
   };
 
+  // btoa() only handles Latin-1 (code points 0x00–0xFF). Descriptions containing
+  // Unicode characters like em dashes (—, U+2014) silently fail with btoa and the
+  // payment-required header is never set, breaking the x402 handshake entirely.
+  // Use TextEncoder to produce UTF-8 bytes, then btoa the byte string — this is
+  // compatible with the client's Buffer.from(encoded, "base64").toString("utf-8").
   let encoded: string | undefined;
   try {
-    encoded = btoa(JSON.stringify(paymentRequirements));
+    const jsonStr = JSON.stringify(paymentRequirements);
+    const bytes = new TextEncoder().encode(jsonStr);
+    let binary = "";
+    for (const byte of bytes) {
+      binary += String.fromCharCode(byte);
+    }
+    encoded = btoa(binary);
   } catch {
-    // btoa failure is unexpected but non-fatal — the payment-required header
-    // is optional; the 402 body still contains all required payment details
+    // Encoding failure should not crash — body still contains payment details
   }
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
