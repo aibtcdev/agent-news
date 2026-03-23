@@ -4,8 +4,8 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL } from "./schema";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -138,7 +138,8 @@ export class NewsDO extends DurableObject<Env> {
     // 4 = sBTC tracking (payout_txid column on earnings)
     // 5 = Classifieds cleanup (drop contact column)
     // 6 = Classifieds editorial review (status, publisher_feedback, reviewed_at, refund_txid)
-    const CURRENT_MIGRATION_VERSION = 6;
+    // 7 = Leaderboard snapshots (audit infrastructure for prize competitions)
+    const CURRENT_MIGRATION_VERSION = 7;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -218,6 +219,20 @@ export class NewsDO extends DurableObject<Env> {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes("duplicate column")) {
               console.error("Classifieds review migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run leaderboard snapshots migration — audit infrastructure for prize competitions.
+      if (appliedVersion < 7) {
+        for (const stmt of MIGRATION_SNAPSHOTS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error("Snapshots migration statement failed:", e);
             }
           }
         }
@@ -2076,7 +2091,9 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      const top3 = this.queryLeaderboard(3) as Array<{ btc_address: string; score: number }>;
+      // Query the full leaderboard — used for both the snapshot and top-3 prize payout.
+      const allEntries = this.queryLeaderboard(10_000);
+      const top3 = allEntries.slice(0, 3) as Array<{ btc_address: string; score: number }>;
 
       if (top3.length === 0) {
         return c.json(
@@ -2093,6 +2110,23 @@ export class NewsDO extends DurableObject<Env> {
 
       const now = new Date().toISOString();
       const weekStr = week as string;
+
+      // Snapshot the full leaderboard before recording earnings.
+      // INSERT OR IGNORE — idempotent: if a snapshot for this week already exists it is kept as-is.
+      try {
+        this.ctx.storage.sql.exec(
+          `INSERT OR IGNORE INTO leaderboard_snapshots (id, snapshot_type, week, snapshot_data, created_at)
+           VALUES (?, ?, ?, ?, ?)`,
+          generateId(),
+          "weekly_payout",
+          weekStr,
+          JSON.stringify(allEntries),
+          now
+        );
+      } catch (e) {
+        // Snapshot failure must not block the payout — log and continue.
+        console.error("Failed to save weekly payout snapshot:", e);
+      }
 
       const paid: PayoutRecord[] = [];
       const skipped: PayoutRecord[] = [];
@@ -2622,6 +2656,252 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
     });
 
+    // -------------------------------------------------------------------------
+    // Audit infrastructure — per-address verify and snapshots
+    // -------------------------------------------------------------------------
+
+    // GET /leaderboard/verify/:address — public endpoint: verify a scout's score
+    // Reuses queryLeaderboard() so scoring math and tie-breaking are always consistent.
+    this.router.get("/leaderboard/verify/:address", (c) => {
+      const address = c.req.param("address");
+
+      // Single query: get the full ranked leaderboard, then find the target address.
+      // This guarantees rank uses the same 4-level tie-breaking as prize payouts.
+      const allEntries = this.queryLeaderboard(10_000);
+      const idx = allEntries.findIndex(
+        (e) => (e as Record<string, unknown>).btc_address === address
+      );
+
+      if (idx === -1) {
+        return c.json({ ok: false, error: "Address not found on leaderboard" } satisfies DOResult<unknown>, 404);
+      }
+
+      const row = allEntries[idx] as Record<string, unknown>;
+      const brief_inclusions = Number(row.brief_inclusions_30d);
+      const signal_count = Number(row.signal_count_30d);
+      const current_streak = Number(row.current_streak);
+      const days_active = Number(row.days_active_30d);
+      const approved_corrections = Number(row.approved_corrections_30d);
+      const referral_credits = Number(row.referral_credits_30d);
+      const total_score = Number(row.score);
+
+      return c.json({
+        ok: true,
+        data: {
+          address,
+          components: {
+            brief_inclusions_30d: brief_inclusions,
+            signal_count_30d: signal_count,
+            current_streak,
+            days_active_30d: days_active,
+            approved_corrections_30d: approved_corrections,
+            referral_credits_30d: referral_credits,
+          },
+          component_scores: {
+            brief_inclusions: brief_inclusions * SCORING_WEIGHTS.brief_inclusions,
+            signal_count: signal_count * SCORING_WEIGHTS.signal_count,
+            current_streak: current_streak * SCORING_WEIGHTS.current_streak,
+            days_active: days_active * SCORING_WEIGHTS.days_active,
+            approved_corrections: approved_corrections * SCORING_WEIGHTS.approved_corrections,
+            referral_credits: referral_credits * SCORING_WEIGHTS.referral_credits,
+          },
+          total_score,
+          rank: idx + 1,
+        },
+      } satisfies DOResult<unknown>);
+    });
+
+    // GET /leaderboard/snapshots — list stored snapshots (id, type, week, created_at — NOT full data)
+    this.router.get("/leaderboard/snapshots", (c) => {
+      const btcAddress = c.req.query("btc_address") ?? "";
+      const auth = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!auth.ok) {
+        return c.json({ ok: false, error: auth.error } satisfies DOResult<unknown>, auth.status);
+      }
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT id, snapshot_type, week, created_at
+           FROM leaderboard_snapshots
+           ORDER BY created_at DESC`
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // GET /leaderboard/snapshots/:id — retrieve a specific snapshot with full data
+    this.router.get("/leaderboard/snapshots/:id", (c) => {
+      const btcAddress = c.req.query("btc_address") ?? "";
+      const auth = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!auth.ok) {
+        return c.json({ ok: false, error: auth.error } satisfies DOResult<unknown>, auth.status);
+      }
+      const id = c.req.param("id");
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT id, snapshot_type, week, snapshot_data, created_at
+           FROM leaderboard_snapshots
+           WHERE id = ?`,
+          id
+        )
+        .toArray();
+      if (rows.length === 0) {
+        return c.json({ ok: false, error: "Snapshot not found" } satisfies DOResult<unknown>, 404);
+      }
+      const row = rows[0] as Record<string, unknown>;
+      return c.json({
+        ok: true,
+        data: {
+          id: row.id,
+          snapshot_type: row.snapshot_type,
+          week: row.week,
+          snapshot_data: JSON.parse(row.snapshot_data as string),
+          created_at: row.created_at,
+        },
+      } satisfies DOResult<unknown>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Test-only seed endpoint — NOT available in production
+    // Allows integration tests to insert rows with arbitrary timestamps so that
+    // exact scoring math can be verified without fighting rate-limit constraints.
+    // -------------------------------------------------------------------------
+    this.router.post("/test-seed", async (c) => {
+      // Hard gate: refuse to serve this route in production
+      if (this.env.ENVIRONMENT !== "test" && this.env.ENVIRONMENT !== "development") {
+        return c.json({ ok: false, error: "Not found" }, 404);
+      }
+
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" }, 400);
+      }
+
+      const inserted: Record<string, number> = {
+        signals: 0,
+        brief_signals: 0,
+        corrections: 0,
+        referral_credits: 0,
+        streaks: 0,
+      };
+
+      // Seed signals
+      if (Array.isArray(body.signals)) {
+        for (const row of body.signals as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO signals
+               (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at,
+                correction_of, status, disclosure)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.beat_slug as string,
+              row.btc_address as string,
+              row.headline as string,
+              (row.body as string | null) ?? null,
+              (row.sources as string) ?? "[]",
+              row.created_at as string,
+              row.created_at as string,
+              (row.correction_of as string | null) ?? null,
+              (row.status as string) ?? "submitted",
+              (row.disclosure as string) ?? ""
+            );
+            inserted.signals++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed brief_signals (requires corresponding signals to exist for btc_address lookup)
+      if (Array.isArray(body.brief_signals)) {
+        for (const row of body.brief_signals as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO brief_signals
+               (brief_date, signal_id, btc_address, position, created_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              row.brief_date as string,
+              row.signal_id as string,
+              row.btc_address as string,
+              (row.position as number) ?? 0,
+              row.created_at as string
+            );
+            inserted.brief_signals++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed corrections
+      if (Array.isArray(body.corrections)) {
+        for (const row of body.corrections as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO corrections
+               (id, signal_id, btc_address, claim, correction, sources, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.signal_id as string,
+              row.btc_address as string,
+              (row.claim as string) ?? "test claim",
+              (row.correction as string) ?? "test correction",
+              (row.sources as string | null) ?? null,
+              (row.status as string) ?? "approved",
+              row.created_at as string
+            );
+            inserted.corrections++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed referral_credits
+      if (Array.isArray(body.referral_credits)) {
+        for (const row of body.referral_credits as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO referral_credits
+               (id, scout_address, recruit_address, credited_at, created_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.scout_address as string,
+              row.recruit_address as string,
+              row.credited_at as string,
+              row.created_at as string
+            );
+            inserted.referral_credits++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed streaks
+      if (Array.isArray(body.streaks)) {
+        for (const row of body.streaks as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO streaks
+               (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
+               VALUES (?, ?, ?, ?, ?)`,
+              row.btc_address as string,
+              (row.current_streak as number) ?? 0,
+              (row.longest_streak as number) ?? 0,
+              (row.last_signal_date as string | null) ?? null,
+              (row.total_signals as number) ?? 0
+            );
+            inserted.streaks++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      return c.json({ ok: true, data: { inserted } });
+    });
+
     this.router.all("*", (c) => {
       return c.json({ ok: false, error: "Not found" }, 404);
     });
@@ -2633,8 +2913,36 @@ export class NewsDO extends DurableObject<Env> {
    * Multipliers below correspond to SCORING_WEIGHTS in src/lib/constants.ts.
    * Update both places when changing weights. SQL literals are used directly
    * because SQLite bind parameters cannot substitute column expressions.
+   *
+   * ── Scoring timeline (Pacific time) ──────────────────────────────────────
+   * This system is operated by a Pacific-based publisher. All streak and day
+   * boundaries use Pacific time (America/Los_Angeles), so a scout's "day" runs
+   * midnight-to-midnight PT regardless of UTC offset.
+   *
+   * Daily editorial cycle:
+   *   - Scouts file signals any time during the Pacific day.
+   *   - The publisher compiles the brief at ~11 pm PT each night.
+   *   - Signals approved before the 11 pm PT cutoff are eligible for that
+   *     day's brief inclusion (brief_inclusions_30d).
+   *   - Streak logic (in POST /signals) uses getPacificDate() / getPacificYesterday()
+   *     to determine whether today or yesterday (Pacific) already has a signal.
+   *
+   * Rolling window:
+   *   - signal_count, days_active, approved_corrections, and referral_credits
+   *     all use datetime('now', '-30 days') which is UTC-based.
+   *   - brief_inclusions uses the same UTC window on brief_signals.created_at.
+   *   - Streaks are NOT windowed — current_streak reflects unbroken consecutive
+   *     Pacific days up to the most recent signal, regardless of the 30-day limit.
+   *
+   * ── Tie-breaking order ────────────────────────────────────────────────────
+   * To ensure the leaderboard is fully deterministic (critical for prize payouts):
+   *   1. score DESC            — highest weighted score wins
+   *   2. current_streak DESC   — longest current streak breaks score ties
+   *   3. first_signal_at ASC   — earliest ever signal (longest tenure) breaks streak ties
+   *   4. btc_address ASC       — alphabetical fallback; always unique
    */
   private queryLeaderboard(limit: number): Array<Record<string, unknown>> {
+    // SQL literals mirror SCORING_WEIGHTS; tests assert exact scores to enforce sync.
     return this.ctx.storage.sql
       .exec(
         `SELECT
@@ -2678,7 +2986,19 @@ export class NewsDO extends DurableObject<Env> {
            FROM referral_credits WHERE credited_at IS NOT NULL AND credited_at > datetime('now', '-30 days')
            GROUP BY scout_address
          ) rf ON a.btc_address = rf.btc_address
-         ORDER BY score DESC, a.btc_address ASC
+         LEFT JOIN (
+           -- Earliest-ever non-correction signal per scout — used as tenure tie-breaker.
+           -- Not windowed: a scout who joined 2 years ago always beats a newcomer with the same score.
+           SELECT btc_address, MIN(created_at) AS first_signal_at
+           FROM signals WHERE correction_of IS NULL
+           GROUP BY btc_address
+         ) fs ON a.btc_address = fs.btc_address
+         -- 4-level deterministic tie-breaking for competition fairness:
+         --   1. score DESC          — highest score wins
+         --   2. current_streak DESC — longest active streak breaks score ties
+         --   3. first_signal_at ASC — earliest tenure breaks streak ties (COALESCE to 'z' so NULLs sort last)
+         --   4. btc_address ASC     — alphabetical fallback; always unique
+         ORDER BY score DESC, COALESCE(st.current_streak, 0) DESC, COALESCE(fs.first_signal_at, 'z') ASC, a.btc_address ASC
          LIMIT ?`,
         limit
       )

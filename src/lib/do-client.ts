@@ -809,3 +809,71 @@ export async function getLeaderboard(env: Env): Promise<LeaderboardEntry[]> {
   return result.data ?? [];
 }
 
+/** Per-address score verification result from raw table recalculation. */
+export interface VerifyScoreResult {
+  address: string;
+  components: {
+    brief_inclusions_30d: number;
+    signal_count_30d: number;
+    current_streak: number;
+    days_active_30d: number;
+    approved_corrections_30d: number;
+    referral_credits_30d: number;
+  };
+  component_scores: {
+    brief_inclusions: number;
+    signal_count: number;
+    current_streak: number;
+    days_active: number;
+    approved_corrections: number;
+    referral_credits: number;
+  };
+  total_score: number;
+  rank: number;
+}
+
+/** Recalculate a single scout's score from raw tables. Public endpoint. */
+export async function verifyLeaderboardScore(
+  env: Env,
+  address: string
+): Promise<DOResult<VerifyScoreResult>> {
+  const stub = getStub(env);
+  return doFetch<VerifyScoreResult>(stub, `/leaderboard/verify/${encodeURIComponent(address)}`);
+}
+
+/** Snapshot metadata row (no snapshot_data payload). */
+export interface SnapshotMeta {
+  id: string;
+  snapshot_type: string;
+  week: string | null;
+  created_at: string;
+}
+
+/** Full snapshot row including parsed snapshot_data. */
+export interface SnapshotFull extends SnapshotMeta {
+  snapshot_data: LeaderboardEntry[];
+}
+
+/** List stored leaderboard snapshots (metadata only, Publisher-only). */
+export async function listLeaderboardSnapshots(
+  env: Env,
+  publisherAddress: string
+): Promise<SnapshotMeta[]> {
+  const stub = getStub(env);
+  const params = new URLSearchParams({ btc_address: publisherAddress });
+  const result = await doFetch<SnapshotMeta[]>(stub, `/leaderboard/snapshots?${params}`);
+  if (!result.ok) throw new Error(result.error ?? "Failed to list leaderboard snapshots");
+  return result.data ?? [];
+}
+
+/** Retrieve a specific snapshot with full data (Publisher-only). */
+export async function getLeaderboardSnapshot(
+  env: Env,
+  id: string,
+  publisherAddress: string
+): Promise<DOResult<SnapshotFull>> {
+  const stub = getStub(env);
+  const params = new URLSearchParams({ btc_address: publisherAddress });
+  return doFetch<SnapshotFull>(stub, `/leaderboard/snapshots/${encodeURIComponent(id)}?${params}`);
+}
+

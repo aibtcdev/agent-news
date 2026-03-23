@@ -5,14 +5,37 @@ import { resolveAgentNames } from "../services/agent-resolver";
 export const PACIFIC_TZ = "America/Los_Angeles";
 
 /**
- * Returns the current date in YYYY-MM-DD format in Pacific time
+ * WHY Pacific time?
+ *
+ * This news system is operated by a Pacific-based publisher. The editorial day
+ * runs midnight-to-midnight PT (America/Los_Angeles), which automatically handles
+ * both PST (UTC-8) and PDT (UTC-7) via the IANA timezone database.
+ *
+ * Key timing anchors:
+ *   - Briefs are compiled at ~11 pm PT each night. Signals approved before
+ *     that cutoff count toward that day's brief and brief_inclusions score.
+ *   - Streak boundaries align with the editorial day: a scout must file at
+ *     least one approved signal on each consecutive Pacific calendar day to
+ *     maintain their streak. Missing a Pacific day breaks the streak even if
+ *     only a few UTC hours passed between their last two signals.
+ *   - The 30-day rolling window in SQL uses datetime('now', '-30 days') (UTC).
+ *     This is intentionally different from streak/day boundaries — it is a
+ *     sliding competition window, not an editorial-day boundary.
+ */
+
+/**
+ * Returns the current date in YYYY-MM-DD format in Pacific time.
+ * Use this for streak and day-boundary calculations, not for UTC timestamps.
  */
 export function getPacificDate(now = new Date()): string {
   return now.toLocaleDateString("en-CA", { timeZone: PACIFIC_TZ });
 }
 
 /**
- * Returns yesterday's date in YYYY-MM-DD format in Pacific time
+ * Returns yesterday's date in YYYY-MM-DD format in Pacific time.
+ * "Yesterday" here is Pacific yesterday — a scout who filed at 11:59 pm PT
+ * and files again at 12:01 am PT the next day has a consecutive-day streak.
+ * The same two signals in UTC could span a very different day boundary.
  */
 export function getPacificYesterday(now = new Date()): string {
   const yesterday = new Date(now);

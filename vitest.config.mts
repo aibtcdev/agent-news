@@ -12,14 +12,21 @@ export default defineConfig({
         configPath: "./wrangler.jsonc",
       },
       // Provide a stub for LOGS (external service binding unavailable in tests)
+      // Override ENVIRONMENT so test-only endpoints (e.g. /api/test-seed) are accessible
       miniflare: {
         serviceBindings: {
           LOGS: async () => new Response("ok"),
+        },
+        bindings: {
+          ENVIRONMENT: "test",
         },
       },
     }),
   ],
   test: {
     include: ["src/__tests__/**/*.test.ts"],
+    // Scoring math tests call /api/leaderboard which resolves agent names with a 3s timeout.
+    // Increase global test timeout to avoid flaky timeouts in integration tests.
+    testTimeout: 15000,
   },
 });
