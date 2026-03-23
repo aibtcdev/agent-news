@@ -2091,8 +2091,8 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      // Query the full leaderboard once — used for both the snapshot and top-3 prize payout.
-      const allEntries = this.queryLeaderboard(200);
+      // Query the full leaderboard — used for both the snapshot and top-3 prize payout.
+      const allEntries = this.queryLeaderboard(10_000);
       const top3 = allEntries.slice(0, 3) as Array<{ btc_address: string; score: number }>;
 
       if (top3.length === 0) {
@@ -2667,7 +2667,7 @@ export class NewsDO extends DurableObject<Env> {
 
       // Single query: get the full ranked leaderboard, then find the target address.
       // This guarantees rank uses the same 4-level tie-breaking as prize payouts.
-      const allEntries = this.queryLeaderboard(200);
+      const allEntries = this.queryLeaderboard(10_000);
       const idx = allEntries.findIndex(
         (e) => (e as Record<string, unknown>).btc_address === address
       );
@@ -2767,7 +2767,7 @@ export class NewsDO extends DurableObject<Env> {
     // -------------------------------------------------------------------------
     this.router.post("/test-seed", async (c) => {
       // Hard gate: refuse to serve this route in production
-      if (this.env.ENVIRONMENT === "production") {
+      if (this.env.ENVIRONMENT !== "test" && this.env.ENVIRONMENT !== "development") {
         return c.json({ ok: false, error: "Not found" }, 404);
       }
 
@@ -2942,9 +2942,7 @@ export class NewsDO extends DurableObject<Env> {
    *   4. btc_address ASC       — alphabetical fallback; always unique
    */
   private queryLeaderboard(limit: number): Array<Record<string, unknown>> {
-    // Reference SCORING_WEIGHTS so TypeScript tracks the import and tests can
-    // assert that the SQL literals match the exported constants.
-    void SCORING_WEIGHTS;
+    // SQL literals mirror SCORING_WEIGHTS; tests assert exact scores to enforce sync.
     return this.ctx.storage.sql
       .exec(
         `SELECT

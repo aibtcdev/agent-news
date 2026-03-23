@@ -111,7 +111,7 @@ app.route("/", reportRouter);
 // Test-only seed endpoint — proxies to the DO's /test-seed route.
 // Gated on ENVIRONMENT !== 'production' at both the worker and DO level.
 app.post("/api/test-seed", async (c) => {
-  if (c.env.ENVIRONMENT === "production") {
+  if (c.env.ENVIRONMENT !== "test" && c.env.ENVIRONMENT !== "development") {
     return c.json({ error: "Not found" }, 404);
   }
   const id = c.env.NEWS_DO.idFromName("news-singleton");
