@@ -809,18 +809,6 @@ export async function getLeaderboard(env: Env): Promise<LeaderboardEntry[]> {
   return result.data ?? [];
 }
 
-/** Full component breakdown for all scouts (Publisher-only). */
-export async function getLeaderboardBreakdown(
-  env: Env,
-  publisherAddress: string
-): Promise<LeaderboardEntry[]> {
-  const stub = getStub(env);
-  const params = new URLSearchParams({ btc_address: publisherAddress });
-  const result = await doFetch<LeaderboardEntry[]>(stub, `/leaderboard/breakdown?${params}`);
-  if (!result.ok) throw new Error(result.error ?? "Failed to get leaderboard breakdown");
-  return result.data ?? [];
-}
-
 /** Per-address score verification result from raw table recalculation. */
 export interface VerifyScoreResult {
   address: string;
