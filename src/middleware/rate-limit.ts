@@ -10,12 +10,23 @@ interface RateLimitOptions {
   key: string;
   maxRequests: number;
   windowSeconds: number;
+  /**
+   * Optional header name to use as the rate-limit identity instead of IP.
+   * When set, the middleware checks for this header first; if present, the
+   * rate-limit bucket is keyed by the header value (e.g. a BTC address)
+   * rather than the caller's IP. This prevents shared-IP collisions for
+   * authenticated endpoints where the caller's identity is known.
+   */
+  identityHeader?: string;
 }
 
 /**
  * Factory that creates a Hono rate-limit middleware scoped to a given key.
  * Reads CF-Connecting-IP and checks a sliding window counter in NEWS_KV.
  * Returns 429 when the limit is exceeded.
+ *
+ * When `identityHeader` is provided the bucket is keyed by that header's
+ * value (falling back to IP when the header is absent).
  *
  * KNOWN LIMITATION — Worker (KV) level only:
  * Rate limiting is enforced at the Cloudflare Worker layer using KV storage.
@@ -29,8 +40,12 @@ export function createRateLimitMiddleware(opts: RateLimitOptions) {
     c: Context<{ Bindings: Env; Variables: AppVariables }>,
     next: Next
   ) {
+    const identity = opts.identityHeader
+      ? c.req.header(opts.identityHeader) ?? null
+      : null;
     const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
-    const rlKey = `ratelimit:${opts.key}:${ip}`;
+    const callerKey = identity ?? ip;
+    const rlKey = `ratelimit:${opts.key}:${callerKey}`;
 
     const record =
       (await c.env.NEWS_KV.get<RateLimitRecord>(rlKey, "json")) ?? {
@@ -53,14 +68,14 @@ export function createRateLimitMiddleware(opts: RateLimitOptions) {
       const logger = c.get("logger");
       logger.warn("rate limit exceeded", {
         key: opts.key,
-        ip,
+        identity: callerKey,
         count: record.count,
         max: opts.maxRequests,
         retry_after: retryAfter,
       });
       c.header("Retry-After", String(retryAfter));
       return c.json(
-        { error: `Rate limited. Try again in ${retryAfter}s` },
+        { error: `Rate limited. Try again in ${retryAfter}s`, retry_after: retryAfter },
         429
       );
     }

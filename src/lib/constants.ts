@@ -105,7 +105,7 @@ export const BRIEF_COMPILE_RATE_LIMIT = {
 } as const;
 
 export const BRIEF_INSCRIBE_RATE_LIMIT = {
-  maxRequests: 10,
+  maxRequests: 30,
   windowSeconds: 3600, // 1 hour
 } as const;
 
