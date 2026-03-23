@@ -1,0 +1,59 @@
+name: Preview
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Deploy preview
+        id: deploy
+        run: |
+          OUTPUT=$(npx wrangler deploy --env staging 2>&1)
+          echo "$OUTPUT"
+          URL=$(echo "$OUTPUT" | grep -oP 'https://[^\s]+\.workers\.dev' | head -1)
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Comment preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = '${{ steps.deploy.outputs.url }}';
+            const body = url
+              ? `**Preview deployed:** ${url}\n\nThis preview reflects the latest push to this PR.`
+              : `**Preview deployed** to \`agent-news-staging.workers.dev\` (URL not detected in deploy output).`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const botComment = comments.find(c =>
+              c.user.type === 'Bot' && c.body.startsWith('**Preview deployed')
+            );
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
