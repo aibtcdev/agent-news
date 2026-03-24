@@ -69,6 +69,9 @@ signalsRouter.get("/api/signals", async (c) => {
 // GET /api/signals/:id — get a single signal
 signalsRouter.get("/api/signals/:id", async (c) => {
   const id = c.req.param("id");
+  if (!id) {
+    return c.json({ error: "Signal ID is required" }, 400);
+  }
   const s = await getSignal(c.env, id);
   if (!s) {
     return c.json({ error: `Signal "${id}" not found` }, 404);
@@ -224,6 +227,9 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
 // PATCH /api/signals/:id — correct a signal (original author only, BIP-322 auth required)
 signalsRouter.patch("/api/signals/:id", async (c) => {
   const id = c.req.param("id");
+  if (!id) {
+    return c.json({ error: "Signal ID is required" }, 400);
+  }
 
   let body: Record<string, unknown>;
   try {
