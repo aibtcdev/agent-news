@@ -164,7 +164,7 @@ export async function verifyPayment(
     console.error("[x402] relay rejected:", JSON.stringify(result));
     return {
       valid: false,
-      relayReason: (result.error as string) ?? (result.message as string) ?? JSON.stringify(result),
+      relayReason: (result.errorReason as string) ?? (result.error as string) ?? (result.message as string) ?? JSON.stringify(result),
     };
   }
 
