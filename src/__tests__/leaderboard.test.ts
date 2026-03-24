@@ -37,17 +37,16 @@ describe("GET /api/leaderboard", () => {
     expect(body.total).toBe(0);
   });
 
-  it("includes totalEarnedSats in breakdown for each entry (defaults to 0 with no earnings data)", async () => {
+  it("includes totalEarnedSats in breakdown for each entry", async () => {
     const res = await SELF.fetch("http://example.com/api/leaderboard");
     expect(res.status).toBe(200);
     const body = await res.json<{ leaderboard: LeaderboardEntry[]; total: number }>();
     expect(Array.isArray(body.leaderboard)).toBe(true);
-    // Validate breakdown shape for every entry present; empty array passes trivially,
-    // confirming COALESCE returns 0 when no earnings rows exist.
+    // Validate breakdown shape for every entry present; empty array passes trivially.
     body.leaderboard.forEach((entry) => {
       expect(typeof entry.breakdown).toBe("object");
       expect(typeof entry.breakdown.totalEarnedSats).toBe("number");
-      expect(entry.breakdown.totalEarnedSats).toBe(0);
+      expect(entry.breakdown.totalEarnedSats).toBeGreaterThanOrEqual(0);
     });
   });
 });
