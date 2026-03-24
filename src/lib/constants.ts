@@ -142,3 +142,8 @@ export const BRIEF_INSCRIBE_RATE_LIMIT = {
 
 // ── Config keys ──
 export const CONFIG_PUBLISHER_ADDRESS = "publisher_btc_address" as const;
+
+// ── ERC-8004 identity registry ──
+export const ERC8004_REGISTRY_CONTRACT =
+  "SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2" as const;
+export const ERC8004_CACHE_TTL_SECONDS = 3600; // 1 hour
