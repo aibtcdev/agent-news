@@ -108,7 +108,7 @@ classifiedsRouter.post(
     // Old code tried to read the header and crashed if missing.
     if (!paymentHeader) {
       const logger = c.get("logger");
-      logger.info("402 payment required sent for POST /api/classifieds", {
+      logger.debug("402 payment required sent for POST /api/classifieds", {
         ip: c.req.header("CF-Connecting-IP"),
       });
       return buildPaymentRequired({

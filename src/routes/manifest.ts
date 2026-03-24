@@ -320,7 +320,7 @@ manifestRouter.get("/api", (c) => {
       limits: {
         signals: "10 requests per hour per IP",
         beats: "5 requests per hour per IP",
-        classifieds: "5 requests per hour per IP",
+        classifieds: "20 requests per 10 minutes per IP (x402 payment attempts only — probes bypass)",
         "brief-inscribe": "5 requests per hour per IP",
       },
       known_limitation:
