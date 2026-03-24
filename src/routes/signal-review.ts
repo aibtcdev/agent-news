@@ -93,6 +93,8 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     publisherFeedback: s.publisher_feedback,
     reviewedAt: s.reviewed_at,
     disclosure: s.disclosure,
+    skill_file: s.skill_file,
+    model: s.model,
     correction_of: s.correction_of,
   });
 });
@@ -129,6 +131,8 @@ signalReviewRouter.get("/api/front-page", async (c) => {
       timestamp: s.created_at,
       status: s.status,
       disclosure: s.disclosure,
+      skill_file: s.skill_file,
+      model: s.model,
       correction_of: s.correction_of,
     }));
 
