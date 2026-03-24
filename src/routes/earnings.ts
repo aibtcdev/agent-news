@@ -1,17 +1,107 @@
 /**
- * Earnings route — correspondent earning history.
+ * Earnings route — correspondent earning history and payout recording.
  *
- * GET   /api/earnings/:address — list earnings for a BTC address
- * PATCH /api/earnings/:id      — Publisher records sBTC txid after sending payout
+ * POST  /api/payouts/record     — Publisher records brief inclusion earnings (idempotent)
+ * GET   /api/earnings/:address  — list earnings for a BTC address
+ * PATCH /api/earnings/:id       — Publisher records sBTC txid after sending payout
  */
 
 import { Hono } from "hono";
 import type { Env, AppVariables, Earning } from "../lib/types";
 import { validateBtcAddress } from "../lib/validators";
-import { listEarnings, updateEarning } from "../lib/do-client";
+import {
+  listEarnings,
+  updateEarning,
+  getBriefSignals,
+  recordBriefInclusionPayouts,
+  getConfig,
+} from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
+import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 
 const earningsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+
+// POST /api/payouts/record — Publisher records brief inclusion earnings (Publisher-only, idempotent)
+// Calls POST /payouts/brief-inclusion in the DO, which uses INSERT OR IGNORE — safe to retry.
+earningsRouter.post("/api/payouts/record", async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { btc_address, brief_date } = body;
+
+  if (!btc_address || typeof btc_address !== "string") {
+    return c.json({ error: "Missing required field: btc_address" }, 400);
+  }
+  if (!brief_date || typeof brief_date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(brief_date)) {
+    return c.json({ error: "Missing or invalid field: brief_date (expected YYYY-MM-DD)" }, 400);
+  }
+
+  if (!validateBtcAddress(btc_address)) {
+    return c.json({ error: "Invalid BTC address format" }, 400);
+  }
+
+  // BIP-322 auth — Publisher must sign the request
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btc_address,
+    "POST",
+    "/api/payouts/record"
+  );
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  // Verify caller is the designated Publisher
+  const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  if (!publisherConfig || publisherConfig.value !== btc_address) {
+    return c.json({ error: "Only the designated Publisher can record payouts" }, 403);
+  }
+
+  // Look up signals included in this brief
+  let briefSignals: unknown[];
+  try {
+    briefSignals = await getBriefSignals(c.env, brief_date);
+  } catch {
+    return c.json({ error: `Failed to fetch brief signals for ${brief_date}` }, 503);
+  }
+
+  if (briefSignals.length === 0) {
+    return c.json({ error: `No signals found in brief for ${brief_date}` }, 404);
+  }
+
+  // Extract signal IDs and call the idempotent DO payout endpoint
+  const signalIds = briefSignals
+    .map((s) => (s as Record<string, unknown>).signal_id as string)
+    .filter(Boolean);
+
+  const result = await recordBriefInclusionPayouts(c.env, brief_date, signalIds);
+
+  if (!result.ok) {
+    return c.json({ error: result.error ?? "Failed to record payouts" }, 500);
+  }
+
+  const logger = c.get("logger");
+  logger.info("brief payouts recorded", {
+    brief_date,
+    paid: result.data?.paid,
+    skipped: result.data?.skipped,
+    publisher: btc_address,
+  });
+
+  return c.json(
+    {
+      ok: true,
+      brief_date,
+      paid: result.data?.paid ?? 0,
+      skipped: result.data?.skipped ?? 0,
+    },
+    201
+  );
+});
 
 // GET /api/earnings/:address — earning history for a correspondent
 earningsRouter.get("/api/earnings/:address", async (c) => {
