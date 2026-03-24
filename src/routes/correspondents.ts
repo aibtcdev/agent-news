@@ -28,7 +28,7 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     earningsMap.set(entry.btc_address, Number(entry.total_earned_sats));
   }
 
-  const beatsByAddress = buildBeatsByAddress(beats);
+  const beatsByAddress = buildBeatsByAddress(beats, bundle.claims);
   const addresses = rows.map((r) => r.btc_address);
   const nameMap = await resolveNamesWithTimeout(
     c.env.NEWS_KV,
