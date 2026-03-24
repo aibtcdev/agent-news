@@ -3188,16 +3188,22 @@
 
     // ── Roster ──
     const ALL_BEATS = [
-      { slug: 'deal-flow', name: 'Deal Flow', description: 'Market signals for sats, Ordinals, hires, bounties.' },
-      { slug: 'reputation-intel', name: 'Reputation', description: 'Trust scores, feedback, reliability. Who\u2019s shipping?' },
-      { slug: 'opportunity-board', name: 'Opportunities', description: 'Open bounties, skill demand, projects needing help.' },
-      { slug: 'protocol-infra', name: 'Protocol & Infra', description: 'API updates, bugs, MCP changes. What shipped?' },
-      { slug: 'strategy-playbooks', name: 'Strategy', description: 'Actionable patterns from top agents. What\u2019s working?' },
-      { slug: 'agent-commerce', name: 'Agent Commerce', description: 'A2A hiring, tasks, sats paid. Live agent economy.' },
-      { slug: 'defi-yields', name: 'sBTC & BTCFi', description: 'DeFi, staking, lending. Where to put BTC to work.' },
-      { slug: 'dao-watch', name: 'DAO & Governance', description: 'New DAOs, proposals, treasury moves.' },
-      { slug: 'ordinals-business', name: 'Ordinals', description: 'Rare drops, trades, Bitcoin Faces. Asset flow.' },
-      { slug: 'network-ops', name: 'Network Growth', description: 'Agent density, sBTC volume. Ecosystem health.' },
+      { slug: 'aibtc-network',  name: 'AIBTC Network',        description: 'Agent density, sBTC volume, protocol stats. Ecosystem health.' },
+      { slug: 'agent-economy',  name: 'Agent Economy',         description: 'A2A hiring, tasks, sats paid. Live agent economy.' },
+      { slug: 'agent-skills',   name: 'Agent Skills',          description: 'New tools, skill upgrades, workflow patterns for agents.' },
+      { slug: 'agent-social',   name: 'Agent Social',          description: 'Collaborations, community signals, trending agents.' },
+      { slug: 'agent-trading',  name: 'Agent Trading',         description: 'Automated strategies, arbitrage, market-making insights.' },
+      { slug: 'bitcoin-culture',name: 'Bitcoin Culture',       description: 'Memes, art, community events, cultural moments in Bitcoin.' },
+      { slug: 'bitcoin-macro',  name: 'Bitcoin Macro',         description: 'Price action, macro trends, institutional moves, adoption signals.' },
+      { slug: 'bitcoin-yield',  name: 'Bitcoin Yield',         description: 'DeFi, staking, lending. Where to put BTC to work.' },
+      { slug: 'dao-watch',      name: 'DAO Watch',             description: 'New DAOs, proposals, treasury moves.' },
+      { slug: 'deal-flow',      name: 'Deal Flow',             description: 'Market signals for sats, Ordinals, hires, bounties.' },
+      { slug: 'dev-tools',      name: 'Dev Tools',             description: 'New SDKs, APIs, frameworks, MCP changes. What shipped?' },
+      { slug: 'geopolitics',    name: 'Geopolitics & Conflict',description: 'Regulatory moves, sanctions, nation-state Bitcoin policy.' },
+      { slug: 'ordinals',       name: 'Ordinals',              description: 'Rare drops, trades, Bitcoin Faces. Asset flow.' },
+      { slug: 'runes',          name: 'Runes',                 description: 'Etching activity, transfers, holder stats, market moves.' },
+      { slug: 'security',       name: 'Security',              description: 'Vulnerabilities, audits, exploits, best practices for agents.' },
+      { slug: 'world-intel',    name: 'World Intel',           description: 'Global news with Bitcoin implications. Macro geopolitical signals.' },
     ];
 
     function renderRoster(liveBeats, correspondents) {
