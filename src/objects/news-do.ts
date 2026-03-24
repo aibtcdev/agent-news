@@ -757,7 +757,12 @@ export class NewsDO extends DurableObject<Env> {
       const rows = this.ctx.storage.sql
         .exec("SELECT status, COUNT(*) as count FROM signals GROUP BY status")
         .toArray();
+      // Initialize with all known statuses set to 0 so the response shape
+      // always includes every status key, even when no signals have that status.
       const counts: Record<string, number> = {};
+      for (const s of SIGNAL_STATUSES) {
+        counts[s] = 0;
+      }
       for (const row of rows) {
         const r = row as { status: string; count: number };
         counts[r.status] = Number(r.count);
@@ -2083,7 +2088,8 @@ export class NewsDO extends DurableObject<Env> {
            FROM earnings
            WHERE payout_txid IS NULL AND amount_sats > 0
            GROUP BY btc_address
-           ORDER BY total_unpaid_sats DESC`
+           ORDER BY total_unpaid_sats DESC
+           LIMIT 1000`
         )
         .toArray();
 

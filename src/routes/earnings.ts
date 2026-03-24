@@ -42,8 +42,8 @@ earningsRouter.get("/api/earnings/unpaid", async (c) => {
   return c.json({
     unpaid,
     summary: {
-      total_correspondents: unpaid.length,
-      total_unpaid_sats: totalUnpaidSats,
+      totalCorrespondents: unpaid.length,
+      totalUnpaidSats: totalUnpaidSats,
     },
   });
 });
