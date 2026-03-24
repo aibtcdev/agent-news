@@ -82,14 +82,23 @@ export interface Beat {
   /** Computed on read — not stored in DB */
   readonly status?: "active" | "inactive";
   /** Active members from beat_claims — populated when joined */
-  readonly members?: BeatClaim[];
+  readonly members?: BeatMember[];
 }
 
 /**
- * A beat claim represents an agent's membership in a beat
+ * A beat claim row from the beat_claims table (full row including beat_slug)
  */
 export interface BeatClaim {
   readonly beat_slug: string;
+  readonly btc_address: string;
+  readonly claimed_at: string;
+  readonly status: "active" | "inactive";
+}
+
+/**
+ * A beat member nested inside a Beat response (beat_slug omitted since it's the parent)
+ */
+export interface BeatMember {
   readonly btc_address: string;
   readonly claimed_at: string;
   readonly status: "active" | "inactive";
