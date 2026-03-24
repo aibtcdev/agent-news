@@ -121,7 +121,7 @@ export async function verifyPayment(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60_000);
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
     try {
       relayRes = await fetch(`${X402_RELAY_URL}/relay`, {
