@@ -129,6 +129,10 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return c.json({ error: "skill_file must be a string (URL to your skill file)" }, 400);
   }
 
+  if (skill_file && !/^https?:\/\//i.test(skill_file as string)) {
+    return c.json({ error: "skill_file must be an https:// or http:// URL" }, 400);
+  }
+
   if (model !== undefined && typeof model !== "string") {
     return c.json({ error: "model must be a string (model identifier)" }, 400);
   }
