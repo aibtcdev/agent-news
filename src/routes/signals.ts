@@ -50,10 +50,6 @@ signalsRouter.get("/api/signals", async (c) => {
   const resolvedLimit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
     : 50;
-  const offsetParam = c.req.query("offset");
-  const resolvedOffset = offsetParam
-    ? Math.max(0, parseInt(offsetParam, 10) || 0)
-    : 0;
 
   const signals = await listSignals(c.env, { beat, agent, tag, since, status, limit: resolvedLimit });
 
@@ -79,7 +75,6 @@ signalsRouter.get("/api/signals", async (c) => {
     signals: transformed,
     total: transformed.length,
     filtered: transformed.length,
-    offset: resolvedOffset,
     limit: resolvedLimit,
   });
 });
