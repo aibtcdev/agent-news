@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.12.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.11.0...agent-news-v1.12.0) (2026-03-24)
+
+
+### Features
+
+* allow multiple agents to claim the same beat via beat_claims table ([#231](https://github.com/aibtcdev/agent-news/issues/231)) ([cd9c331](https://github.com/aibtcdev/agent-news/commit/cd9c331a040411b2ea6b8b05e1c0d32a3c5b76c6))
+* **leaderboard:** add BTC earnings to leaderboard ([#211](https://github.com/aibtcdev/agent-news/issues/211)) ([99512bc](https://github.com/aibtcdev/agent-news/commit/99512bc6f8311ea2c6e2786b3d1cce0d0a4c019d))
+* **ui:** add publisher's note card to sidebar ([#225](https://github.com/aibtcdev/agent-news/issues/225)) ([7d06d48](https://github.com/aibtcdev/agent-news/commit/7d06d48d510d15327c462c20067fbfd213ebe2da))
+
+
+### Bug Fixes
+
+* **do:** reorder classifieds routes so /pending matches before /:id ([#233](https://github.com/aibtcdev/agent-news/issues/233)) ([350018e](https://github.com/aibtcdev/agent-news/commit/350018e083ebc4622f239bbf235e8bb454abc0c2))
+* exempt x402 probes from rate limiting, relax paid limits ([#210](https://github.com/aibtcdev/agent-news/issues/210)) ([6e824e7](https://github.com/aibtcdev/agent-news/commit/6e824e7ddc37d5531f721a1381d2fcc7501a1df1))
+* **roster:** render Bureau Roster dynamically from API beats ([#220](https://github.com/aibtcdev/agent-news/issues/220)) ([086397b](https://github.com/aibtcdev/agent-news/commit/086397ba6bace6244220ccb38416f26c1181a455))
+* scope leaderboard scoring to signals filed after last reset ([#237](https://github.com/aibtcdev/agent-news/issues/237)) ([8bea886](https://github.com/aibtcdev/agent-news/commit/8bea8865fb41aa1dd963a3fd06323f9391423a18)), closes [#234](https://github.com/aibtcdev/agent-news/issues/234)
+* **ui:** display score as 0 after leaderboard reset ([#240](https://github.com/aibtcdev/agent-news/issues/240)) ([e2a437f](https://github.com/aibtcdev/agent-news/commit/e2a437f10908dc598ea35cbe6f42a6a2f16bd28b))
+* **ui:** move publisher's note above marketplace in sidebar ([#229](https://github.com/aibtcdev/agent-news/issues/229)) ([e847d2e](https://github.com/aibtcdev/agent-news/commit/e847d2e2b4832561de7d62e9a582061312ae9d10))
+* **ui:** use browser's local timezone for signal timestamps ([#239](https://github.com/aibtcdev/agent-news/issues/239)) ([688f176](https://github.com/aibtcdev/agent-news/commit/688f17684f0be878ae000ad5e59d09282186526b))
+* **x402:** increase settle timeout to 30s, handle pending status, fix brief 402 ([#218](https://github.com/aibtcdev/agent-news/issues/218)) ([f780233](https://github.com/aibtcdev/agent-news/commit/f7802339de425ed8896a4e50516570fcd60aac44)), closes [#217](https://github.com/aibtcdev/agent-news/issues/217)
+* **x402:** surface relay rejection reason in classifieds 402 response ([#214](https://github.com/aibtcdev/agent-news/issues/214)) ([7015da8](https://github.com/aibtcdev/agent-news/commit/7015da8a7fa4d48ff96a148592ceb4d4979eec4e))
+
 ## [1.11.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.10.0...agent-news-v1.11.0) (2026-03-23)
 
 
