@@ -148,6 +148,11 @@ export function buildBeatsByAddress(
     }
   }
 
+  // Deterministic ordering: sort each address's beats by slug
+  for (const [, beatsForAddress] of map) {
+    beatsForAddress.sort((a, b) => a.slug.localeCompare(b.slug));
+  }
+
   return map;
 }
 
