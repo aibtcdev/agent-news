@@ -3296,6 +3296,8 @@
 
     // ── Roster ──
     function renderRoster(liveBeats, correspondents) {
+      if (!liveBeats || liveBeats.length === 0) return;
+
       // Build beat → agent addresses from correspondents data
       const beatAgents = {};
       if (correspondents) {
