@@ -126,8 +126,14 @@ initRouter.get("/api/init", async (c) => {
     };
   });
 
-  // Sort by score so the homepage sidebar reflects actual leaderboard ranking.
-  correspondentsList.sort((a, b) => b.score - a.score || b.signalCount - a.signalCount);
+  // Sort by score descending, then streak, then address to mirror
+  // leaderboard tie-breaking when signal_count order diverges after a reset.
+  correspondentsList.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.streak - a.streak ||
+      a.address.localeCompare(b.address),
+  );
 
   const correspondentsPayload = {
     correspondents: correspondentsList,

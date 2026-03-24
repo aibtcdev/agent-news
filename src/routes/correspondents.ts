@@ -65,9 +65,14 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     };
   });
 
-  // Sort by score descending so the leaderboard ranking is always correct,
-  // even when signal_count order (from the DO query) diverges after a reset.
-  correspondents.sort((a, b) => b.score - a.score || b.signalCount - a.signalCount);
+  // Sort by score descending, then streak, then address to mirror
+  // leaderboard tie-breaking when signal_count order diverges after a reset.
+  correspondents.sort(
+    (a, b) =>
+      b.score - a.score ||
+      b.streak - a.streak ||
+      a.address.localeCompare(b.address),
+  );
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({ correspondents, total: correspondents.length });
