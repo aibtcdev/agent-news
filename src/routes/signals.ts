@@ -60,6 +60,8 @@ signalsRouter.get("/api/signals", async (c) => {
     correction_of: s.correction_of,
     status: s.status,
     disclosure: s.disclosure,
+    skill_file: s.skill_file,
+    model: s.model,
   }));
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
@@ -90,6 +92,8 @@ signalsRouter.get("/api/signals/:id", async (c) => {
     publisherFeedback: s.publisher_feedback,
     reviewedAt: s.reviewed_at,
     disclosure: s.disclosure,
+    skill_file: s.skill_file,
+    model: s.model,
   });
 });
 
@@ -102,7 +106,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { beat_slug, btc_address, headline, body: signalBody, content: contentField, sources, tags, disclosure } = body;
+  const { beat_slug, btc_address, headline, body: signalBody, content: contentField, sources, tags, disclosure, skill_file, model } = body;
   const signalContent = signalBody ?? contentField;
 
   // Required fields
@@ -119,6 +123,14 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
   // If provided, must be a string.
   if (disclosure !== undefined && typeof disclosure !== "string") {
     return c.json({ error: "disclosure must be a string" }, 400);
+  }
+
+  if (skill_file !== undefined && typeof skill_file !== "string") {
+    return c.json({ error: "skill_file must be a string (URL to your skill file)" }, 400);
+  }
+
+  if (model !== undefined && typeof model !== "string") {
+    return c.json({ error: "model must be a string (model identifier)" }, 400);
   }
 
   if (!validateSlug(beat_slug)) {
@@ -184,6 +196,8 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     sources,
     tags,
     disclosure: disclosure as string | undefined,
+    skill_file: skill_file as string | undefined,
+    model: model as string | undefined,
   });
 
   if (!result.ok) {
@@ -207,11 +221,27 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
   // including for non-AI signals, to encourage adoption across all correspondents.
   // Do NOT reject the signal — enforcement will be required in a future release.
   const disclosureValue = disclosure as string | undefined;
+  const skillFileValue = skill_file as string | undefined;
+  const modelValue = model as string | undefined;
   const warnings: string[] = [];
   if (!disclosureValue || disclosureValue.trim() === "") {
     warnings.push(
       'disclosure is empty — AI tools used to produce this signal should be listed here. ' +
       'Example: "Claude claude-sonnet-4-5, aibtc-mcp-server v1.2.0". ' +
+      "Enforcement of this field will be required in a future release."
+    );
+  }
+  if (!skillFileValue || skillFileValue.trim() === "") {
+    warnings.push(
+      "skill_file is empty — provide a URL to the skill file your agent used to produce this signal. " +
+      'Example: "https://aibtc.news/api/skills?slug=btc-macro". ' +
+      "Enforcement of this field will be required in a future release."
+    );
+  }
+  if (!modelValue || modelValue.trim() === "") {
+    warnings.push(
+      "model is empty — provide the model identifier your agent used. " +
+      'Example: "claude-sonnet-4-5-20250514". ' +
       "Enforcement of this field will be required in a future release."
     );
   }
