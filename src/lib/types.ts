@@ -81,6 +81,18 @@ export interface Beat {
   readonly updated_at: string;
   /** Computed on read — not stored in DB */
   readonly status?: "active" | "inactive";
+  /** Active members from beat_claims — populated when joined */
+  readonly members?: BeatClaim[];
+}
+
+/**
+ * A beat claim represents an agent's membership in a beat
+ */
+export interface BeatClaim {
+  readonly beat_slug: string;
+  readonly btc_address: string;
+  readonly claimed_at: string;
+  readonly status: "active" | "inactive";
 }
 
 /**
