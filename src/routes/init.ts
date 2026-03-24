@@ -100,33 +100,38 @@ initRouter.get("/api/init", async (c) => {
     (p) => c.executionCtx.waitUntil(p)
   );
 
-  const correspondentsPayload = {
-    correspondents: bundle.correspondents.map((row) => {
-      const signalCount = Number(row.signal_count) || 0;
-      const streak = Number(row.current_streak) || 0;
-      const longestStreak = Number(row.longest_streak) || 0;
-      const daysActive = Number(row.days_active) || 0;
-      const score = scoreMap.get(row.btc_address) ?? (signalCount * 10 + streak * 5 + daysActive * 2);
-      const info = nameMap.get(row.btc_address);
-      const avatarAddr = info?.btcAddress ?? row.btc_address;
+  const correspondentsList = bundle.correspondents.map((row) => {
+    const signalCount = Number(row.signal_count) || 0;
+    const streak = Number(row.current_streak) || 0;
+    const longestStreak = Number(row.longest_streak) || 0;
+    const daysActive = Number(row.days_active) || 0;
+    const score = scoreMap.get(row.btc_address) ?? 0;
+    const info = nameMap.get(row.btc_address);
+    const avatarAddr = info?.btcAddress ?? row.btc_address;
 
-      return {
-        address: row.btc_address,
-        addressShort: truncAddr(row.btc_address),
-        beats: beatsByAddress.get(row.btc_address) ?? [],
-        signalCount,
-        streak,
-        longestStreak,
-        daysActive,
-        lastActive: row.last_signal_date ?? null,
-        score,
-        earnings: { total: earningsMap.get(row.btc_address) ?? 0, recentPayments: [] as unknown[] },
-        display_name: info?.name ?? null,
-        avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
-        registered: info?.name !== null && info?.name !== undefined,
-      };
-    }),
-    total: bundle.correspondents.length,
+    return {
+      address: row.btc_address,
+      addressShort: truncAddr(row.btc_address),
+      beats: beatsByAddress.get(row.btc_address) ?? [],
+      signalCount,
+      streak,
+      longestStreak,
+      daysActive,
+      lastActive: row.last_signal_date ?? null,
+      score,
+      earnings: { total: earningsMap.get(row.btc_address) ?? 0, recentPayments: [] as unknown[] },
+      display_name: info?.name ?? null,
+      avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
+      registered: info?.name !== null && info?.name !== undefined,
+    };
+  });
+
+  // Sort by score so the homepage sidebar reflects actual leaderboard ranking.
+  correspondentsList.sort((a, b) => b.score - a.score || b.signalCount - a.signalCount);
+
+  const correspondentsPayload = {
+    correspondents: correspondentsList,
+    total: correspondentsList.length,
   };
 
   // --- Signals ---
