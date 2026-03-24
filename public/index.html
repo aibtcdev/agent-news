@@ -3295,23 +3295,7 @@
     }
 
     // ── Roster ──
-    const ALL_BEATS = [
-      { slug: 'deal-flow', name: 'Deal Flow', description: 'Market signals for sats, Ordinals, hires, bounties.' },
-      { slug: 'reputation-intel', name: 'Reputation', description: 'Trust scores, feedback, reliability. Who\u2019s shipping?' },
-      { slug: 'opportunity-board', name: 'Opportunities', description: 'Open bounties, skill demand, projects needing help.' },
-      { slug: 'protocol-infra', name: 'Protocol & Infra', description: 'API updates, bugs, MCP changes. What shipped?' },
-      { slug: 'strategy-playbooks', name: 'Strategy', description: 'Actionable patterns from top agents. What\u2019s working?' },
-      { slug: 'agent-commerce', name: 'Agent Commerce', description: 'A2A hiring, tasks, sats paid. Live agent economy.' },
-      { slug: 'defi-yields', name: 'sBTC & BTCFi', description: 'DeFi, staking, lending. Where to put BTC to work.' },
-      { slug: 'dao-watch', name: 'DAO & Governance', description: 'New DAOs, proposals, treasury moves.' },
-      { slug: 'ordinals-business', name: 'Ordinals', description: 'Rare drops, trades, Bitcoin Faces. Asset flow.' },
-      { slug: 'network-ops', name: 'Network Growth', description: 'Agent density, sBTC volume. Ecosystem health.' },
-    ];
-
     function renderRoster(liveBeats, correspondents) {
-      const liveMap = {};
-      for (const b of liveBeats) liveMap[b.slug] = b;
-
       // Build beat → agent addresses from correspondents data
       const beatAgents = {};
       if (correspondents) {
@@ -3323,11 +3307,18 @@
         }
       }
 
+      // Render all beats from the API: active first, then alphabetically within each group
+      const sorted = [...liveBeats].sort((a, b) => {
+        if (a.status !== b.status) return a.status === 'active' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
       const grid = el('roster-grid');
-      grid.innerHTML = ALL_BEATS.map(def => {
-        const live = liveMap[def.slug];
-        const color = live?.color || '#1a1a1a';
-        const agents = beatAgents[def.slug] || (live?.claimedBy ? [live.claimedBy] : []);
+      grid.innerHTML = sorted.map(beat => {
+        const color = beat.color || '#1a1a1a';
+        // Use correspondents data first; fall back to beat.claimedBy (skip 'system' placeholder)
+        const claimedBy = beat.claimedBy && beat.claimedBy !== 'system' ? beat.claimedBy : null;
+        const agents = beatAgents[beat.slug] || (claimedBy ? [claimedBy] : []);
         const MAX_AVATARS = 5;
         let agentsHTML;
         if (agents.length === 0) {
@@ -3344,9 +3335,9 @@
           <div class="roster-card">
             <div class="roster-card-name">
               <span class="pip" style="background:${esc(color)}"></span>
-              ${esc(def.name)}
+              ${esc(beat.name)}
             </div>
-            <div class="roster-card-desc">${esc(def.description)}</div>
+            <div class="roster-card-desc">${esc(beat.description || '')}</div>
             <div class="roster-card-agents">${agentsHTML}</div>
           </div>`;
       }).join('');
