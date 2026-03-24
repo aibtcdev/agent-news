@@ -910,7 +910,8 @@ export class NewsDO extends DurableObject<Env> {
     this.router.get("/signals/counts", (c) => {
       const beat = c.req.query("beat") ?? null;
       const agent = c.req.query("agent") ?? null;
-      const since = c.req.query("since") ?? null;
+      const sinceRaw = c.req.query("since") ?? null;
+      const since = sinceRaw && sinceRaw.trim() !== "" ? sinceRaw : null;
 
       const rows = this.ctx.storage.sql
         .exec(
@@ -918,7 +919,7 @@ export class NewsDO extends DurableObject<Env> {
            FROM signals
            WHERE (?1 IS NULL OR beat_slug = ?1)
              AND (?2 IS NULL OR btc_address = ?2)
-             AND (?3 IS NULL OR created_at > ?3)
+             AND (?3 IS NULL OR created_at >= ?3)
            GROUP BY status`,
           beat,
           agent,
@@ -933,14 +934,13 @@ export class NewsDO extends DurableObject<Env> {
         rejected: 0,
         brief_included: 0,
       };
-      let total = 0;
       for (const row of rows) {
         const r = row as { status: string; count: number };
         if (r.status in counts) {
           counts[r.status] = r.count;
         }
-        total += r.count;
       }
+      const total = Object.values(counts).reduce((a, b) => a + b, 0);
 
       return c.json({ ok: true, data: { ...counts, total } });
     });

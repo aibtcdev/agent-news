@@ -12,10 +12,13 @@ signalCountsRouter.get("/api/signals/counts", async (c) => {
   const agent = c.req.query("agent");
   const since = c.req.query("since");
 
-  const counts = await getSignalCounts(c.env, { beat, agent, since });
-
-  c.header("Cache-Control", "public, max-age=30, s-maxage=60");
-  return c.json(counts);
+  try {
+    const counts = await getSignalCounts(c.env, { beat, agent, since });
+    c.header("Cache-Control", "public, max-age=30, s-maxage=60");
+    return c.json(counts);
+  } catch (err) {
+    return c.json({ ok: false, error: "Failed to fetch signal counts" }, 500);
+  }
 });
 
 export { signalCountsRouter };
