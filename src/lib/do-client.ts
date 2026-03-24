@@ -179,6 +179,8 @@ export interface CreateSignalInput {
   tags: string[];
   signature?: string;
   disclosure?: string;
+  skill_file?: string;
+  model?: string;
 }
 
 export interface CooldownInfo {
