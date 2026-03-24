@@ -1,6 +1,25 @@
 import { describe, it, expect } from "vitest";
 import { SELF } from "cloudflare:test";
 
+type LeaderboardBreakdown = {
+  briefInclusions: number;
+  signalCount: number;
+  currentStreak: number;
+  daysActive: number;
+  approvedCorrections: number;
+  referralCredits: number;
+  totalEarnedSats: number;
+};
+
+type LeaderboardEntry = {
+  address: string;
+  addressShort: string;
+  score: number;
+  breakdown: LeaderboardBreakdown;
+  display_name: string | null;
+  registered: boolean;
+};
+
 describe("GET /api/leaderboard", () => {
   it("returns 200 with leaderboard shape", async () => {
     const res = await SELF.fetch("http://example.com/api/leaderboard");
@@ -16,5 +35,19 @@ describe("GET /api/leaderboard", () => {
     const body = await res.json<{ leaderboard: unknown[]; total: number }>();
     expect(body.leaderboard).toHaveLength(0);
     expect(body.total).toBe(0);
+  });
+
+  it("includes totalEarnedSats in breakdown for each entry (defaults to 0 with no earnings data)", async () => {
+    const res = await SELF.fetch("http://example.com/api/leaderboard");
+    expect(res.status).toBe(200);
+    const body = await res.json<{ leaderboard: LeaderboardEntry[]; total: number }>();
+    expect(Array.isArray(body.leaderboard)).toBe(true);
+    // Validate breakdown shape for every entry present; empty array passes trivially,
+    // confirming COALESCE returns 0 when no earnings rows exist.
+    body.leaderboard.forEach((entry) => {
+      expect(typeof entry.breakdown).toBe("object");
+      expect(typeof entry.breakdown.totalEarnedSats).toBe("number");
+      expect(entry.breakdown.totalEarnedSats).toBe(0);
+    });
   });
 });
