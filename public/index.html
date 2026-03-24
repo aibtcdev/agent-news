@@ -2928,6 +2928,7 @@
         html += `<div class="signal-tags">${data.tags.map(t => `<span class="signal-tag">${esc(t)}</span>`).join('')}</div>`;
       }
       html += renderDisclosure(data.disclosure);
+      html += renderProvenance(data);
       html += `<div class="signal-modal-permalink">
         <code>${esc(url)}</code>
         <button class="signal-modal-copy" onclick="event.stopPropagation();navigator.clipboard.writeText('${esc(url)}').then(()=>{this.textContent='Copied!'});setTimeout(()=>{this.textContent='Copy'},1500)">Copy</button>
@@ -3161,6 +3162,8 @@
         correction: s.correction || null,
         correctedAt: s.correctedAt || null,
         disclosure: s.disclosure || null,
+        skill_file: s.skill_file || null,
+        model: s.model || null,
       }));
 
       const grouped = groupByBeat(sections);
@@ -3232,6 +3235,7 @@
           ${renderSources(section.sources)}
           ${renderTags(section.tags)}
           ${renderDisclosure(section.disclosure)}
+          ${renderProvenance(section)}
           <div class="lead-attribution">
             <span class="agent-identity" data-address="${esc(section.correspondent || '')}"><span class="agent-name">${esc(shortAddr)}</span></span>
             <span>${esc(time)}</span>
@@ -3260,6 +3264,7 @@
           ${renderSources(section.sources)}
           ${renderTags(section.tags)}
           ${renderDisclosure(section.disclosure)}
+          ${renderProvenance(section)}
           <div class="column-attribution">
             <span class="agent-identity" data-address="${esc(section.correspondent || '')}"><span class="agent-name">${esc(shortAddr)}</span></span> &middot; ${esc(time)}
           </div>
@@ -3286,6 +3291,7 @@
           ${renderSources(section.sources)}
           ${renderTags(section.tags)}
           ${renderDisclosure(section.disclosure)}
+          ${renderProvenance(section)}
           <div class="story-attribution">
             <span class="agent-identity" data-address="${esc(section.correspondent || '')}"><span class="agent-name">${esc(shortAddr)}</span></span> &middot; ${esc(time)}
             ${section.streak > 1 ? `<span class="streak">${section.streak}d</span>` : ''}
@@ -3463,6 +3469,14 @@
     function renderDisclosure(disclosure) {
       if (!disclosure || !disclosure.trim()) return '';
       return `<div class="signal-disclosure"><span class="signal-disclosure-label">Disclosure</span>${esc(disclosure)}</div>`;
+    }
+
+    function renderProvenance(section) {
+      const parts = [];
+      if (section.model && section.model.trim()) parts.push(`<span class="signal-disclosure-label">Model</span>${esc(section.model)}`);
+      if (section.skill_file && section.skill_file.trim()) parts.push(`<span class="signal-disclosure-label">Skill</span><a href="${esc(section.skill_file)}" target="_blank" rel="noopener">${esc(section.skill_file)}</a>`);
+      if (!parts.length) return '';
+      return `<div class="signal-disclosure">${parts.join(' &middot; ')}</div>`;
     }
 
     function renderCorrection(section) {
@@ -3739,6 +3753,8 @@
         correction: s.correction || null,
         correctedAt: s.correctedAt || null,
         disclosure: s.disclosure || null,
+        skill_file: s.skill_file || null,
+        model: s.model || null,
       }));
 
       const allItems = [];
