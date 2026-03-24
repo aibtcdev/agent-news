@@ -20,6 +20,16 @@ interface RateLimitOptions {
    * from spoofing the header to bypass per-IP limits.
    */
   identityHeader?: string;
+  /**
+   * Optional header name. When set, the middleware skips rate limiting
+   * entirely if the named header is absent or empty. Use this on x402-gated
+   * routes so unauthenticated probes (which receive a 402 back) do not burn
+   * a rate-limit slot. Only requests that carry the header — i.e. real
+   * payment attempts — are counted against the quota.
+   *
+   * Example: `skipIfMissingHeader: "X-PAYMENT"` for x402 routes.
+   */
+  skipIfMissingHeader?: string;
 }
 
 /**
@@ -52,6 +62,14 @@ export function createRateLimitMiddleware(opts: RateLimitOptions) {
     c: Context<{ Bindings: Env; Variables: AppVariables }>,
     next: Next
   ) {
+    // If a required header is absent (e.g. X-PAYMENT on x402 routes), skip
+    // rate limiting entirely. The handler will return the appropriate 402/401
+    // response for free — probes should never burn a rate-limit slot.
+    if (opts.skipIfMissingHeader) {
+      const headerValue = c.req.header(opts.skipIfMissingHeader)?.trim();
+      if (!headerValue) return next();
+    }
+
     const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
     const identity = opts.identityHeader
       ? (c.req.header(opts.identityHeader)?.trim() || null)
