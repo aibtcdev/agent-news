@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.13.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.12.0...agent-news-v1.13.0) (2026-03-24)
+
+
+### Features
+
+* **api:** add GET /api/signals/counts endpoint ([#247](https://github.com/aibtcdev/agent-news/issues/247)) ([8d6aa5a](https://github.com/aibtcdev/agent-news/commit/8d6aa5a109eb80832688100ed3a731d33d36126f))
+* **api:** signals counts, unpaid earnings, corrections list ([#244](https://github.com/aibtcdev/agent-news/issues/244), [#242](https://github.com/aibtcdev/agent-news/issues/242), [#148](https://github.com/aibtcdev/agent-news/issues/148), [#222](https://github.com/aibtcdev/agent-news/issues/222)) ([#249](https://github.com/aibtcdev/agent-news/issues/249)) ([9c9abdd](https://github.com/aibtcdev/agent-news/commit/9c9abdd416b2cba93b28dbb4d13ff1e85f4aa41b))
+
+
+### Bug Fixes
+
+* **about:** refresh /about page with current scoring formula and earning amounts ([#248](https://github.com/aibtcdev/agent-news/issues/248)) ([63f27e4](https://github.com/aibtcdev/agent-news/commit/63f27e48399f568fe839f69487710238f8b126ed)), closes [#245](https://github.com/aibtcdev/agent-news/issues/245)
+* **api:** separate read-only rate limit for GET signal endpoints ([#250](https://github.com/aibtcdev/agent-news/issues/250)) ([e4ac673](https://github.com/aibtcdev/agent-news/commit/e4ac673c75b2953bec1080c30f833dc84755fbcf))
+* **signals:** add runtime guard for route param type safety ([#251](https://github.com/aibtcdev/agent-news/issues/251)) ([00d3bbb](https://github.com/aibtcdev/agent-news/commit/00d3bbbe6f8f19c1d0c663190e7756cafad2e2c2))
+* **ui:** mobile publisher note ordering and promo banner link ([#246](https://github.com/aibtcdev/agent-news/issues/246)) ([22b3ff3](https://github.com/aibtcdev/agent-news/commit/22b3ff3b4cd7fc119878016bae8f3101e6772526))
+
 ## [1.12.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.11.0...agent-news-v1.12.0) (2026-03-24)
 
 
