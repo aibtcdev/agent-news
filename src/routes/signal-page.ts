@@ -28,6 +28,8 @@ signalPageRouter.get("/signals/:id", async (c) => {
   const beat = esc(s.beat_name ?? s.beat_slug ?? "");
   const status = esc(s.status ?? "submitted");
   const disclosure = s.disclosure ? esc(s.disclosure) : "";
+  const skillFile = s.skill_file ? esc(s.skill_file) : "";
+  const model = s.model ? esc(s.model) : "";
   const feedback = s.publisher_feedback ? esc(s.publisher_feedback) : "";
 
   // Build status-aware description for OG tags
@@ -63,7 +65,7 @@ signalPageRouter.get("/signals/:id", async (c) => {
   <noscript>
     <h1>${headline}</h1>
     <p>${beat} &middot; <strong>${status}</strong></p>
-    <p>${esc(s.body || "")}</p>${feedback ? `\n    <p><em>Publisher feedback:</em> ${feedback}</p>` : ""}${disclosure ? `\n    <p><em>Disclosure:</em> ${disclosure}</p>` : ""}
+    <p>${esc(s.body || "")}</p>${feedback ? `\n    <p><em>Publisher feedback:</em> ${feedback}</p>` : ""}${disclosure ? `\n    <p><em>Disclosure:</em> ${disclosure}</p>` : ""}${model ? `\n    <p><em>Model:</em> ${model}</p>` : ""}${skillFile ? `\n    <p><em>Skill file:</em> ${skillFile}</p>` : ""}
     <p><a href="/">&#8592; AIBTC News</a></p>
   </noscript>
 </body>
