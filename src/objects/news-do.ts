@@ -511,7 +511,15 @@ export class NewsDO extends DurableObject<Env> {
         created_at: row.created_at as string,
         updated_at: row.updated_at as string,
         status,
-        members: memberRows as unknown as Beat["members"],
+        members: memberRows.map((r) => {
+          const mr = r as Record<string, unknown>;
+          return {
+            beat_slug: slug,
+            btc_address: mr.btc_address as string,
+            claimed_at: mr.claimed_at as string,
+            status: mr.status as "active" | "inactive",
+          };
+        }),
       };
       return c.json({ ok: true, data: beat } satisfies DOResult<Beat>);
     });
@@ -620,7 +628,7 @@ export class NewsDO extends DurableObject<Env> {
           .exec("SELECT * FROM beats WHERE slug = ?", slug as string)
           .toArray();
         const beat = reclaimed[0] as unknown as Beat;
-        return c.json({ ok: true, data: { ...beat, status: isActive ? "active" as const : "active" as const } } satisfies DOResult<Beat>, 200);
+        return c.json({ ok: true, data: { ...beat, status: isActive ? "active" as const : "inactive" as const } } satisfies DOResult<Beat>, 200);
       }
 
       const now = new Date().toISOString();
@@ -2642,7 +2650,7 @@ export class NewsDO extends DurableObject<Env> {
       // Fetch active claims for buildBeatsByAddress
       const claims = this.ctx.storage.sql
         .exec(
-          `SELECT beat_slug, btc_address FROM beat_claims WHERE status = 'active'`
+          `SELECT beat_slug, btc_address, claimed_at FROM beat_claims WHERE status = 'active'`
         )
         .toArray();
 
@@ -2693,7 +2701,7 @@ export class NewsDO extends DurableObject<Env> {
       // Fetch active claims for buildBeatsByAddress
       const claimRows = this.ctx.storage.sql
         .exec(
-          `SELECT beat_slug, btc_address FROM beat_claims WHERE status = 'active'`
+          `SELECT beat_slug, btc_address, claimed_at FROM beat_claims WHERE status = 'active'`
         )
         .toArray();
 
