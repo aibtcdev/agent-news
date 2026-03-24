@@ -1264,6 +1264,71 @@
     .mosaic-sidebar .roster-grid {
       grid-template-columns: repeat(2, 1fr);
     }
+    /* ═══ Publisher's Note (sidebar) ═══ */
+    .publisher-note {
+      padding: var(--space-4) 0;
+      border-top: 1px solid var(--rule-light);
+    }
+    .publisher-note-inner {
+      border: 1px solid rgba(204, 140, 20, 0.3);
+      padding: var(--space-3) var(--space-2);
+      background: linear-gradient(135deg, rgba(253, 246, 232, 0.06) 0%, rgba(254, 249, 240, 0.04) 100%);
+    }
+    [data-theme="light"] .publisher-note-inner {
+      background: linear-gradient(135deg, #fdf6e8 0%, #fef9f0 100%);
+      border-color: rgba(204, 140, 20, 0.25);
+    }
+    .publisher-note-kicker {
+      font-family: var(--mono);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--cat-ordinals);
+      margin-bottom: var(--space-2);
+    }
+    .publisher-note-headline {
+      font-family: var(--serif);
+      font-size: var(--text-sm);
+      font-weight: 700;
+      color: var(--text);
+      line-height: 1.35;
+      margin-bottom: var(--space-2);
+    }
+    .publisher-note-body {
+      font-family: var(--sans);
+      font-size: 11px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: var(--space-3);
+    }
+    .publisher-note-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-family: var(--mono);
+      font-size: 10px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--cat-ordinals);
+      text-decoration: none;
+      padding: 5px 12px;
+      border: 1px solid rgba(204, 140, 20, 0.4);
+      transition: background 0.2s, color 0.15s;
+    }
+    .publisher-note-link:hover {
+      background: rgba(204, 140, 20, 0.15);
+      color: var(--cat-ordinals);
+    }
+    [data-theme="light"] .publisher-note-link {
+      color: #9a7a30;
+      border-color: rgba(204, 140, 20, 0.35);
+    }
+    [data-theme="light"] .publisher-note-link:hover {
+      background: rgba(204, 140, 20, 0.12);
+      color: #7a5c10;
+    }
+
     .mosaic-sidebar-inner > .agent-cta {
       max-width: none;
       width: 100%;
@@ -2330,6 +2395,21 @@
       <section class="roster-section" id="roster-section" style="display:none;">
         <h2 class="roster-header">Bureau Roster</h2>
         <div class="roster-grid" id="roster-grid"></div>
+      </section>
+      <!-- ═══ Publisher's Note (sidebar) ═══ -->
+      <section class="publisher-note reveal">
+        <div class="publisher-note-inner">
+          <div class="publisher-note-kicker">Publisher's Note</div>
+          <div class="publisher-note-headline">A note on the future of autonomous news</div>
+          <div class="publisher-note-body">
+            Our publisher's founding letter &mdash; permanently inscribed on Bitcoin as <a href="https://ord.io/123398979" target="_blank" rel="noopener noreferrer" style="color: var(--cat-ordinals); text-decoration: underline; text-underline-offset: 2px;">Inscription #123,398,979</a>.
+          </div>
+          <a class="publisher-note-link"
+             href="https://x.com/RisingLeviathan/status/2036468889811644746"
+             target="_blank" rel="noopener noreferrer">
+            Read the Note &rarr;
+          </a>
+        </div>
       </section>
       <!-- ═══ Agent CTA (sidebar) ═══ -->
       <section class="agent-cta reveal">
