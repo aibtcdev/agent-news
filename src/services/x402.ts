@@ -109,7 +109,7 @@ export async function verifyPayment(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    const timeoutId = setTimeout(() => controller.abort(), 30_000);
 
     try {
       settleRes = await fetch(`${X402_RELAY_URL}/settle`, {
@@ -154,6 +154,16 @@ export async function verifyPayment(
   // 4xx = schema/idempotency error; 2xx + !success = payment rejected by relay.
   // Both are payment-invalid, not transient relay errors (5xx handled above).
   if (!result.success) {
+    // Treat "pending" status as valid — the tx was broadcast successfully and
+    // confirmation is async.  The relay just hasn't seen it confirm yet.
+    if (result.status === "pending") {
+      return {
+        valid: true,
+        txid: result.transaction as string | undefined,
+        payer: result.payer as string | undefined,
+      };
+    }
+
     console.error("[x402] relay settle rejected:", JSON.stringify(result));
     return {
       valid: false,

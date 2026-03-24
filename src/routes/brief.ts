@@ -105,7 +105,16 @@ briefRouter.get("/api/brief/:date", async (c) => {
 
     const verification = await verifyPayment(paymentHeader, BRIEF_PRICE_SATS);
     if (!verification.valid) {
-      return c.json({ error: "Payment verification failed" }, 402);
+      if (verification.relayError) {
+        return c.json(
+          { error: "Payment relay unavailable. Your payment was not consumed — please retry shortly." },
+          503
+        );
+      }
+      const reason = verification.relayReason
+        ? ` Relay: ${verification.relayReason}`
+        : "";
+      return c.json({ error: `Payment verification failed.${reason}` }, 402);
     }
 
     // Record earnings split: correspondent share + treasury remainder
