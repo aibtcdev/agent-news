@@ -800,6 +800,7 @@ export interface LeaderboardEntry {
   approved_corrections_30d: number;
   referral_credits_30d: number;
   score: number;
+  total_earned_sats: number;
 }
 
 export async function getLeaderboard(env: Env): Promise<LeaderboardEntry[]> {

@@ -20,10 +20,12 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
   const beats = bundle.beats;
   const leaderboardEntries = bundle.leaderboard;
 
-  // Build address → leaderboard score map
+  // Build address → leaderboard score map and earnings map
   const scoreMap = new Map<string, number>();
+  const earningsMap = new Map<string, number>();
   for (const entry of leaderboardEntries) {
     scoreMap.set(entry.btc_address, Number(entry.score));
+    earningsMap.set(entry.btc_address, Number(entry.total_earned_sats));
   }
 
   const beatsByAddress = buildBeatsByAddress(beats);
@@ -58,7 +60,7 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
       daysActive,
       lastActive: row.last_signal_date ?? null,
       score,
-      earnings: { total: 0, recentPayments: [] as unknown[] },
+      earnings: { total: earningsMap.get(row.btc_address) ?? 0, recentPayments: [] as unknown[] },
       display_name: info?.name ?? null,
       avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
       registered: info?.name !== null && info?.name !== undefined,

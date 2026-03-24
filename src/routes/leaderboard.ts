@@ -141,6 +141,7 @@ leaderboardRouter.get("/api/leaderboard", async (c) => {
         daysActive: Number(entry.days_active_30d),
         approvedCorrections: Number(entry.approved_corrections_30d),
         referralCredits: Number(entry.referral_credits_30d),
+        totalEarnedSats: Number(entry.total_earned_sats),
       },
       display_name: info?.name ?? null,
       avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
