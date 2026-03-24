@@ -1369,6 +1369,31 @@ export class NewsDO extends DurableObject<Env> {
       });
     });
 
+    // GET /classifieds/pending — list classifieds awaiting review (Publisher-only)
+    // NOTE: Must be registered before /classifieds/:id to avoid the wildcard capturing "pending"
+    this.router.get("/classifieds/pending", (c) => {
+      const btcAddress = c.req.query("btc_address");
+      if (!btcAddress) {
+        return c.json({ ok: false, error: "Missing btc_address" } satisfies DOResult<Classified[]>, 400);
+      }
+      const pub = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!pub.ok) {
+        return c.json({ ok: false, error: pub.error } satisfies DOResult<Classified[]>, pub.status);
+      }
+
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM classifieds
+           WHERE status = 'pending_review'
+           ORDER BY created_at ASC`
+        )
+        .toArray();
+      return c.json({
+        ok: true,
+        data: rows as unknown as Classified[],
+      } satisfies DOResult<Classified[]>);
+    });
+
     // GET /classifieds/:id — get a single classified
     this.router.get("/classifieds/:id", (c) => {
       const id = c.req.param("id");
@@ -1434,30 +1459,6 @@ export class NewsDO extends DurableObject<Env> {
         { ok: true, data: rows[0] as unknown as Classified } satisfies DOResult<Classified>,
         201
       );
-    });
-
-    // GET /classifieds/pending — list classifieds awaiting review (Publisher-only)
-    this.router.get("/classifieds/pending", (c) => {
-      const btcAddress = c.req.query("btc_address");
-      if (!btcAddress) {
-        return c.json({ ok: false, error: "Missing btc_address" } satisfies DOResult<Classified[]>, 400);
-      }
-      const pub = verifyPublisher(this.ctx.storage.sql, btcAddress);
-      if (!pub.ok) {
-        return c.json({ ok: false, error: pub.error } satisfies DOResult<Classified[]>, pub.status);
-      }
-
-      const rows = this.ctx.storage.sql
-        .exec(
-          `SELECT * FROM classifieds
-           WHERE status = 'pending_review'
-           ORDER BY created_at ASC`
-        )
-        .toArray();
-      return c.json({
-        ok: true,
-        data: rows as unknown as Classified[],
-      } satisfies DOResult<Classified[]>);
     });
 
     // PATCH /classifieds/:id/review — Publisher approves or rejects a classified
