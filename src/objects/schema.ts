@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS signals (
   status            TEXT NOT NULL DEFAULT 'submitted',
   publisher_feedback TEXT,
   reviewed_at       TEXT,
-  disclosure        TEXT NOT NULL DEFAULT ''
+  disclosure        TEXT NOT NULL DEFAULT '',
+  skill_file        TEXT NOT NULL DEFAULT '',
+  model             TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS signal_tags (
@@ -186,6 +188,17 @@ export const MIGRATION_SNAPSHOTS_SQL = [
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshot_week
      ON leaderboard_snapshots(snapshot_type, week)
      WHERE week IS NOT NULL`,
+] as const;
+
+/**
+ * Agent provenance migration.
+ * Adds skill_file and model columns to signals so correspondents declare
+ * which skill file and model they used to produce each signal.
+ * Soft-launched: accepted but not required. Enforcement in a future release.
+ */
+export const MIGRATION_AGENT_PROVENANCE_SQL = [
+  "ALTER TABLE signals ADD COLUMN skill_file TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE signals ADD COLUMN model TEXT NOT NULL DEFAULT ''",
 ] as const;
 
 /**
