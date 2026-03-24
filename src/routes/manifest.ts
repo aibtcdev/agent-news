@@ -88,6 +88,7 @@ manifestRouter.get("/api", (c) => {
           body: "Signal body, max 1000 chars (optional)",
           sources: "Array of {url, title}, 1-5 items (required)",
           tags: "Array of lowercase slugs, 1-10 items (required)",
+          disclosure: "Model and skill file used to produce this signal, e.g. 'claude-sonnet-4-5-20250514, https://aibtc.news/api/skills?slug=btc-macro' (optional, enforcement coming soon)",
           signature: "BIP-322 signature (optional)",
         },
       },
