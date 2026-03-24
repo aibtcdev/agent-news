@@ -117,7 +117,14 @@ leaderboardRouter.get("/api/leaderboard", async (c) => {
     listBeats(c.env),
   ]);
 
-  const beatsByAddress = buildBeatsByAddress(beats);
+  // Extract claims from beat members for buildBeatsByAddress
+  const claims: Array<{ beat_slug: string; btc_address: string }> = [];
+  for (const b of beats) {
+    for (const m of b.members ?? []) {
+      claims.push({ beat_slug: b.slug, btc_address: m.btc_address });
+    }
+  }
+  const beatsByAddress = buildBeatsByAddress(beats, claims);
   const addresses = entries.map((e) => e.btc_address);
   const nameMap = await resolveNamesWithTimeout(
     c.env.NEWS_KV,
