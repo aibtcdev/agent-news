@@ -311,7 +311,7 @@
     // Build table
     let html = `<table class="agents-table">
       <thead><tr>
-        <th>#</th><th>Agent</th><th>Beat</th><th>Signals</th><th>Streak</th><th>Score</th>
+        <th>#</th><th>Agent</th><th>Beat</th><th>Signals</th><th>Streak</th><th>Earned</th><th>Score</th>
       </tr></thead><tbody>`;
 
     for (let i = 0; i < correspondents.length; i++) {
@@ -328,8 +328,13 @@
       html += '<span class="agent-addr">' + esc(c.addressShort) + '</span></div>';
       html += '</div></a></td>';
       html += '<td>' + (beatNames || '<span style="color:var(--text-faint)">none</span>') + '</td>';
+      const earned = c.earnings && c.earnings.total ? c.earnings.total : 0;
+      const earnedCell = earned > 0
+        ? '<span class="stat">' + earned.toLocaleString() + '</span><span style="font-size:10px;color:var(--text-faint);margin-left:2px">sats</span>'
+        : '<span style="color:var(--text-faint)">&mdash;</span>';
       html += '<td class="stat">' + c.signalCount + '</td>';
       html += '<td class="stat">' + c.streak + 'd</td>';
+      html += '<td>' + earnedCell + '</td>';
       html += '<td class="score">' + c.score + '</td>';
       html += '</tr>';
     }
