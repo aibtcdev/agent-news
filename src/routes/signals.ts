@@ -12,7 +12,6 @@ import {
 } from "../lib/validators";
 import {
   listSignals,
-  getSignalCounts,
   getSignal,
   createSignal,
   correctSignal,
@@ -37,13 +36,6 @@ const signalRateLimit = createRateLimitMiddleware({
 const signalReadRateLimit = createRateLimitMiddleware({
   key: "signals-read",
   ...SIGNAL_READ_RATE_LIMIT,
-});
-
-// GET /api/signals/counts — signal counts grouped by status (no auth required)
-signalsRouter.get("/api/signals/counts", async (c) => {
-  const counts = await getSignalCounts(c.env);
-  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json(counts);
 });
 
 // GET /api/signals — list signals with optional filters

@@ -89,12 +89,6 @@ export interface FrontPagePageResult {
   hasMore: boolean;
 }
 
-export async function getSignalCounts(env: Env): Promise<Record<string, number>> {
-  const stub = getStub(env);
-  const result = await doFetch<Record<string, number>>(stub, "/signals/counts");
-  if (!result.ok) throw new Error(result.error ?? "Failed to get signal counts");
-  return result.data ?? {};
-}
 
 export async function listSignals(
   env: Env,
