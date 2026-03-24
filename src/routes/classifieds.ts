@@ -167,10 +167,14 @@ classifiedsRouter.post(
       logger.warn("payment verification failed for POST /api/classifieds", {
         category,
         headline,
+        relayReason: verification.relayReason,
       });
+      const reason = verification.relayReason
+        ? ` Relay: ${verification.relayReason}`
+        : "";
       return buildPaymentRequired({
         amount: CLASSIFIED_PRICE_SATS,
-        description: `Payment verification failed. Please pay ${CLASSIFIED_PRICE_SATS} sats sBTC to place a classified ad.`,
+        description: `Payment verification failed.${reason} Please pay ${CLASSIFIED_PRICE_SATS} sats sBTC to place a classified ad.`,
       });
     }
 

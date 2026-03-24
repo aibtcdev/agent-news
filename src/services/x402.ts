@@ -27,6 +27,8 @@ export interface PaymentVerifyResult {
    * who already paid does not retry payment unnecessarily.
    */
   relayError?: boolean;
+  /** Human-readable reason from the relay when settlement fails (for diagnostics). */
+  relayReason?: string;
 }
 
 /**
@@ -152,7 +154,11 @@ export async function verifyPayment(
   // 4xx = schema/idempotency error; 2xx + !success = payment rejected by relay.
   // Both are payment-invalid, not transient relay errors (5xx handled above).
   if (!result.success) {
-    return { valid: false };
+    console.error("[x402] relay settle rejected:", JSON.stringify(result));
+    return {
+      valid: false,
+      relayReason: (result.error as string) ?? (result.message as string) ?? JSON.stringify(result),
+    };
   }
 
   return {
