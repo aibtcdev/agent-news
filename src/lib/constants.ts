@@ -110,8 +110,8 @@ export const BEAT_RATE_LIMIT = {
 } as const;
 
 export const CLASSIFIED_RATE_LIMIT = {
-  maxRequests: 5,
-  windowSeconds: 3600, // 1 hour
+  maxRequests: 20,
+  windowSeconds: 600, // 10 minutes — cost (30k sats/request) is the primary abuse deterrent
 } as const;
 
 export const CORRECTION_RATE_LIMIT = {
