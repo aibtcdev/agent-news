@@ -97,6 +97,8 @@ export async function verifyPayment(
   paymentHeader: string,
   amount: number
 ): Promise<PaymentVerifyResult> {
+  // Decode the base64 payment header to extract the transaction hex.
+  // The x402 PaymentPayloadV2 wraps the tx inside payload.transaction.
   let paymentPayload: Record<string, unknown>;
   try {
     paymentPayload = JSON.parse(atob(paymentHeader)) as Record<string, unknown>;
@@ -105,26 +107,33 @@ export async function verifyPayment(
     return { valid: false };
   }
 
-  let settleRes: Response;
+  // Extract the raw transaction hex from the x402 PaymentPayloadV2 envelope.
+  const payload = paymentPayload.payload as Record<string, unknown> | undefined;
+  const txHex = (payload?.transaction as string) ?? (paymentPayload.transaction as string);
+  if (!txHex) {
+    return { valid: false, relayReason: "No transaction found in payment payload" };
+  }
+
+  // Use /relay (not /settle) — /relay sponsors the tx before broadcasting.
+  // /settle expects a fully-sponsored tx which x402 clients don't produce;
+  // they build with sponsored:true + fee:0 (empty sponsor auth slot).
+  let relayRes: Response;
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10_000);
+    const timeoutId = setTimeout(() => controller.abort(), 60_000);
 
     try {
-      settleRes = await fetch(`${X402_RELAY_URL}/settle`, {
+      relayRes = await fetch(`${X402_RELAY_URL}/relay`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         signal: controller.signal,
         body: JSON.stringify({
-          x402Version: 2,
-          paymentPayload,
-          paymentRequirements: {
-            scheme: "exact",
-            network: "stacks:1",
-            amount: String(amount),
-            asset: SBTC_CONTRACT_MAINNET,
-            payTo: TREASURY_STX_ADDRESS,
+          transaction: txHex,
+          settle: {
+            expectedRecipient: TREASURY_STX_ADDRESS,
+            minAmount: String(amount),
+            tokenType: "sBTC",
             maxTimeoutSeconds: 60,
           },
         }),
@@ -138,32 +147,33 @@ export async function verifyPayment(
   }
 
   // 5xx from relay = relay-side problem, not an invalid payment
-  if (settleRes.status >= 500) {
+  if (relayRes.status >= 500) {
     return { valid: false, relayError: true };
   }
 
   let result: Record<string, unknown>;
   try {
-    result = (await settleRes.json()) as Record<string, unknown>;
+    result = (await relayRes.json()) as Record<string, unknown>;
   } catch {
     // Unexpected non-JSON body from relay = relay error
     return { valid: false, relayError: true };
   }
 
-  // Relay returns 200 for both success and failure — check the success field.
-  // 4xx = schema/idempotency error; 2xx + !success = payment rejected by relay.
-  // Both are payment-invalid, not transient relay errors (5xx handled above).
+  // /relay returns 200 with success:true on success. 4xx responses have error details.
   if (!result.success) {
-    console.error("[x402] relay settle rejected:", JSON.stringify(result));
+    console.error("[x402] relay rejected:", JSON.stringify(result));
     return {
       valid: false,
       relayReason: (result.error as string) ?? (result.message as string) ?? JSON.stringify(result),
     };
   }
 
+  // Extract txid and payer from the relay response.
+  // /relay returns txid at top level and sender inside settlement.
+  const settlement = result.settlement as Record<string, unknown> | undefined;
   return {
     valid: true,
-    txid: result.transaction as string | undefined,
-    payer: result.payer as string | undefined,
+    txid: (result.txid as string) ?? undefined,
+    payer: (settlement?.sender as string) ?? undefined,
   };
 }
