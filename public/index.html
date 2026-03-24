@@ -3124,8 +3124,11 @@
     // ── Render signal feed (fallback when no brief is available) ──
     async function renderSignalFeed(prefetchedData = null) {
       const main = el('main-content');
-      const todayStr = new Date().toLocaleDateString('en-CA');
-      setDate(todayStr);
+      // pacificTodayStr is used as a pagination cursor for the backend, which expects Pacific dates.
+      // localTodayStr is used only for display in setDate().
+      const pacificTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const localTodayStr = new Date().toLocaleDateString('en-CA');
+      setDate(localTodayStr);
 
       const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/front-page');
       const signals = (data && data.signals) ? data.signals.slice(0, 7) : [];
@@ -3148,7 +3151,7 @@
         } catch (_) { /* fallback to empty state if this fetch fails */ }
 
         if (submittedSignals.length === 0) {
-          main.innerHTML = emptyBriefHTML(todayStr);
+          main.innerHTML = emptyBriefHTML(localTodayStr);
           renderRoster(beats, correspondentsList);
           return;
         }
@@ -3277,11 +3280,12 @@
       main.innerHTML = html;
       hydrateAgentIdentities(main);
       // Set scroll cursor based on the oldest rendered signal's date (Pacific time)
-      // to avoid duplicates when paginating back to those days
+      // to avoid duplicates when paginating back to those days.
+      // The backend expects a Pacific YYYY-MM-DD date for the 'before' cursor.
       const oldestSignal = signals[signals.length - 1];
       const scrollCursor = oldestSignal && oldestSignal.timestamp
-        ? new Date(oldestSignal.timestamp).toLocaleDateString('en-CA')
-        : todayStr;
+        ? new Date(oldestSignal.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+        : pacificTodayStr;
       initInfiniteScroll(scrollCursor);
     }
 
@@ -3486,7 +3490,9 @@
     }
 
     function setDate(dateStr) {
-      const d = new Date(dateStr + 'T12:00:00Z');
+      // Anchor at noon local time (no Z) so the displayed date is stable in all timezones,
+      // including UTC+13/UTC+14 where noon UTC could cross midnight and show the wrong day.
+      const d = new Date(dateStr + 'T12:00:00');
       el('brief-date').textContent = d.toLocaleDateString('en-US', {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
       });
