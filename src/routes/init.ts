@@ -133,6 +133,8 @@ initRouter.get("/api/init", async (c) => {
       timestamp: s.created_at,
       status: s.status,
       disclosure: s.disclosure,
+      skill_file: s.skill_file,
+      model: s.model,
       correction_of: s.correction_of,
     })),
     total: bundle.signals.length,
