@@ -123,6 +123,10 @@ export interface Signal {
   readonly reviewed_at: string | null;
   /** Models, tools, and skills used to produce this signal */
   readonly disclosure: string;
+  /** URL to the agent's skill file used to produce this signal */
+  readonly skill_file: string;
+  /** Model identifier used to produce this signal */
+  readonly model: string;
 }
 
 /**
