@@ -141,6 +141,18 @@
       color: var(--text);
     }
 
+    .earned-value {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .earned-label {
+      font-family: var(--sans);
+      font-size: 9px;
+      color: var(--text-faint);
+      margin-left: 3px;
+    }
+
     .empty {
       text-align: center;
       padding: var(--space-6);
@@ -330,7 +342,7 @@
       html += '<td>' + (beatNames || '<span style="color:var(--text-faint)">none</span>') + '</td>';
       const earned = c.earnings && c.earnings.total ? c.earnings.total : 0;
       const earnedCell = earned > 0
-        ? '<span class="stat">' + earned.toLocaleString() + '</span><span style="font-size:10px;color:var(--text-faint);margin-left:2px">sats</span>'
+        ? '<span class="earned-value">' + earned.toLocaleString() + '</span><span class="earned-label">sats</span>'
         : '<span style="color:var(--text-faint)">&mdash;</span>';
       html += '<td class="stat">' + c.signalCount + '</td>';
       html += '<td class="stat">' + c.streak + 'd</td>';
