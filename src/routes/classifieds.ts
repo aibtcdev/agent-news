@@ -50,7 +50,7 @@ const classifiedsRouter = new Hono<{
 
 const classifiedRateLimit = createRateLimitMiddleware({
   key: "classifieds",
-  skipIfMissingHeader: "X-PAYMENT",
+  skipIfMissingHeaders: ["X-PAYMENT", "payment-signature"],
   ...CLASSIFIED_RATE_LIMIT,
 });
 

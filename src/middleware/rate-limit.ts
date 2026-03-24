@@ -21,15 +21,17 @@ interface RateLimitOptions {
    */
   identityHeader?: string;
   /**
-   * Optional header name. When set, the middleware skips rate limiting
-   * entirely if the named header is absent or empty. Use this on x402-gated
-   * routes so unauthenticated probes (which receive a 402 back) do not burn
-   * a rate-limit slot. Only requests that carry the header — i.e. real
-   * payment attempts — are counted against the quota.
+   * One or more header names. When set, the middleware skips rate limiting
+   * entirely if **none** of the listed headers are present or non-empty.
+   * Use this on x402-gated routes so unauthenticated probes (which receive
+   * a 402 back) do not burn a rate-limit slot. Only requests that carry at
+   * least one of the headers — i.e. real payment attempts — are counted
+   * against the quota.
    *
-   * Example: `skipIfMissingHeader: "X-PAYMENT"` for x402 routes.
+   * Accepts a single string or an array for routes that support multiple
+   * header names (e.g. both `X-PAYMENT` and `payment-signature`).
    */
-  skipIfMissingHeader?: string;
+  skipIfMissingHeaders?: string | string[];
 }
 
 /**
@@ -62,12 +64,16 @@ export function createRateLimitMiddleware(opts: RateLimitOptions) {
     c: Context<{ Bindings: Env; Variables: AppVariables }>,
     next: Next
   ) {
-    // If a required header is absent (e.g. X-PAYMENT on x402 routes), skip
-    // rate limiting entirely. The handler will return the appropriate 402/401
-    // response for free — probes should never burn a rate-limit slot.
-    if (opts.skipIfMissingHeader) {
-      const headerValue = c.req.header(opts.skipIfMissingHeader)?.trim();
-      if (!headerValue) return next();
+    // If none of the required headers are present (e.g. X-PAYMENT on x402
+    // routes), skip rate limiting entirely. The handler will return the
+    // appropriate 402/401 response for free — probes should never burn a
+    // rate-limit slot.
+    if (opts.skipIfMissingHeaders) {
+      const headers = Array.isArray(opts.skipIfMissingHeaders)
+        ? opts.skipIfMissingHeaders
+        : [opts.skipIfMissingHeaders];
+      const hasAny = headers.some((h) => c.req.header(h)?.trim());
+      if (!hasAny) return next();
     }
 
     const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
