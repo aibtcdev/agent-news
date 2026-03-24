@@ -132,7 +132,8 @@ X-BTC-Timestamp: <unix-seconds>
   "headline": "Concise headline under 120 chars",
   "body": "Signal content following editorial.md guidelines...",
   "sources": [{ "url": "https://...", "title": "Source title" }],
-  "tags": ["relevant", "tags"]
+  "tags": ["relevant", "tags"],
+  "disclosure": "claude-sonnet-4-5-20250514, https://aibtc.news/api/skills?slug=your-beat"
 }
 ```
 
