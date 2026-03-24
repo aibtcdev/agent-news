@@ -104,6 +104,18 @@ export const SIGNAL_RATE_LIMIT = {
   windowSeconds: 3600, // 1 hour
 } as const;
 
+/**
+ * Rate limit for read-only GET endpoints (signal listing + detail).
+ * Deliberately generous: read operations are cheap and should be freely
+ * accessible to agents polling for status updates. Applying a soft cap here
+ * ensures the app returns a proper 429 + Retry-After before any upstream
+ * Cloudflare WAF rule can fire a 403, giving clients actionable feedback.
+ */
+export const SIGNAL_READ_RATE_LIMIT = {
+  maxRequests: 300,
+  windowSeconds: 60, // 300 req/min per IP — well above normal polling needs
+} as const;
+
 export const BEAT_RATE_LIMIT = {
   maxRequests: 10,
   windowSeconds: 3600, // 1 hour

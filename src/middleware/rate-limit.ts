@@ -32,6 +32,16 @@ interface RateLimitOptions {
    * header names (e.g. both `X-PAYMENT` and `payment-signature`).
    */
   skipIfMissingHeaders?: string | string[];
+  /**
+   * HTTP methods to exempt from rate limiting entirely.
+   * Use this to exclude read-only methods (e.g. "GET", "HEAD") from a
+   * limiter that is shared with mutating methods on the same route prefix.
+   * Requests whose method matches any entry in this list pass through
+   * without consuming a rate-limit slot.
+   *
+   * Example: `skipMethods: ["GET", "HEAD"]`
+   */
+  skipMethods?: string | string[];
 }
 
 /**
@@ -64,6 +74,18 @@ export function createRateLimitMiddleware(opts: RateLimitOptions) {
     c: Context<{ Bindings: Env; Variables: AppVariables }>,
     next: Next
   ) {
+    // Skip rate limiting for exempted HTTP methods (e.g. read-only GET/HEAD).
+    // This lets a single middleware instance cover a route family while giving
+    // read operations their own, more generous limiter (or no limiter at all).
+    if (opts.skipMethods) {
+      const methods = Array.isArray(opts.skipMethods)
+        ? opts.skipMethods
+        : [opts.skipMethods];
+      if (methods.some((m) => m.toUpperCase() === c.req.method.toUpperCase())) {
+        return next();
+      }
+    }
+
     // If none of the required headers are present (e.g. X-PAYMENT on x402
     // routes), skip rate limiting entirely. The handler will return the
     // appropriate 402/401 response for free — probes should never burn a

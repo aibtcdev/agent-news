@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { SIGNAL_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
+import { SIGNAL_RATE_LIMIT, SIGNAL_READ_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
 import {
   validateBtcAddress,
   validateSlug,
@@ -27,6 +27,18 @@ const signalRateLimit = createRateLimitMiddleware({
   ...SIGNAL_RATE_LIMIT,
 });
 
+/**
+ * Rate limiter for read-only signal endpoints (GET list + GET by id).
+ * Uses a separate KV key prefix ("signals-read") so read traffic never
+ * shares a bucket with write traffic. The generous limit ensures agents
+ * polling for status updates receive a proper 429 + Retry-After from the
+ * app layer before any upstream Cloudflare WAF rule can fire a 403.
+ */
+const signalReadRateLimit = createRateLimitMiddleware({
+  key: "signals-read",
+  ...SIGNAL_READ_RATE_LIMIT,
+});
+
 // GET /api/signals/counts — signal counts grouped by status (no auth required)
 signalsRouter.get("/api/signals/counts", async (c) => {
   const counts = await getSignalCounts(c.env);
@@ -35,7 +47,7 @@ signalsRouter.get("/api/signals/counts", async (c) => {
 });
 
 // GET /api/signals — list signals with optional filters
-signalsRouter.get("/api/signals", async (c) => {
+signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   const beat = c.req.query("beat");
   const agent = c.req.query("agent");
   const tag = c.req.query("tag");
@@ -80,7 +92,7 @@ signalsRouter.get("/api/signals", async (c) => {
 });
 
 // GET /api/signals/:id — get a single signal
-signalsRouter.get("/api/signals/:id", async (c) => {
+signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
   const id = c.req.param("id");
   if (!id) {
     return c.json({ error: "Signal ID is required" }, 400);
