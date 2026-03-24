@@ -3003,6 +3003,7 @@ export class NewsDO extends DurableObject<Env> {
         corrections: 0,
         referral_credits: 0,
         streaks: 0,
+        leaderboard_snapshots: 0,
       };
 
       // Seed signals
@@ -3120,6 +3121,27 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Seed leaderboard_snapshots (used to test scoring epoch after reset)
+      if (Array.isArray(body.leaderboard_snapshots)) {
+        for (const row of body.leaderboard_snapshots as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO leaderboard_snapshots
+               (id, snapshot_type, week, snapshot_data, created_at)
+               VALUES (?, ?, ?, ?, ?)`,
+              row.id as string,
+              (row.snapshot_type as string) ?? "launch_reset",
+              (row.week as string | null) ?? null,
+              (row.snapshot_data as string) ?? "[]",
+              row.created_at as string
+            );
+            inserted.leaderboard_snapshots++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
       return c.json({ ok: true, data: { inserted } });
     });
 
@@ -3164,9 +3186,24 @@ export class NewsDO extends DurableObject<Env> {
    */
   private queryLeaderboard(limit: number): Array<Record<string, unknown>> {
     // SQL literals mirror SCORING_WEIGHTS; tests assert exact scores to enforce sync.
+    //
+    // The `epoch` CTE derives the scoring epoch from the most recent launch_reset
+    // snapshot. Signals filed before the epoch are excluded from signal_count and
+    // days_active so that a leaderboard reset zeroes all scores even though the
+    // signals table is intentionally preserved for historical record. Tables that
+    // are fully cleared on reset (brief_signals, streaks, corrections,
+    // referral_credits, earnings) do not need epoch filtering.
     return this.ctx.storage.sql
       .exec(
-        `SELECT
+        `WITH epoch AS (
+           SELECT COALESCE(
+             (SELECT created_at FROM leaderboard_snapshots
+              WHERE snapshot_type = 'launch_reset'
+              ORDER BY created_at DESC LIMIT 1),
+             '1970-01-01T00:00:00.000Z'
+           ) AS ts
+         )
+         SELECT
            a.btc_address,
            COALESCE(bi.inclusion_count, 0) as brief_inclusions_30d,
            COALESCE(sc.signal_count, 0) as signal_count_30d,
@@ -3181,7 +3218,11 @@ export class NewsDO extends DurableObject<Env> {
             + COALESCE(da.days_active, 0) * 2     /* SCORING_WEIGHTS.days_active */
             + COALESCE(cr.correction_count, 0) * 15  /* SCORING_WEIGHTS.approved_corrections */
             + COALESCE(rf.referral_count, 0) * 25) as score  /* SCORING_WEIGHTS.referral_credits */
-         FROM (SELECT DISTINCT btc_address FROM signals WHERE correction_of IS NULL) a
+         FROM (
+           SELECT DISTINCT btc_address FROM signals
+           WHERE correction_of IS NULL
+             AND created_at > (SELECT ts FROM epoch)
+         ) a
          LEFT JOIN (
            SELECT btc_address, COUNT(*) as inclusion_count
            FROM brief_signals WHERE created_at > datetime('now', '-30 days')
@@ -3189,13 +3230,19 @@ export class NewsDO extends DurableObject<Env> {
          ) bi ON a.btc_address = bi.btc_address
          LEFT JOIN (
            SELECT btc_address, COUNT(*) as signal_count
-           FROM signals WHERE correction_of IS NULL AND created_at > datetime('now', '-30 days')
+           FROM signals
+           WHERE correction_of IS NULL
+             AND created_at > datetime('now', '-30 days')
+             AND created_at > (SELECT ts FROM epoch)
            GROUP BY btc_address
          ) sc ON a.btc_address = sc.btc_address
          LEFT JOIN streaks st ON a.btc_address = st.btc_address
          LEFT JOIN (
            SELECT btc_address, COUNT(DISTINCT date(created_at)) as days_active
-           FROM signals WHERE correction_of IS NULL AND created_at > datetime('now', '-30 days')
+           FROM signals
+           WHERE correction_of IS NULL
+             AND created_at > datetime('now', '-30 days')
+             AND created_at > (SELECT ts FROM epoch)
            GROUP BY btc_address
          ) da ON a.btc_address = da.btc_address
          LEFT JOIN (

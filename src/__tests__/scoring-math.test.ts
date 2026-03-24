@@ -89,6 +89,13 @@ type SeedPayload = {
     last_signal_date: string;
     total_signals: number;
   }>;
+  leaderboard_snapshots?: Array<{
+    id: string;
+    snapshot_type: string;
+    week?: string | null;
+    snapshot_data?: string;
+    created_at: string;
+  }>;
 };
 
 async function seed(payload: SeedPayload): Promise<void> {
@@ -155,6 +162,10 @@ const ADDR_TWIN_RB = "bc1qtwinrecb0000000000000000000000000000000";  // twin B r
 const ADDR_ALL     = "bc1qallcomponent0000000000000000000000000000"; // all-components combined
 const ADDR_ALL_SIG = "bc1qallcompsig000000000000000000000000000000"; // signal for ALL's correction
 const ADDR_ALL_REC = "bc1qallcomprec000000000000000000000000000000"; // recruit for ALL's referral
+
+// Reset epoch test addresses
+const ADDR_RESET_PRE  = "bc1qresetpre0000000000000000000000000000000"; // signals before reset
+const ADDR_RESET_POST = "bc1qresetpost000000000000000000000000000000"; // signals after reset
 
 // Tie-breaking test addresses — 44 chars each, unique prefix "tb" to avoid collisions.
 // For each scenario the "loser" address sorts BEFORE the "winner" alphabetically ('l' < 'w'),
@@ -450,8 +461,8 @@ describe("edge case: 30-day boundary — signal just outside window not counted"
 
     const leaderboard = await getLeaderboard();
     const entry = findEntry(leaderboard, ADDR_BND_OUT);
-    // The address appears in FROM (signals WHERE correction_of IS NULL has no time filter)
-    // but signal_count and days_active use the 30-day window
+    // The address appears in FROM because the epoch defaults to 1970 (no reset),
+    // but signal_count and days_active use the 30-day rolling window.
     expect(entry).toBeDefined();
     expect(entry!.breakdown.signalCount).toBe(0);
     expect(entry!.breakdown.daysActive).toBe(0);
@@ -674,5 +685,49 @@ describe("combined: all scoring components sum to the correct total", () => {
     // = 198
     expect(entry!.score).toBe(expectedScore);
     expect(expectedScore).toBe(198);
+  });
+});
+
+// ── Reset epoch tests ─────────────────────────────────────────────────────────
+// These MUST run last because seeding a launch_reset snapshot sets the scoring
+// epoch for all subsequent queries in this shared DO instance.
+
+describe("reset epoch: signals before reset are excluded from scoring", () => {
+  it("pre-reset signals produce score=0; post-reset signals score normally", async () => {
+    // Timeline:
+    //   10 days ago: ADDR_RESET_PRE files a signal (before the reset)
+    //    8 days ago: launch_reset snapshot created (the scoring epoch)
+    //    3 days ago: ADDR_RESET_POST files a signal (after the reset)
+    const preResetTs = recentTs(10);
+    const resetTs = recentTs(8);
+    const postResetTs = recentTs(3);
+
+    await seed({
+      signals: [
+        // Pre-reset signal — should be excluded from scoring
+        { id: "reset-pre-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_RESET_PRE, headline: "Pre-reset signal", created_at: preResetTs },
+        // Post-reset signal — should be counted
+        { id: "reset-post-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_RESET_POST, headline: "Post-reset signal", created_at: postResetTs },
+      ],
+      leaderboard_snapshots: [
+        { id: "reset-snapshot-001", snapshot_type: "launch_reset", snapshot_data: "[]", created_at: resetTs },
+      ],
+    });
+
+    const leaderboard = await getLeaderboard();
+
+    // Pre-reset scout should not appear on the leaderboard at all
+    const preEntry = findEntry(leaderboard, ADDR_RESET_PRE);
+    expect(preEntry).toBeUndefined();
+
+    // Post-reset scout should appear with normal scoring
+    const postEntry = findEntry(leaderboard, ADDR_RESET_POST);
+    expect(postEntry).toBeDefined();
+    expect(postEntry!.breakdown.signalCount).toBe(1);
+    expect(postEntry!.breakdown.daysActive).toBe(1);
+    const expectedScore =
+      1 * SCORING_WEIGHTS.signal_count +
+      1 * SCORING_WEIGHTS.days_active;
+    expect(postEntry!.score).toBe(expectedScore);
   });
 });
