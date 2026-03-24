@@ -12,6 +12,7 @@ import {
 } from "../lib/validators";
 import {
   listSignals,
+  getSignalCounts,
   getSignal,
   createSignal,
   correctSignal,
@@ -24,6 +25,13 @@ const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 const signalRateLimit = createRateLimitMiddleware({
   key: "signals",
   ...SIGNAL_RATE_LIMIT,
+});
+
+// GET /api/signals/counts — signal counts grouped by status (no auth required)
+signalsRouter.get("/api/signals/counts", async (c) => {
+  const counts = await getSignalCounts(c.env);
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  return c.json(counts);
 });
 
 // GET /api/signals — list signals with optional filters
@@ -39,11 +47,15 @@ signalsRouter.get("/api/signals", async (c) => {
   }
 
   const limitParam = c.req.query("limit");
-  const limit = limitParam
+  const resolvedLimit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
-    : undefined;
+    : 50;
+  const offsetParam = c.req.query("offset");
+  const resolvedOffset = offsetParam
+    ? Math.max(0, parseInt(offsetParam, 10) || 0)
+    : 0;
 
-  const signals = await listSignals(c.env, { beat, agent, tag, since, status, limit });
+  const signals = await listSignals(c.env, { beat, agent, tag, since, status, limit: resolvedLimit });
 
   // Transform snake_case → camelCase to match frontend expectations
   // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
@@ -63,7 +75,13 @@ signalsRouter.get("/api/signals", async (c) => {
   }));
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({ signals: transformed, total: transformed.length, filtered: transformed.length });
+  return c.json({
+    signals: transformed,
+    total: transformed.length,
+    filtered: transformed.length,
+    offset: resolvedOffset,
+    limit: resolvedLimit,
+  });
 });
 
 // GET /api/signals/:id — get a single signal

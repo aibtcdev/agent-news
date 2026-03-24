@@ -752,6 +752,19 @@ export class NewsDO extends DurableObject<Env> {
     // Signals CRUD
     // -------------------------------------------------------------------------
 
+    // GET /signals/counts — signal counts grouped by status
+    this.router.get("/signals/counts", (c) => {
+      const rows = this.ctx.storage.sql
+        .exec("SELECT status, COUNT(*) as count FROM signals GROUP BY status")
+        .toArray();
+      const counts: Record<string, number> = {};
+      for (const row of rows) {
+        const r = row as { status: string; count: number };
+        counts[r.status] = Number(r.count);
+      }
+      return c.json({ ok: true, data: counts } satisfies DOResult<Record<string, number>>);
+    });
+
     // GET /signals — list signals with optional filters (beat, agent, tag, since, status, limit)
     this.router.get("/signals", (c) => {
       const beat = c.req.query("beat") ?? null;
@@ -2053,6 +2066,39 @@ export class NewsDO extends DurableObject<Env> {
       );
     });
 
+    // GET /earnings/unpaid — unpaid earnings aggregated by correspondent (Publisher-only)
+    this.router.get("/earnings/unpaid", (c) => {
+      const btcAddress = c.req.query("btc_address") ?? "";
+      const publisherCheck = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!publisherCheck.ok) {
+        return c.json({ ok: false, error: publisherCheck.error } satisfies DOResult<unknown>, publisherCheck.status);
+      }
+
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT
+             btc_address,
+             SUM(amount_sats) as total_unpaid_sats,
+             COUNT(*) as pending_count
+           FROM earnings
+           WHERE payout_txid IS NULL AND amount_sats > 0
+           GROUP BY btc_address
+           ORDER BY total_unpaid_sats DESC`
+        )
+        .toArray();
+
+      const unpaid = rows.map((r) => {
+        const row = r as { btc_address: string; total_unpaid_sats: number; pending_count: number };
+        return {
+          btc_address: row.btc_address,
+          total_unpaid_sats: Number(row.total_unpaid_sats),
+          pending_count: Number(row.pending_count),
+        };
+      });
+
+      return c.json({ ok: true, data: unpaid } satisfies DOResult<typeof unpaid>);
+    });
+
     // GET /earnings/:address
     this.router.get("/earnings/:address", (c) => {
       const address = c.req.param("address");
@@ -2380,6 +2426,37 @@ export class NewsDO extends DurableObject<Env> {
     // -------------------------------------------------------------------------
     // Corrections — fact-checker corrections on signals
     // -------------------------------------------------------------------------
+
+    // GET /corrections — list all corrections, optionally filtered by status (Publisher-only)
+    this.router.get("/corrections", (c) => {
+      const btcAddress = c.req.query("btc_address") ?? "";
+      const publisherCheck = verifyPublisher(this.ctx.storage.sql, btcAddress);
+      if (!publisherCheck.ok) {
+        return c.json({ ok: false, error: publisherCheck.error } satisfies DOResult<Correction[]>, publisherCheck.status);
+      }
+
+      const status = c.req.query("status") ?? null;
+      const validStatuses = ["pending", "approved", "rejected"];
+      if (status && !validStatuses.includes(status)) {
+        return c.json(
+          { ok: false, error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` } satisfies DOResult<Correction[]>,
+          400
+        );
+      }
+
+      const rows = status
+        ? this.ctx.storage.sql
+            .exec(
+              "SELECT * FROM corrections WHERE status = ? ORDER BY created_at DESC LIMIT 500",
+              status
+            )
+            .toArray()
+        : this.ctx.storage.sql
+            .exec("SELECT * FROM corrections ORDER BY created_at DESC LIMIT 500")
+            .toArray();
+
+      return c.json({ ok: true, data: rows as unknown as Correction[] } satisfies DOResult<Correction[]>);
+    });
 
     // POST /corrections — file a correction
     this.router.post("/corrections", async (c) => {

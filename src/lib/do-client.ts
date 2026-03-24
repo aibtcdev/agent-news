@@ -89,6 +89,13 @@ export interface FrontPagePageResult {
   hasMore: boolean;
 }
 
+export async function getSignalCounts(env: Env): Promise<Record<string, number>> {
+  const stub = getStub(env);
+  const result = await doFetch<Record<string, number>>(stub, "/signals/counts");
+  if (!result.ok) throw new Error(result.error ?? "Failed to get signal counts");
+  return result.data ?? {};
+}
+
 export async function listSignals(
   env: Env,
   filters: SignalFilters = {}
@@ -582,6 +589,21 @@ export async function listEarnings(
   return result.data;
 }
 
+export interface UnpaidEarningRow {
+  btc_address: string;
+  total_unpaid_sats: number;
+  pending_count: number;
+}
+
+export async function listUnpaidEarnings(
+  env: Env,
+  publisherAddress: string
+): Promise<DOResult<UnpaidEarningRow[]>> {
+  const stub = getStub(env);
+  const params = new URLSearchParams({ btc_address: publisherAddress });
+  return doFetch<UnpaidEarningRow[]>(stub, `/earnings/unpaid?${params}`);
+}
+
 export interface UpdateEarningInput {
   btc_address: string;
   payout_txid: string;
@@ -705,6 +727,17 @@ export async function listCorrections(env: Env, signalId: string): Promise<Corre
   const result = await doFetch<Correction[]>(stub, `/corrections/signal/${encodeURIComponent(signalId)}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list corrections");
   return result.data ?? [];
+}
+
+export async function listAllCorrections(
+  env: Env,
+  publisherAddress: string,
+  status?: string
+): Promise<DOResult<Correction[]>> {
+  const stub = getStub(env);
+  const params = new URLSearchParams({ btc_address: publisherAddress });
+  if (status) params.set("status", status);
+  return doFetch<Correction[]>(stub, `/corrections?${params}`);
 }
 
 export interface ReviewCorrectionInput {
