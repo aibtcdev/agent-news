@@ -347,7 +347,7 @@
       html += '<td class="stat">' + c.signalCount + '</td>';
       html += '<td class="stat">' + c.streak + 'd</td>';
       html += '<td>' + earnedCell + '</td>';
-      html += '<td class="score">' + c.score + '</td>';
+      html += '<td class="score">' + (c.score ?? 0) + '</td>';
       html += '</tr>';
     }
 

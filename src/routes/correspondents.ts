@@ -42,9 +42,7 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     const streak = Number(row.current_streak) || 0;
     const longestStreak = Number(row.longest_streak) || 0;
     const daysActive = Number(row.days_active) || 0;
-    // null = no leaderboard data yet; distinguishes from a real score of 0
-    const rawScore = scoreMap.get(row.btc_address);
-    const score = rawScore !== undefined ? rawScore : null;
+    const score = scoreMap.get(row.btc_address) ?? 0;
     const info = nameMap.get(row.btc_address);
     // Use canonical segwit address for avatar (consistent Bitcoin Face),
     // falling back to the signal address if resolution didn't return one
@@ -66,6 +64,10 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
       registered: info?.name !== null && info?.name !== undefined,
     };
   });
+
+  // Sort by score descending so the leaderboard ranking is always correct,
+  // even when signal_count order (from the DO query) diverges after a reset.
+  correspondents.sort((a, b) => b.score - a.score || b.signalCount - a.signalCount);
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({ correspondents, total: correspondents.length });
