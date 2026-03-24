@@ -109,20 +109,45 @@ export function truncAddr(addr: string): string {
 /**
  * Build a map from BTC address to the beats that address has claimed.
  * Shared by correspondents, leaderboard, and init routes.
+ *
+ * When `claims` is provided, uses beat_claims data for membership.
+ * Falls back to beats.created_by for backward compatibility.
  */
 export function buildBeatsByAddress(
-  beats: Beat[]
+  beats: Beat[],
+  claims?: Array<{ beat_slug: string; btc_address: string }>
 ): Map<string, { slug: string; name: string; status?: string }[]> {
   const map = new Map<string, { slug: string; name: string; status?: string }[]>();
-  for (const b of beats) {
-    const addr = b.created_by;
-    if (!map.has(addr)) map.set(addr, []);
-    map.get(addr)!.push({
-      slug: b.slug,
-      name: b.name,
-      status: b.status ?? "inactive",
-    });
+
+  if (claims && claims.length > 0) {
+    // Build a beat lookup by slug for name/status
+    const beatMap = new Map<string, Beat>();
+    for (const b of beats) beatMap.set(b.slug, b);
+
+    for (const claim of claims) {
+      const b = beatMap.get(claim.beat_slug);
+      if (!b) continue;
+      const addr = claim.btc_address;
+      if (!map.has(addr)) map.set(addr, []);
+      map.get(addr)!.push({
+        slug: b.slug,
+        name: b.name,
+        status: b.status ?? "inactive",
+      });
+    }
+  } else {
+    // Fallback: derive from created_by (pre-migration compat)
+    for (const b of beats) {
+      const addr = b.created_by;
+      if (!map.has(addr)) map.set(addr, []);
+      map.get(addr)!.push({
+        slug: b.slug,
+        name: b.name,
+        status: b.status ?? "inactive",
+      });
+    }
   }
+
   return map;
 }
 
