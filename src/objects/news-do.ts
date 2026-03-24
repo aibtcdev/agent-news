@@ -514,7 +514,6 @@ export class NewsDO extends DurableObject<Env> {
         members: memberRows.map((r) => {
           const mr = r as Record<string, unknown>;
           return {
-            beat_slug: slug,
             btc_address: mr.btc_address as string,
             claimed_at: mr.claimed_at as string,
             status: mr.status as "active" | "inactive",
@@ -1767,7 +1766,8 @@ export class NewsDO extends DurableObject<Env> {
              AND s.beat_slug = b.slug
              AND s.correction_of IS NULL
            WHERE bc.btc_address = ? AND bc.status = 'active'
-           GROUP BY b.slug`,
+           GROUP BY b.slug
+           ORDER BY bc.claimed_at`,
           address
         )
         .toArray();
