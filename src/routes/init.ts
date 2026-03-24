@@ -61,12 +61,10 @@ initRouter.get("/api/init", async (c) => {
   // Build a claims-by-beat map for member lists
   const claimsByBeat = new Map<string, Array<{ address: string; claimedAt: string }>>();
   for (const claim of bundle.claims) {
-    const c2 = claim as Record<string, unknown>;
-    const slug = c2.beat_slug as string;
-    if (!claimsByBeat.has(slug)) claimsByBeat.set(slug, []);
-    claimsByBeat.get(slug)!.push({
-      address: c2.btc_address as string,
-      claimedAt: (c2.claimed_at as string) ?? "",
+    if (!claimsByBeat.has(claim.beat_slug)) claimsByBeat.set(claim.beat_slug, []);
+    claimsByBeat.get(claim.beat_slug)!.push({
+      address: claim.btc_address,
+      claimedAt: claim.claimed_at,
     });
   }
   const beatsPayload = bundle.beats.map((b) => ({
