@@ -26,6 +26,10 @@ beatsRouter.get("/api/beats", async (c) => {
     claimedBy: b.created_by,
     claimedAt: b.created_at,
     status: b.status,
+    members: (b.members ?? []).map((m) => ({
+      address: m.btc_address,
+      claimedAt: m.claimed_at,
+    })),
   }));
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
@@ -48,6 +52,10 @@ beatsRouter.get("/api/beats/:slug", async (c) => {
     claimedBy: b.created_by,
     claimedAt: b.created_at,
     status: b.status,
+    members: (b.members ?? []).map((m) => ({
+      address: m.btc_address,
+      claimedAt: m.claimed_at,
+    })),
   });
 });
 

@@ -58,6 +58,15 @@ initRouter.get("/api/init", async (c) => {
   }
 
   // --- Beats ---
+  // Build a claims-by-beat map for member lists
+  const claimsByBeat = new Map<string, Array<{ address: string; claimedAt: string }>>();
+  for (const claim of bundle.claims) {
+    if (!claimsByBeat.has(claim.beat_slug)) claimsByBeat.set(claim.beat_slug, []);
+    claimsByBeat.get(claim.beat_slug)!.push({
+      address: claim.btc_address,
+      claimedAt: claim.claimed_at,
+    });
+  }
   const beatsPayload = bundle.beats.map((b) => ({
     slug: b.slug,
     name: b.name,
@@ -66,6 +75,7 @@ initRouter.get("/api/init", async (c) => {
     claimedBy: b.created_by,
     claimedAt: b.created_at,
     status: b.status,
+    members: claimsByBeat.get(b.slug) ?? [],
   }));
 
   // --- Classifieds ---
@@ -82,7 +92,7 @@ initRouter.get("/api/init", async (c) => {
     earningsMap.set(entry.btc_address, Number(entry.total_earned_sats));
   }
 
-  const beatsByAddress = buildBeatsByAddress(bundle.beats);
+  const beatsByAddress = buildBeatsByAddress(bundle.beats, bundle.claims);
   const addresses = bundle.correspondents.map((r) => r.btc_address);
   const nameMap = await resolveNamesWithTimeout(
     c.env.NEWS_KV,

@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -139,7 +139,8 @@ export class NewsDO extends DurableObject<Env> {
     // 5 = Classifieds cleanup (drop contact column)
     // 6 = Classifieds editorial review (status, publisher_feedback, reviewed_at, refund_txid)
     // 7 = Leaderboard snapshots (audit infrastructure for prize competitions)
-    const CURRENT_MIGRATION_VERSION = 7;
+    // 8 = Beat claims (multi-agent beats — beat_claims join table)
+    const CURRENT_MIGRATION_VERSION = 8;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -233,6 +234,20 @@ export class NewsDO extends DurableObject<Env> {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes("already exists")) {
               console.error("Snapshots migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run beat claims migration — multi-agent beats join table.
+      if (appliedVersion < 8) {
+        for (const stmt of MIGRATION_BEAT_CLAIMS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error("Beat claims migration statement failed:", e);
             }
           }
         }
@@ -393,11 +408,35 @@ export class NewsDO extends DurableObject<Env> {
         .exec(
           `SELECT b.*, MAX(s.created_at) as last_signal_at
            FROM beats b
-           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
+           LEFT JOIN signals s ON bc.btc_address = s.btc_address
+             AND s.beat_slug = b.slug
+             AND s.correction_of IS NULL
            GROUP BY b.slug
            ORDER BY b.name`
         )
         .toArray();
+
+      // Fetch all active claims for member lists
+      const claimRows = this.ctx.storage.sql
+        .exec(
+          `SELECT beat_slug, btc_address, claimed_at, status
+           FROM beat_claims WHERE status = 'active'
+           ORDER BY claimed_at`
+        )
+        .toArray();
+      const claimsByBeat = new Map<string, Array<{ btc_address: string; claimed_at: string; status: string }>>();
+      for (const cr of claimRows) {
+        const claim = cr as Record<string, unknown>;
+        const slug = claim.beat_slug as string;
+        if (!claimsByBeat.has(slug)) claimsByBeat.set(slug, []);
+        claimsByBeat.get(slug)!.push({
+          btc_address: claim.btc_address as string,
+          claimed_at: claim.claimed_at as string,
+          status: claim.status as string,
+        });
+      }
+
       const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
       const now = Date.now();
       const beats = rows.map((r) => {
@@ -416,6 +455,7 @@ export class NewsDO extends DurableObject<Env> {
           created_at: row.created_at,
           updated_at: row.updated_at,
           status,
+          members: claimsByBeat.get(row.slug as string) ?? [],
         } as Beat;
       });
       return c.json({ ok: true, data: beats } satisfies DOResult<Beat[]>);
@@ -428,7 +468,10 @@ export class NewsDO extends DurableObject<Env> {
         .exec(
           `SELECT b.*, MAX(s.created_at) as last_signal_at
            FROM beats b
-           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
+           LEFT JOIN signals s ON bc.btc_address = s.btc_address
+             AND s.beat_slug = b.slug
+             AND s.correction_of IS NULL
            WHERE b.slug = ?
            GROUP BY b.slug`,
           slug
@@ -447,6 +490,18 @@ export class NewsDO extends DurableObject<Env> {
         lastSignalAt && Date.now() - new Date(lastSignalAt).getTime() < expiryMs
           ? "active"
           : "inactive";
+
+      // Fetch members for this beat
+      const memberRows = this.ctx.storage.sql
+        .exec(
+          `SELECT btc_address, claimed_at, status
+           FROM beat_claims
+           WHERE beat_slug = ? AND status = 'active'
+           ORDER BY claimed_at`,
+          slug
+        )
+        .toArray();
+
       const beat: Beat = {
         slug: row.slug as string,
         name: row.name as string,
@@ -456,6 +511,14 @@ export class NewsDO extends DurableObject<Env> {
         created_at: row.created_at as string,
         updated_at: row.updated_at as string,
         status,
+        members: memberRows.map((r) => {
+          const mr = r as Record<string, unknown>;
+          return {
+            btc_address: mr.btc_address as string,
+            claimed_at: mr.claimed_at as string,
+            status: mr.status as "active" | "inactive",
+          };
+        }),
       };
       return c.json({ ok: true, data: beat } satisfies DOResult<Beat>);
     });
@@ -502,12 +565,15 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      // Check for existing beat — allow reclaim if inactive
+      // Check for existing beat — allow join if active, reclaim if inactive
       const existing = this.ctx.storage.sql
         .exec(
           `SELECT b.*, MAX(s.created_at) as last_signal_at
            FROM beats b
-           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
+           LEFT JOIN signals s ON bc.btc_address = s.btc_address
+             AND s.beat_slug = b.slug
+             AND s.correction_of IS NULL
            WHERE b.slug = ?
            GROUP BY b.slug`,
           slug as string
@@ -518,28 +584,50 @@ export class NewsDO extends DurableObject<Env> {
         const lastSignalAt = row.last_signal_at as string | null;
         const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
         const isActive = lastSignalAt && Date.now() - new Date(lastSignalAt).getTime() < expiryMs;
-        if (isActive) {
+
+        // Check if agent already has an active claim
+        const existingClaim = this.ctx.storage.sql
+          .exec(
+            "SELECT 1 FROM beat_claims WHERE beat_slug = ? AND btc_address = ? AND status = 'active'",
+            slug as string,
+            created_by as string
+          )
+          .toArray();
+        if (existingClaim.length > 0) {
           return c.json(
             {
               ok: false,
-              error: `Beat "${slug as string}" already exists`,
+              error: `You are already a member of beat "${slug as string}"`,
             } satisfies DOResult<Beat>,
             409
           );
         }
-        // Inactive — reclaim: update created_by to new agent
+
+        // Active or inactive — agent can join via beat_claims
         const now = new Date().toISOString();
         this.ctx.storage.sql.exec(
-          "UPDATE beats SET created_by = ?, updated_at = ? WHERE slug = ?",
+          `INSERT INTO beat_claims (beat_slug, btc_address, claimed_at, status)
+           VALUES (?, ?, ?, 'active')
+           ON CONFLICT(beat_slug, btc_address) DO UPDATE SET status = 'active', claimed_at = excluded.claimed_at`,
+          slug as string,
           created_by as string,
-          now,
-          slug as string
+          now
         );
+
+        // If beat was inactive (no active members with recent signals), update updated_at
+        if (!isActive) {
+          this.ctx.storage.sql.exec(
+            "UPDATE beats SET updated_at = ? WHERE slug = ?",
+            now,
+            slug as string
+          );
+        }
+
         const reclaimed = this.ctx.storage.sql
           .exec("SELECT * FROM beats WHERE slug = ?", slug as string)
           .toArray();
         const beat = reclaimed[0] as unknown as Beat;
-        return c.json({ ok: true, data: { ...beat, status: "active" as const } } satisfies DOResult<Beat>, 200);
+        return c.json({ ok: true, data: { ...beat, status: isActive ? "active" as const : "inactive" as const } } satisfies DOResult<Beat>, 200);
       }
 
       const now = new Date().toISOString();
@@ -560,6 +648,15 @@ export class NewsDO extends DurableObject<Env> {
         beatColor,
         beatCreatedBy,
         now,
+        now
+      );
+
+      // Also create the initial beat_claims entry for the creator
+      this.ctx.storage.sql.exec(
+        `INSERT INTO beat_claims (beat_slug, btc_address, claimed_at, status)
+         VALUES (?, ?, ?, 'active')`,
+        beatSlug,
+        beatCreatedBy,
         now
       );
 
@@ -838,6 +935,21 @@ export class NewsDO extends DurableObject<Env> {
         return c.json(
           { ok: false, error: `Beat "${beat_slug as string}" not found` } satisfies DOResult<Signal>,
           404
+        );
+      }
+
+      // Verify agent is a member of this beat
+      const claimRows = this.ctx.storage.sql
+        .exec(
+          "SELECT 1 FROM beat_claims WHERE beat_slug = ? AND btc_address = ? AND status = 'active'",
+          beat_slug as string,
+          btc_address as string
+        )
+        .toArray();
+      if (claimRows.length === 0) {
+        return c.json(
+          { ok: false, error: `You must claim beat "${beat_slug as string}" before filing signals on it` } satisfies DOResult<Signal>,
+          403
         );
       }
 
@@ -1643,24 +1755,33 @@ export class NewsDO extends DurableObject<Env> {
       const today = getPacificDate(now);
       const todayUTCStart = getPacificDayStartUTC(today);
 
-      // Find agent's beat (created_by = address)
+      // Find all beats this agent is a member of (via beat_claims)
       const beatRows = this.ctx.storage.sql
         .exec(
           `SELECT b.*, MAX(s.created_at) as last_signal_at
-           FROM beats b
-           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
-           WHERE b.created_by = ?
+           FROM beat_claims bc
+           JOIN beats b ON bc.beat_slug = b.slug
+           LEFT JOIN beat_claims bc_all ON b.slug = bc_all.beat_slug AND bc_all.status = 'active'
+           LEFT JOIN signals s ON bc_all.btc_address = s.btc_address
+             AND s.beat_slug = b.slug
+             AND s.correction_of IS NULL
+           WHERE bc.btc_address = ? AND bc.status = 'active'
            GROUP BY b.slug
-           LIMIT 1`,
+           ORDER BY bc.claimed_at`,
           address
         )
         .toArray();
 
-      let beat: Record<string, unknown> | null = null;
-      let beatStatus: "active" | "inactive" | null = null;
-      if (beatRows.length > 0) {
-        const row = beatRows[0] as Record<string, unknown>;
-        beat = {
+      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+      const agentBeats: Array<Record<string, unknown> & { beatStatus: "active" | "inactive" }> = [];
+      for (const r of beatRows) {
+        const row = r as Record<string, unknown>;
+        const lastSignalAt = row.last_signal_at as string | null;
+        const status: "active" | "inactive" =
+          lastSignalAt && now.getTime() - new Date(lastSignalAt).getTime() < expiryMs
+            ? "active"
+            : "inactive";
+        agentBeats.push({
           slug: row.slug,
           name: row.name,
           description: row.description,
@@ -1668,13 +1789,13 @@ export class NewsDO extends DurableObject<Env> {
           created_by: row.created_by,
           created_at: row.created_at,
           updated_at: row.updated_at,
-        };
-        const lastSignalAt = row.last_signal_at as string | null;
-        const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
-        beatStatus = lastSignalAt && now.getTime() - new Date(lastSignalAt).getTime() < expiryMs
-          ? "active"
-          : "inactive";
+          beatStatus: status,
+        });
       }
+
+      // Backward compat: expose first beat as `beat` / `beatStatus`
+      const beat = agentBeats.length > 0 ? agentBeats[0] : null;
+      const beatStatus = beat ? beat.beatStatus : null;
 
       // Last signal time for cooldown
       const lastSignalRows = this.ctx.storage.sql
@@ -1752,13 +1873,14 @@ export class NewsDO extends DurableObject<Env> {
       // Build actions array
       const actions: { type: string; description: string; waitMinutes?: number }[] = [];
 
-      if (!beat) {
+      if (agentBeats.length === 0) {
         actions.push({ type: "claim-beat", description: "Claim a news beat to start filing signals" });
       } else if (signalsToday >= MAX_SIGNALS_PER_DAY) {
         canFileSignal = false;
         actions.push({ type: "daily-limit", description: `Daily limit reached (${MAX_SIGNALS_PER_DAY}/${MAX_SIGNALS_PER_DAY}). Try again tomorrow.` });
       } else if (canFileSignal) {
-        actions.push({ type: "file-signal", description: `File a signal on your beat "${(beat.name as string)}" (${signalsToday}/${MAX_SIGNALS_PER_DAY} today)` });
+        const beatNames = agentBeats.map((b) => b.name as string).join(", ");
+        actions.push({ type: "file-signal", description: `File a signal on your beat${agentBeats.length > 1 ? "s" : ""} (${beatNames}) (${signalsToday}/${MAX_SIGNALS_PER_DAY} today)` });
       } else if (waitMinutes !== null) {
         actions.push({ type: "wait", description: `Cooldown active — wait ${waitMinutes} minute${waitMinutes === 1 ? "" : "s"}`, waitMinutes });
       }
@@ -1767,7 +1889,7 @@ export class NewsDO extends DurableObject<Env> {
         actions.push({ type: "maintain-streak", description: "File a signal today to maintain your streak" });
       }
 
-      if (beat && !todayBrief && signalsToday >= 3) {
+      if (agentBeats.length > 0 && !todayBrief && signalsToday >= 3) {
         actions.push({ type: "compile-brief", description: "Enough signals today — compile the daily brief" });
       }
 
@@ -1781,6 +1903,7 @@ export class NewsDO extends DurableObject<Env> {
           address,
           beat,
           beatStatus,
+          beats: agentBeats,
           signals: signalRows,
           totalSignals,
           streak,
@@ -2515,9 +2638,19 @@ export class NewsDO extends DurableObject<Env> {
         .exec(
           `SELECT b.*, MAX(s.created_at) as last_signal_at
            FROM beats b
-           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
+           LEFT JOIN signals s ON bc.btc_address = s.btc_address
+             AND s.beat_slug = b.slug
+             AND s.correction_of IS NULL
            GROUP BY b.slug
            ORDER BY b.name`
+        )
+        .toArray();
+
+      // Fetch active claims for buildBeatsByAddress
+      const claims = this.ctx.storage.sql
+        .exec(
+          `SELECT beat_slug, btc_address, claimed_at FROM beat_claims WHERE status = 'active'`
         )
         .toArray();
 
@@ -2532,8 +2665,8 @@ export class NewsDO extends DurableObject<Env> {
 
       return c.json({
         ok: true,
-        data: { correspondents, beats, leaderboard },
-      } satisfies DOResult<{ correspondents: unknown[]; beats: unknown[]; leaderboard: unknown[] }>);
+        data: { correspondents, beats, claims, leaderboard },
+      } satisfies DOResult<{ correspondents: unknown[]; beats: unknown[]; claims: unknown[]; leaderboard: unknown[] }>);
     });
 
     // GET /init — all data needed for the initial page load in a single DO call.
@@ -2551,16 +2684,27 @@ export class NewsDO extends DurableObject<Env> {
         .toArray();
       const briefDates = briefDateRows.map((r) => (r as { date: string }).date);
 
-      // Beats (with status computation)
+      // Beats (with status computation via beat_claims)
       const beatRows = this.ctx.storage.sql
         .exec(
           `SELECT b.*, MAX(s.created_at) as last_signal_at
            FROM beats b
-           LEFT JOIN signals s ON b.created_by = s.btc_address AND s.correction_of IS NULL
+           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
+           LEFT JOIN signals s ON bc.btc_address = s.btc_address
+             AND s.beat_slug = b.slug
+             AND s.correction_of IS NULL
            GROUP BY b.slug
            ORDER BY b.name`
         )
         .toArray();
+
+      // Fetch active claims for buildBeatsByAddress
+      const claimRows = this.ctx.storage.sql
+        .exec(
+          `SELECT beat_slug, btc_address, claimed_at FROM beat_claims WHERE status = 'active'`
+        )
+        .toArray();
+
       const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
       const now = Date.now();
       const beats = beatRows.map((r) => {
@@ -2642,6 +2786,7 @@ export class NewsDO extends DurableObject<Env> {
           brief: latestBrief,
           briefDates,
           beats,
+          claims: claimRows,
           classifieds: classifiedRows,
           correspondents: correspondentRows,
           leaderboard,

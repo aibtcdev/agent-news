@@ -310,3 +310,28 @@ export const MIGRATION_BEAT_RESTRUCTURE_SQL = `
   -- ── Phase D: Delete old beats (all signals remapped above) ─────────────
   DELETE FROM beats WHERE slug IN ('btc-macro', 'agent-commerce', 'network-ops', 'ordinals-business', 'ordinals-culture', 'protocol-infra', 'defi-yields', 'fee-weather', 'agentic-trading');
 `;
+
+/**
+ * Beat claims migration — multi-agent beats.
+ * Adds a beat_claims join table that decouples beat membership from beat creation.
+ * beats.created_by is preserved as an immutable "founded by" record.
+ * beat_claims tracks all active memberships.
+ *
+ * Migration seeds beat_claims from existing beats.created_by so current
+ * owners retain their membership automatically.
+ */
+export const MIGRATION_BEAT_CLAIMS_SQL = [
+  `CREATE TABLE IF NOT EXISTS beat_claims (
+    beat_slug    TEXT NOT NULL REFERENCES beats(slug),
+    btc_address  TEXT NOT NULL,
+    claimed_at   TEXT NOT NULL,
+    status       TEXT NOT NULL DEFAULT 'active',
+    PRIMARY KEY (beat_slug, btc_address)
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_beat_claims_address ON beat_claims(btc_address)",
+  "CREATE INDEX IF NOT EXISTS idx_beat_claims_status ON beat_claims(status)",
+  `INSERT OR IGNORE INTO beat_claims (beat_slug, btc_address, claimed_at, status)
+    SELECT slug, created_by, created_at, 'active'
+    FROM beats
+    WHERE created_by != 'system'`,
+] as const;

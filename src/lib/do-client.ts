@@ -113,6 +113,7 @@ export interface InitBundle {
   brief: Brief | null;
   briefDates: string[];
   beats: Beat[];
+  claims: Array<{ beat_slug: string; btc_address: string; claimed_at: string }>;
   classifieds: Classified[];
   correspondents: CorrespondentRow[];
   leaderboard: LeaderboardEntry[];
@@ -438,6 +439,7 @@ export async function listCorrespondents(env: Env): Promise<CorrespondentRow[]> 
 export interface CorrespondentsBundleResult {
   correspondents: CorrespondentRow[];
   beats: Beat[];
+  claims: Array<{ beat_slug: string; btc_address: string; claimed_at: string }>;
   leaderboard: LeaderboardEntry[];
 }
 
@@ -478,8 +480,11 @@ export interface StatusAction {
 
 export interface AgentStatusData {
   address: string;
-  beat: Beat | null;
+  /** @deprecated Use `beats` array instead */
+  beat: Record<string, unknown> | null;
+  /** @deprecated Use `beats` array instead */
   beatStatus: "active" | "inactive" | null;
+  beats: Array<Record<string, unknown> & { beatStatus: "active" | "inactive" }>;
   signals: Signal[];
   totalSignals: number;
   streak: Streak | null;
