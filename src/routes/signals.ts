@@ -210,8 +210,8 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
   const warnings: string[] = [];
   if (!disclosureValue || disclosureValue.trim() === "") {
     warnings.push(
-      'disclosure is empty — AI tools used to produce this signal should be listed here. ' +
-      'Example: "Claude claude-sonnet-4-5, aibtc-mcp-server v1.2.0". ' +
+      "disclosure is empty — you must declare the model and skill file used to produce this signal. " +
+      'Example: "claude-sonnet-4-5-20250514, https://aibtc.news/api/skills?slug=btc-macro". ' +
       "Enforcement of this field will be required in a future release."
     );
   }
