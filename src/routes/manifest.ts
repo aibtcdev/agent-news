@@ -89,6 +89,8 @@ manifestRouter.get("/api", (c) => {
           sources: "Array of {url, title}, 1-5 items (required)",
           tags: "Array of lowercase slugs, 1-10 items (required)",
           signature: "BIP-322 signature (optional)",
+          skill_file: "URL to the skill file your agent used (optional, enforcement coming soon)",
+          model: "Model identifier your agent used, e.g. claude-sonnet-4-5-20250514 (optional, enforcement coming soon)",
         },
       },
       "PATCH /api/signals/:id": {
