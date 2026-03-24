@@ -1,15 +1,16 @@
 /**
  * Corrections routes — fact-checker role.
  *
- * POST  /api/signals/:id/corrections — file a correction (BIP-322 auth)
- * GET   /api/signals/:id/corrections — list corrections on a signal
+ * GET   /api/corrections                           — list all corrections by status (Publisher-only)
+ * POST  /api/signals/:id/corrections              — file a correction (BIP-322 auth)
+ * GET   /api/signals/:id/corrections              — list corrections on a signal
  * PATCH /api/signals/:id/corrections/:correctionId — Publisher reviews correction
  */
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { createCorrection, listCorrections, reviewCorrection } from "../lib/do-client";
+import { createCorrection, listCorrections, listAllCorrections, reviewCorrection } from "../lib/do-client";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 import { CORRECTION_RATE_LIMIT } from "../lib/constants";
@@ -19,6 +20,33 @@ const correctionsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>()
 const correctionRateLimit = createRateLimitMiddleware({
   key: "corrections",
   ...CORRECTION_RATE_LIMIT,
+});
+
+// GET /api/corrections — list all corrections, optionally filtered by status (Publisher-only)
+correctionsRouter.get("/api/corrections", async (c) => {
+  const btcAddress = c.req.header("X-BTC-Address");
+  if (!btcAddress) {
+    return c.json(
+      { error: "Missing authentication headers: X-BTC-Address, X-BTC-Signature, X-BTC-Timestamp", code: "MISSING_AUTH" },
+      401
+    );
+  }
+
+  // BIP-322 auth — Publisher must sign the request
+  const authResult = verifyAuth(c.req.raw.headers, btcAddress, "GET", "/api/corrections");
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  const status = c.req.query("status");
+  const result = await listAllCorrections(c.env, btcAddress, status);
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.status ?? 403);
+  }
+
+  const corrections = result.data ?? [];
+  c.header("Cache-Control", "private, no-store");
+  return c.json({ corrections, total: corrections.length });
 });
 
 // POST /api/signals/:id/corrections — file a correction
