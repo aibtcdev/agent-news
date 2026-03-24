@@ -21,6 +21,7 @@ import { manifestRouter } from "./routes/manifest";
 import { signalPageRouter } from "./routes/signal-page";
 import { configRouter } from "./routes/config";
 import { signalReviewRouter } from "./routes/signal-review";
+import { signalCountsRouter } from "./routes/signal-counts";
 import { correctionsRouter } from "./routes/corrections";
 import { referralsRouter } from "./routes/referrals";
 import { leaderboardRouter } from "./routes/leaderboard";
@@ -72,6 +73,9 @@ app.route("/", signalPageRouter);
 
 // Mount signal review routes (publisher editorial + front page) before generic signals
 app.route("/", signalReviewRouter);
+
+// Mount signal counts route before generic signals (avoids :id param collision)
+app.route("/", signalCountsRouter);
 
 // Mount signals routes
 app.route("/", signalsRouter);

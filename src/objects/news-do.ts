@@ -906,6 +906,45 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: { signals: daySignals, date: day, hasMore } });
     });
 
+    // GET /signals/counts — lightweight signal counts by status (no full records fetched)
+    this.router.get("/signals/counts", (c) => {
+      const beat = c.req.query("beat") ?? null;
+      const agent = c.req.query("agent") ?? null;
+      const since = c.req.query("since") ?? null;
+
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT status, COUNT(*) as count
+           FROM signals
+           WHERE (?1 IS NULL OR beat_slug = ?1)
+             AND (?2 IS NULL OR btc_address = ?2)
+             AND (?3 IS NULL OR created_at > ?3)
+           GROUP BY status`,
+          beat,
+          agent,
+          since
+        )
+        .toArray();
+
+      const counts: Record<string, number> = {
+        submitted: 0,
+        in_review: 0,
+        approved: 0,
+        rejected: 0,
+        brief_included: 0,
+      };
+      let total = 0;
+      for (const row of rows) {
+        const r = row as { status: string; count: number };
+        if (r.status in counts) {
+          counts[r.status] = r.count;
+        }
+        total += r.count;
+      }
+
+      return c.json({ ok: true, data: { ...counts, total } });
+    });
+
     // GET /signals/:id — get a single signal with tags and beat name joined
     this.router.get("/signals/:id", (c) => {
       const id = c.req.param("id");
