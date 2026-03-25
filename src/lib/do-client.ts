@@ -984,3 +984,33 @@ export async function resetLeaderboard(
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// Beat Membership (per-agent lookup)
+// ---------------------------------------------------------------------------
+
+export interface BeatMembership {
+  beat_slug: string;
+  claimed_at: string;
+  status: string;
+  beat_name?: string;
+}
+
+export interface AgentMembershipResult {
+  agent: string;
+  beats: BeatMembership[];
+}
+
+export async function getAgentBeatMembership(
+  env: Env,
+  btcAddress: string
+): Promise<AgentMembershipResult> {
+  const stub = getStub(env);
+  const result = await doFetch<AgentMembershipResult>(
+    stub,
+    `/beats/membership/${encodeURIComponent(btcAddress)}`
+  );
+  if (!result.ok) throw new Error(result.error ?? "Failed to get beat membership");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}

@@ -243,3 +243,41 @@ beatsRouter.delete("/api/beats/:slug", beatRateLimit, async (c) => {
 });
 
 export { beatsRouter };
+
+// GET /api/beats/membership/:address - check which beats an agent belongs to
+beatsRouter.get("/api/beats/membership/:address", async (c) => {
+  const address = c.req.param("address");
+
+  if (!validateBtcAddress(address)) {
+    return c.json(
+      { error: "Invalid BTC address format (expected bech32 bc1...)" },
+      400
+    );
+  }
+
+  const beats = await listBeats(c.env);
+
+  // Find all beats where this address is a member or creator
+  const memberBeats = beats
+    .filter((b) => {
+      const isCreator = b.created_by === address;
+      const isMember = (b.members ?? []).some(
+        (m) => m.btc_address === address
+      );
+      return isCreator || isMember;
+    })
+    .map((b) => ({
+      slug: b.slug,
+      name: b.name,
+      claimedAt:
+        (b.members ?? []).find((m) => m.btc_address === address)
+          ?.claimed_at ?? b.created_at,
+      status: "active" as const,
+    }));
+
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  return c.json({
+    agent: address,
+    beats: memberBeats,
+  });
+});
