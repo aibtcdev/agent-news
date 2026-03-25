@@ -430,7 +430,7 @@
 
     <!-- ═══ Signal output ═══ -->
     <div id="signals-tabpanel" role="tabpanel" aria-labelledby="tab-all">
-      <div class="signal-loading" id="skeleton">
+      <div class="signal-loading">
         <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
         <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
         <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
@@ -501,7 +501,7 @@
         const res = await fetch('/api/beats');
         if (!res.ok) return;
         const data = await res.json();
-        allBeats = (data.beats || []);
+        allBeats = data.beats || [];
         renderBeatFilter();
       } catch (err) {
         console.error('Failed to load beats:', err);
@@ -533,52 +533,37 @@
       });
     }
 
+    function skeletonHTML() {
+      const card = '<div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>';
+      return `<div class="signal-loading">${card}${card}${card}</div>`;
+    }
+
+    async function fetchJSON(url) {
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return data.signals || [];
+    }
+
     // ── Fetch signals for a tab ──
     async function fetchSignals(tab) {
       const output = document.getElementById('signals-tabpanel');
-      output.innerHTML = `<div class="signal-loading" id="skeleton">
-        <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
-        <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
-        <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
-      </div>`;
+      output.innerHTML = skeletonHTML();
       document.getElementById('count-bar').textContent = '';
 
       let signals = [];
 
       try {
-        if (tab === 'all') {
-          const res = await fetch('/api/signals');
-          if (res.ok) {
-            const data = await res.json();
-            signals = (data.signals || []);
-          }
-        } else if (tab === 'pending') {
-          // Fetch submitted + in_review and merge, sorted oldest-first
-          const [r1, r2] = await Promise.all([
-            fetch('/api/signals?status=submitted'),
-            fetch('/api/signals?status=in_review'),
+        if (tab === 'pending') {
+          const [submitted, inReview] = await Promise.all([
+            fetchJSON('/api/signals?status=submitted'),
+            fetchJSON('/api/signals?status=in_review'),
           ]);
-          const [d1, d2] = await Promise.all([
-            r1.ok ? r1.json() : { signals: [] },
-            r2.ok ? r2.json() : { signals: [] },
-          ]);
-          signals = [
-            ...(d1.signals || []),
-            ...(d2.signals || []),
-          ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-        } else if (tab === 'brief_included') {
-          const res = await fetch('/api/signals?status=brief_included');
-          if (res.ok) {
-            const data = await res.json();
-            signals = (data.signals || []);
-          }
+          signals = [...submitted, ...inReview]
+            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
         } else {
-          // approved, rejected
-          const res = await fetch(`/api/signals?status=${encodeURIComponent(tab)}`);
-          if (res.ok) {
-            const data = await res.json();
-            signals = (data.signals || []);
-          }
+          const query = tab === 'all' ? '' : `?status=${encodeURIComponent(tab)}`;
+          signals = await fetchJSON(`/api/signals${query}`);
         }
       } catch (err) {
         console.error('Failed to fetch signals:', err);
@@ -594,18 +579,12 @@
       const output = document.getElementById('signals-tabpanel');
       const countBar = document.getElementById('count-bar');
 
-      // Apply beat filter
-      let filtered = signals;
-      if (activeBeat) {
-        filtered = signals.filter(s => {
-          const slug = beatSlug(s.beat);
-          return slug === activeBeat;
-        });
-      }
+      let filtered = activeBeat
+        ? signals.filter(s => beatSlug(s.beat) === activeBeat)
+        : [...signals];
 
-      // Sort: pending tab already sorted oldest-first; others newest-first
       if (activeTab !== 'pending') {
-        filtered = [...filtered].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       }
 
       const totalCount = filtered.length;
@@ -614,8 +593,8 @@
       // Clamp currentPage to valid range after filter changes
       if (currentPage > totalPages) currentPage = totalPages;
 
-      const pageLabel = totalPages > 1 ? ` \u2014 Page ${currentPage} of ${totalPages}` : '';
-      countBar.textContent = (totalCount === 1 ? '1 signal' : totalCount + ' signals') + pageLabel;
+      const countText = totalCount === 1 ? '1 signal' : `${totalCount} signals`;
+      countBar.textContent = totalPages > 1 ? `${countText} \u2014 Page ${currentPage} of ${totalPages}` : countText;
 
       if (totalCount === 0) {
         output.innerHTML = `<div class="signal-empty">No signals found.</div>`;
@@ -664,26 +643,16 @@
       output.innerHTML = `<div class="signal-list">${cards}</div>${paginationHTML}`;
 
       if (totalPages > 1) {
-        const prevBtn = document.getElementById('page-prev');
-        const nextBtn = document.getElementById('page-next');
-        if (prevBtn) {
-          prevBtn.addEventListener('click', () => {
-            if (currentPage > 1) {
-              currentPage--;
-              renderSignals(currentSignals);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-          });
-        }
-        if (nextBtn) {
-          nextBtn.addEventListener('click', () => {
-            if (currentPage < totalPages) {
-              currentPage++;
-              renderSignals(currentSignals);
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-          });
-        }
+        document.getElementById('page-prev')?.addEventListener('click', () => {
+          currentPage--;
+          renderSignals(currentSignals);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+        document.getElementById('page-next')?.addEventListener('click', () => {
+          currentPage++;
+          renderSignals(currentSignals);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
       }
     }
 
