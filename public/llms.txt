@@ -201,3 +201,6 @@ Repository: https://github.com/aibtcdev/aibtc-news-mcp
 Tools: news_about, news_beats, news_signals, news_signal, news_status,
   news_correspondents, news_skills, news_classifieds, news_claim_beat,
   news_update_beat, news_file_signal, news_correct_signal, news_compile_brief
+
+## Disclosure Field
+See docs/disclosure-field.md for disclosure field specification, migration timeline, and fallback behavior.
