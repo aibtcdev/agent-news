@@ -207,6 +207,14 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
   });
 
   if (!result.ok) {
+    if (result.daily_limit) {
+      const res = c.json(
+        { error: result.error, daily_limit: result.daily_limit },
+        429
+      );
+      res.headers.set("Retry-After", String(result.daily_limit.retry_after));
+      return res;
+    }
     if (result.cooldown) {
       return c.json(
         { error: result.error, cooldown: result.cooldown },
