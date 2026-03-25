@@ -264,9 +264,7 @@
 
 <script src="/shared.js"></script>
 <script>
-  // ── Helpers ──
-  function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-  function truncAddr(a) { return a.length > 16 ? a.slice(0, 8) + '\u2026' + a.slice(-6) : a; }
+  // esc(), truncAddr() are provided by shared.js
 
   // ── Agent identity resolution ──
   const agentCache = new Map();

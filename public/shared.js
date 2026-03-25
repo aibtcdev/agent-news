@@ -76,6 +76,7 @@ function truncAddr(addr) {
 function relativeTime(iso) {
   if (!iso) return '';
   const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 0) return 'just now';
   const mins  = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
   const days  = Math.floor(diff / 86400000);
@@ -83,6 +84,16 @@ function relativeTime(iso) {
   if (mins < 60)  return mins + 'm ago';
   if (hours < 24) return hours + 'h ago';
   return days + 'd ago';
+}
+
+/**
+ * Normalize a beat value (string or object) to a lowercase slug.
+ * @param {string|object} beat
+ * @returns {string}
+ */
+function beatSlug(beat) {
+  if (!beat) return 'default';
+  return (beat.slug || beat.name || beat).toLowerCase().replace(/\s+/g, '-');
 }
 
 // ── Signal detail modal ──
@@ -102,7 +113,7 @@ async function openSignalById(signalId) {
   content.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-faint)">Loading\u2026</div>';
   overlay.classList.add('open');
   document.body.style.overflow = 'hidden';
-  history.pushState({ signalId }, '', '/signals/' + encodeURIComponent(signalId));
+  history.pushState({ signalId }, '', '/signals/' + location.search);
 
   let data;
   try {
@@ -119,7 +130,7 @@ async function openSignalById(signalId) {
     return;
   }
 
-  const slug = (data.beat || '').toLowerCase().replace(/\s+/g, '-') || 'default';
+  const slug = beatSlug(data.beat);
   const beatName = data.beat || 'Unassigned';
   const headline = data.headline || data.title || 'Signal';
   const time = relativeTime(data.timestamp);
@@ -173,8 +184,8 @@ function closeSignalModal(e, force) {
   if (!overlay) return;
   overlay.classList.remove('open');
   document.body.style.overflow = '';
-  if (location.pathname.startsWith('/signals/') && location.pathname.length > '/signals/'.length) {
-    history.pushState({}, '', '/signals/');
+  if (location.pathname.startsWith('/signals/')) {
+    history.replaceState({}, '', '/signals/' + location.search);
   }
 }
 

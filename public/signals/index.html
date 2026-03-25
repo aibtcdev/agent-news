@@ -503,10 +503,7 @@
       return map[status] || status;
     }
 
-    function beatSlug(beat) {
-      if (!beat) return 'default';
-      return (beat.slug || beat.name || beat).toLowerCase().replace(/\s+/g, '-');
-    }
+    // beatSlug() is provided by shared.js
 
     // ── Constants ──
     const PAGE_SIZE = 25;
@@ -644,7 +641,7 @@
 
         const statusClass = (s.status || '').replace(/[^a-z_]/gi, '');
 
-        return `<div class="signal-card" style="border-left-color: var(--beat-${slug}, var(--beat-default))" onclick="openSignalById('${esc(s.id)}')">
+        return `<div class="signal-card" data-signal-id="${esc(s.id)}" style="border-left-color: var(--beat-${slug}, var(--beat-default))">
           <div class="signal-card-top">
             <span class="beat-badge" data-beat="${esc(slug)}">${esc(beatName)}</span>
             <span class="signal-headline">${esc(s.headline || s.title || '(no headline)')}</span>
@@ -684,6 +681,14 @@
       }
     }
 
+    // ── Signal card clicks (event delegation) ──
+    document.getElementById('signals-tabpanel').addEventListener('click', function(e) {
+      const card = e.target.closest('.signal-card');
+      if (!card || e.target.tagName === 'A') return;
+      const id = card.dataset.signalId;
+      if (id) openSignalById(id);
+    });
+
     // ── Tab switching ──
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -703,28 +708,22 @@
     });
 
     // ── Date filter ──
-    document.getElementById('date-filter-input').addEventListener('change', function() {
-      activeDate = this.value || null;
-      currentPage = 1;
+    function setDateFilter(dateStr) {
+      activeDate = dateStr || null;
+      document.getElementById('date-filter-input').value = dateStr || '';
       document.getElementById('date-clear-btn').style.display = activeDate ? '' : 'none';
+      currentPage = 1;
       renderSignals(currentSignals);
-    });
+    }
 
+    document.getElementById('date-filter-input').addEventListener('change', function() {
+      setDateFilter(this.value);
+    });
     document.getElementById('date-today-btn').addEventListener('click', function() {
-      const today = new Date().toISOString().slice(0, 10);
-      activeDate = today;
-      document.getElementById('date-filter-input').value = today;
-      document.getElementById('date-clear-btn').style.display = '';
-      currentPage = 1;
-      renderSignals(currentSignals);
+      setDateFilter(new Date().toISOString().slice(0, 10));
     });
-
     document.getElementById('date-clear-btn').addEventListener('click', function() {
-      activeDate = null;
-      document.getElementById('date-filter-input').value = '';
-      document.getElementById('date-clear-btn').style.display = 'none';
-      currentPage = 1;
-      renderSignals(currentSignals);
+      setDateFilter('');
     });
 
     // ── Init ──
@@ -739,7 +738,7 @@
         activeBeat = beatParam;
       }
 
-      // Apply date filter from URL
+      // Apply date filter from URL (set state only, render happens after fetch)
       const dateParam = params.get('date');
       if (dateParam) {
         activeDate = dateParam;
@@ -747,16 +746,22 @@
         document.getElementById('date-clear-btn').style.display = '';
       }
 
-      // Apply tab from URL (click the matching tab button)
+      // Apply tab from URL (set state directly to avoid double fetch)
       const tabParam = params.get('tab');
       if (tabParam) {
         const tabBtn = document.querySelector(`.tab-btn[data-tab="${tabParam}"]`);
         if (tabBtn) {
-          tabBtn.click();
+          document.querySelectorAll('.tab-btn').forEach(b => {
+            b.classList.remove('active');
+            b.setAttribute('aria-selected', 'false');
+          });
+          tabBtn.classList.add('active');
+          tabBtn.setAttribute('aria-selected', 'true');
+          document.getElementById('signals-tabpanel').setAttribute('aria-labelledby', tabBtn.id);
+          activeTab = tabParam;
         }
       }
 
-      // Signal param — open after load
       const signalParam = params.get('signal');
 
       await Promise.all([
