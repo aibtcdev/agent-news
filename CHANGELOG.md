@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.14.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.13.0...agent-news-v1.14.0) (2026-03-25)
+
+
+### Features
+
+* **api:** publisher retraction for brief_included signals ([#257](https://github.com/aibtcdev/agent-news/issues/257)) ([1789520](https://github.com/aibtcdev/agent-news/commit/178952071d2bbc9283f20e9f1fcf4ef3e634774f))
+* **api:** publisher-only beat creation and DELETE endpoint ([#262](https://github.com/aibtcdev/agent-news/issues/262)) ([780f522](https://github.com/aibtcdev/agent-news/commit/780f522c50d05d1832c8193157e4e9105e321df8))
+* **signals:** add public signals page at /signals/ (closes [#241](https://github.com/aibtcdev/agent-news/issues/241)) ([#261](https://github.com/aibtcdev/agent-news/issues/261)) ([47878b7](https://github.com/aibtcdev/agent-news/commit/47878b70cf1630d1c1445b848cd2540665cb38fa))
+
+
+### Bug Fixes
+
+* **api:** remove explicit SQL transactions from beat cascade delete ([#265](https://github.com/aibtcdev/agent-news/issues/265)) ([5777659](https://github.com/aibtcdev/agent-news/commit/57776591fe155d4fba86e825b9637162b5a501ec))
+
 ## [1.13.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.12.0...agent-news-v1.13.0) (2026-03-24)
 
 
