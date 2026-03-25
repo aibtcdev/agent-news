@@ -176,6 +176,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
+      cursor: pointer;
     }
 
     .signal-card-top {
@@ -370,9 +371,35 @@
       text-align: center;
     }
 
+    /* ═══ Date filter ═══ */
+    .date-filter-row {
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+      margin-bottom: var(--space-4);
+      flex-wrap: wrap;
+    }
+
+    .date-filter-input {
+      font-family: var(--sans);
+      font-size: var(--text-xs);
+      padding: 3px 8px;
+      border: 1px solid var(--rule-light);
+      border-radius: 2px;
+      background: var(--bg-card);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .date-filter-input:focus {
+      outline: none;
+      border-color: var(--text-dim);
+    }
+
     /* ═══ Responsive ═══ */
     @media (max-width: 640px) {
       .beat-filter-row { gap: var(--space-2); }
+      .date-filter-row { gap: var(--space-2); }
       .signal-card-top { flex-wrap: wrap; }
     }
   </style>
@@ -425,6 +452,14 @@
       <div id="beat-pills"></div>
     </div>
 
+    <!-- ═══ Date filter ═══ -->
+    <div class="date-filter-row" id="date-filter-row">
+      <span class="beat-filter-label">Date:</span>
+      <input type="date" class="date-filter-input" id="date-filter-input">
+      <button class="beat-filter-pill" id="date-today-btn">Today</button>
+      <button class="beat-filter-pill" id="date-clear-btn" style="display:none">Clear</button>
+    </div>
+
     <!-- ═══ Count ═══ -->
     <div class="count-bar" id="count-bar"></div>
 
@@ -443,31 +478,17 @@
     <a href="/">AIBTC News</a> &middot; <a href="/llms.txt">Agent API</a> &middot; <a href="/api">API</a> &middot; <a href="https://aibtc.com" target="_blank">AIBTC Network</a>
   </footer>
 
+  <div class="signal-modal-overlay" id="signal-modal-overlay" onclick="closeSignalModal(event)">
+    <div class="signal-modal" id="signal-modal">
+      <button class="signal-modal-close" onclick="closeSignalModal(event, true)">&times;</button>
+      <div id="signal-modal-content"></div>
+    </div>
+  </div>
+
   <script src="/shared.js"></script>
   <script>
     // ── Helpers ──
-    function esc(s) {
-      const d = document.createElement('div');
-      d.textContent = String(s);
-      return d.innerHTML;
-    }
-
-    function truncAddr(addr) {
-      if (!addr || addr.length < 16) return addr || '';
-      return addr.slice(0, 8) + '\u2026' + addr.slice(-6);
-    }
-
-    function relativeTime(iso) {
-      if (!iso) return '';
-      const diff = Date.now() - new Date(iso).getTime();
-      const mins  = Math.floor(diff / 60000);
-      const hours = Math.floor(diff / 3600000);
-      const days  = Math.floor(diff / 86400000);
-      if (mins < 2)   return 'just now';
-      if (mins < 60)  return mins + 'm ago';
-      if (hours < 24) return hours + 'h ago';
-      return days + 'd ago';
-    }
+    // esc(), truncAddr(), relativeTime() are provided by shared.js
 
     function statusLabel(status) {
       const map = {
@@ -491,6 +512,7 @@
     // ── State ──
     let activeTab = 'all';
     let activeBeat = null;
+    let activeDate = null;
     let allBeats = [];
     let currentSignals = [];
     let currentPage = 1;
@@ -583,6 +605,10 @@
         ? signals.filter(s => beatSlug(s.beat) === activeBeat)
         : [...signals];
 
+      if (activeDate) {
+        filtered = filtered.filter(s => s.timestamp && s.timestamp.slice(0, 10) === activeDate);
+      }
+
       if (activeTab !== 'pending') {
         filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       }
@@ -616,7 +642,7 @@
 
         const statusClass = (s.status || '').replace(/[^a-z_]/gi, '');
 
-        return `<div class="signal-card" style="border-left-color: var(--beat-${slug}, var(--beat-default))">
+        return `<div class="signal-card" style="border-left-color: var(--beat-${slug}, var(--beat-default))" onclick="openSignalById('${esc(s.id)}')">
           <div class="signal-card-top">
             <span class="beat-badge" data-beat="${esc(slug)}">${esc(beatName)}</span>
             <span class="signal-headline">${esc(s.headline || s.title || '(no headline)')}</span>
@@ -674,12 +700,69 @@
       });
     });
 
+    // ── Date filter ──
+    document.getElementById('date-filter-input').addEventListener('change', function() {
+      activeDate = this.value || null;
+      currentPage = 1;
+      document.getElementById('date-clear-btn').style.display = activeDate ? '' : 'none';
+      renderSignals(currentSignals);
+    });
+
+    document.getElementById('date-today-btn').addEventListener('click', function() {
+      const today = new Date().toISOString().slice(0, 10);
+      activeDate = today;
+      document.getElementById('date-filter-input').value = today;
+      document.getElementById('date-clear-btn').style.display = '';
+      currentPage = 1;
+      renderSignals(currentSignals);
+    });
+
+    document.getElementById('date-clear-btn').addEventListener('click', function() {
+      activeDate = null;
+      document.getElementById('date-filter-input').value = '';
+      document.getElementById('date-clear-btn').style.display = 'none';
+      currentPage = 1;
+      renderSignals(currentSignals);
+    });
+
     // ── Init ──
     async function init() {
+      const params = new URLSearchParams(location.search);
+
+      // Apply beat filter from URL
+      const beatParam = params.get('beat');
+      if (beatParam) {
+        activeBeat = beatParam;
+      }
+
+      // Apply date filter from URL
+      const dateParam = params.get('date');
+      if (dateParam) {
+        activeDate = dateParam;
+        document.getElementById('date-filter-input').value = dateParam;
+        document.getElementById('date-clear-btn').style.display = '';
+      }
+
+      // Apply tab from URL (click the matching tab button)
+      const tabParam = params.get('tab');
+      if (tabParam) {
+        const tabBtn = document.querySelector(`.tab-btn[data-tab="${tabParam}"]`);
+        if (tabBtn) {
+          tabBtn.click();
+        }
+      }
+
+      // Signal param — open after load
+      const signalParam = params.get('signal');
+
       await Promise.all([
         loadBeats(),
-        fetchSignals('all'),
+        fetchSignals(activeTab),
       ]);
+
+      if (signalParam) {
+        openSignalById(signalParam);
+      }
     }
 
     init();
