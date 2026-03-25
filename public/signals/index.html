@@ -481,8 +481,8 @@
   </footer>
 
   <div class="signal-modal-overlay" id="signal-modal-overlay" onclick="closeSignalModal(event)">
-    <div class="signal-modal" id="signal-modal">
-      <button class="signal-modal-close" onclick="closeSignalModal(event, true)">&times;</button>
+    <div class="signal-modal" id="signal-modal" role="dialog" aria-modal="true" aria-label="Signal detail">
+      <button class="signal-modal-close" aria-label="Close dialog" onclick="closeSignalModal(event, true)">&times;</button>
       <div id="signal-modal-content"></div>
     </div>
   </div>
@@ -641,7 +641,7 @@
 
         const statusClass = (s.status || '').replace(/[^a-z_]/gi, '');
 
-        return `<div class="signal-card" data-signal-id="${esc(s.id)}" style="border-left-color: var(--beat-${slug}, var(--beat-default))">
+        return `<div class="signal-card" data-signal-id="${esc(s.id)}" role="button" tabindex="0" style="border-left-color: var(--beat-${slug}, var(--beat-default))">
           <div class="signal-card-top">
             <span class="beat-badge" data-beat="${esc(slug)}">${esc(beatName)}</span>
             <span class="signal-headline">${esc(s.headline || s.title || '(no headline)')}</span>
@@ -681,12 +681,19 @@
       }
     }
 
-    // ── Signal card clicks (event delegation) ──
-    document.getElementById('signals-tabpanel').addEventListener('click', function(e) {
+    // ── Signal card interaction (event delegation) ──
+    function handleCardActivation(e) {
       const card = e.target.closest('.signal-card');
       if (!card || e.target.tagName === 'A') return;
       const id = card.dataset.signalId;
       if (id) openSignalById(id);
+    }
+    document.getElementById('signals-tabpanel').addEventListener('click', handleCardActivation);
+    document.getElementById('signals-tabpanel').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        handleCardActivation(e);
+      }
     });
 
     // ── Tab switching ──

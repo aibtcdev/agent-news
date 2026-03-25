@@ -48,14 +48,19 @@ function setDateBar(elementId) {
 // ── Shared text helpers ──
 
 /**
- * HTML-escape a string for safe insertion into innerHTML.
+ * HTML-escape a string for safe insertion into innerHTML and attributes.
+ * Escapes &, <, >, ", and ' to prevent XSS in both content and attribute contexts.
  * @param {string} s
  * @returns {string}
  */
 function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = String(s == null ? '' : s);
-  return d.innerHTML;
+  var str = String(s == null ? '' : s);
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 /**
@@ -96,11 +101,30 @@ function beatSlug(beat) {
   return (beat.slug || beat.name || beat).toLowerCase().replace(/\s+/g, '-');
 }
 
+// ── Signal modal URL helpers ──
+
+/**
+ * Build a URL string with the `signal` query param set or removed.
+ * Preserves all other existing query params.
+ */
+function _signalUrl(signalId) {
+  var params = new URLSearchParams(location.search);
+  if (signalId) {
+    params.set('signal', signalId);
+  } else {
+    params.delete('signal');
+  }
+  var qs = params.toString();
+  return '/signals/' + (qs ? '?' + qs : '');
+}
+
 // ── Signal detail modal ──
+
+var _priorFocusEl = null;
 
 /**
  * Fetch a signal by ID and render it in the shared modal overlay.
- * Pushes a deep-link URL to the history stack.
+ * Updates the URL with ?signal=<id> for deep linking.
  * Requires #signal-modal-overlay and #signal-modal-content in the page.
  * @param {string} signalId
  */
@@ -109,11 +133,17 @@ async function openSignalById(signalId) {
   const content = document.getElementById('signal-modal-content');
   if (!overlay || !content) return;
 
+  _priorFocusEl = document.activeElement;
+
   // Show loading state while fetching
   content.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-faint)">Loading\u2026</div>';
   overlay.classList.add('open');
   document.body.style.overflow = 'hidden';
-  history.pushState({ signalId }, '', '/signals/' + location.search);
+  history.pushState({ signalId: signalId }, '', _signalUrl(signalId));
+
+  // Move focus into the modal for accessibility
+  var closeBtn = overlay.querySelector('.signal-modal-close');
+  if (closeBtn) closeBtn.focus();
 
   let data;
   try {
@@ -136,6 +166,10 @@ async function openSignalById(signalId) {
   const time = relativeTime(data.timestamp);
   const shortAddr = truncAddr(data.btcAddress || data.submittedBy || '');
   const url = location.origin + '/signals/' + encodeURIComponent(signalId);
+
+  // Set accessible label from headline
+  var modal = overlay.querySelector('.signal-modal');
+  if (modal) modal.setAttribute('aria-label', headline);
 
   let html = '';
   html += '<span class="beat-badge" data-beat="' + esc(slug) + '">' + esc(beatName) + '</span>';
@@ -184,7 +218,7 @@ async function openSignalById(signalId) {
 }
 
 /**
- * Close the shared signal modal and restore scroll and URL state.
+ * Close the shared signal modal and restore scroll, URL, and focus state.
  * @param {Event|null} e   The click event (used to check overlay click vs inner click).
  * @param {boolean} force  If true, close regardless of click target.
  */
@@ -195,7 +229,12 @@ function closeSignalModal(e, force) {
   overlay.classList.remove('open');
   document.body.style.overflow = '';
   if (location.pathname.startsWith('/signals/')) {
-    history.replaceState({}, '', '/signals/' + location.search);
+    history.replaceState({}, '', _signalUrl(null));
+  }
+  // Restore focus to the element that opened the modal
+  if (_priorFocusEl && _priorFocusEl.focus) {
+    _priorFocusEl.focus();
+    _priorFocusEl = null;
   }
 }
 
@@ -209,12 +248,21 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
-// Handle browser back button
+// Derive modal state from URL on back/forward navigation
 window.addEventListener('popstate', function() {
   const overlay = document.getElementById('signal-modal-overlay');
-  if (overlay && overlay.classList.contains('open') && !location.pathname.startsWith('/signals/')) {
+  if (!overlay) return;
+  var params = new URLSearchParams(location.search);
+  var signalId = params.get('signal');
+  if (signalId && !overlay.classList.contains('open')) {
+    openSignalById(signalId);
+  } else if (!signalId && overlay.classList.contains('open')) {
     overlay.classList.remove('open');
     document.body.style.overflow = '';
+    if (_priorFocusEl && _priorFocusEl.focus) {
+      _priorFocusEl.focus();
+      _priorFocusEl = null;
+    }
   }
 });
 
