@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -16,7 +16,7 @@ export const SIGNAL_VALID_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
   in_review: ["approved", "rejected"],
   approved: ["brief_included", "rejected"],
   rejected: ["approved"],
-  brief_included: [],
+  brief_included: ["rejected"],
 };
 
 /** Valid editorial transitions for classifieds: pending_review → approved/rejected */
@@ -140,7 +140,8 @@ export class NewsDO extends DurableObject<Env> {
     // 6 = Classifieds editorial review (status, publisher_feedback, reviewed_at, refund_txid)
     // 7 = Leaderboard snapshots (audit infrastructure for prize competitions)
     // 8 = Beat claims (multi-agent beats — beat_claims join table)
-    const CURRENT_MIGRATION_VERSION = 8;
+    // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
+    const CURRENT_MIGRATION_VERSION = 9;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -248,6 +249,20 @@ export class NewsDO extends DurableObject<Env> {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes("already exists")) {
               console.error("Beat claims migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run retraction support migration — soft-archive columns for brief_signals and earnings.
+      if (appliedVersion < 9) {
+        for (const stmt of MIGRATION_RETRACTION_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("Retraction migration statement failed:", e);
             }
           }
         }
@@ -370,6 +385,28 @@ export class NewsDO extends DurableObject<Env> {
         } satisfies DOResult<Signal>, 400);
       }
 
+      // Pre-inscription retraction gate: brief_included → rejected is only allowed
+      // if the brief containing this signal has NOT been inscribed yet.
+      // Post-inscription, the on-chain record is final — use additive corrections instead.
+      if (currentStatus === "brief_included" && newStatus === "rejected") {
+        const inscriptionRows = this.ctx.storage.sql
+          .exec(
+            `SELECT b.inscription_id
+             FROM brief_signals bs
+             JOIN briefs b ON bs.brief_date = b.date
+             WHERE bs.signal_id = ?
+             LIMIT 1`,
+            id
+          )
+          .toArray();
+        if (inscriptionRows.length > 0 && (inscriptionRows[0] as Record<string, unknown>).inscription_id) {
+          return c.json({
+            ok: false,
+            error: "Cannot retract a signal after its brief has been inscribed. Use a correction instead.",
+          } satisfies DOResult<Signal>, 409);
+        }
+      }
+
       const now = new Date().toISOString();
       this.ctx.storage.sql.exec(
         `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
@@ -380,6 +417,19 @@ export class NewsDO extends DurableObject<Env> {
         now,
         id
       );
+
+      // Soft-archive brief_signals and void unpaid earnings when retracting a brief_included signal.
+      // Records are preserved for audit — retracted_at/voided_at timestamps mark them inactive.
+      if (currentStatus === "brief_included" && newStatus === "rejected") {
+        this.ctx.storage.sql.exec(
+          "UPDATE brief_signals SET retracted_at = ? WHERE signal_id = ? AND retracted_at IS NULL",
+          now, id
+        );
+        this.ctx.storage.sql.exec(
+          "UPDATE earnings SET voided_at = ? WHERE reason = 'brief_inclusion' AND reference_id = ? AND payout_txid IS NULL AND voided_at IS NULL",
+          now, id
+        );
+      }
 
       // Re-fetch with tags
       const updated = this.ctx.storage.sql
@@ -2125,7 +2175,7 @@ export class NewsDO extends DurableObject<Env> {
              SUM(amount_sats) as total_unpaid_sats,
              COUNT(*) as pending_count
            FROM earnings
-           WHERE payout_txid IS NULL AND amount_sats > 0
+           WHERE payout_txid IS NULL AND amount_sats > 0 AND voided_at IS NULL
            GROUP BY btc_address
            ORDER BY total_unpaid_sats DESC
            LIMIT 1000`
@@ -2444,7 +2494,7 @@ export class NewsDO extends DurableObject<Env> {
         .exec(
           `SELECT btc_address, COUNT(*) as inclusion_count
            FROM brief_signals
-           WHERE created_at > datetime('now', '-30 days')
+           WHERE created_at > datetime('now', '-30 days') AND retracted_at IS NULL
            GROUP BY btc_address
            ORDER BY inclusion_count DESC`
         )
@@ -2460,7 +2510,7 @@ export class NewsDO extends DurableObject<Env> {
           `SELECT bs.*, s.headline, s.beat_slug
            FROM brief_signals bs
            JOIN signals s ON bs.signal_id = s.id
-           WHERE bs.brief_date = ?
+           WHERE bs.brief_date = ? AND bs.retracted_at IS NULL
            ORDER BY bs.position`,
           date
         )
@@ -3265,6 +3315,64 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Seed config (publisher designation, etc.)
+      if (Array.isArray(body.config)) {
+        for (const row of body.config as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT INTO config (key, value, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+              row.key as string,
+              row.value as string
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed briefs
+      if (Array.isArray(body.briefs)) {
+        for (const row of body.briefs as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO briefs (date, text, json_data, compiled_at, inscribed_txid, inscription_id)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              row.date as string,
+              (row.text as string) ?? "",
+              (row.json_data as string) ?? "{}",
+              (row.compiled_at as string) ?? new Date().toISOString(),
+              (row.inscribed_txid as string | null) ?? null,
+              (row.inscription_id as string | null) ?? null
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed earnings
+      if (Array.isArray(body.earnings)) {
+        for (const row of body.earnings as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at, payout_txid)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.btc_address as string,
+              (row.amount_sats as number) ?? 0,
+              (row.reason as string) ?? "brief_inclusion",
+              (row.reference_id as string | null) ?? null,
+              (row.created_at as string) ?? new Date().toISOString(),
+              (row.payout_txid as string | null) ?? null
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
       return c.json({ ok: true, data: { inserted } });
     });
 
@@ -3348,7 +3456,7 @@ export class NewsDO extends DurableObject<Env> {
          ) a
          LEFT JOIN (
            SELECT btc_address, COUNT(*) as inclusion_count
-           FROM brief_signals WHERE created_at > datetime('now', '-30 days')
+           FROM brief_signals WHERE created_at > datetime('now', '-30 days') AND retracted_at IS NULL
            GROUP BY btc_address
          ) bi ON a.btc_address = bi.btc_address
          LEFT JOIN (
@@ -3381,7 +3489,7 @@ export class NewsDO extends DurableObject<Env> {
          LEFT JOIN (
            -- Lifetime cumulative earnings (positive amounts only; not windowed to 30 days).
            SELECT btc_address, SUM(amount_sats) AS total_earned_sats
-           FROM earnings WHERE amount_sats > 0
+           FROM earnings WHERE amount_sats > 0 AND voided_at IS NULL
            GROUP BY btc_address
          ) ea ON a.btc_address = ea.btc_address
          LEFT JOIN (

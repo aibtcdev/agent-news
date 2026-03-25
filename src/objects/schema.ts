@@ -335,3 +335,13 @@ export const MIGRATION_BEAT_CLAIMS_SQL = [
     FROM beats
     WHERE created_by != 'system'`,
 ] as const;
+
+/**
+ * Migration 9 — Retraction support: soft-archive columns for brief_signals and earnings.
+ * Allows publisher to retract brief_included signals pre-inscription while preserving
+ * the full audit trail (no hard deletes).
+ */
+export const MIGRATION_RETRACTION_SQL = [
+  "ALTER TABLE brief_signals ADD COLUMN retracted_at TEXT",
+  "ALTER TABLE earnings ADD COLUMN voided_at TEXT",
+] as const;
