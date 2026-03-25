@@ -101,3 +101,63 @@ describe("POST /api/beats — validation errors", () => {
   // NOTE: Only 5 POST tests total to stay within the rate limit (5 req/hour per IP).
   // Color validation is covered by the validators unit tests in validators.test.ts.
 });
+
+describe("DELETE /api/beats/:slug — validation errors", () => {
+  it("returns 400 when body is not valid JSON", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/beats/some-beat",
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: "not-json",
+      }
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toBeTruthy();
+  });
+
+  it("returns 400 when btc_address is missing", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/beats/some-beat",
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      }
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("btc_address");
+  });
+
+  it("returns 400 for an invalid BTC address", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/beats/some-beat",
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ btc_address: "not-valid" }),
+      }
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("BTC address");
+  });
+
+  it("returns 401 when auth headers are missing (valid data, no auth)", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/beats/some-beat",
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+        }),
+      }
+    );
+    expect(res.status).toBe(401);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toBeTruthy();
+  });
+});
