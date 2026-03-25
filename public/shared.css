@@ -259,3 +259,131 @@ a:hover { color: var(--text); }
 @media print {
   .datebar, .theme-toggle { display: none; }
 }
+
+/* ── Signal detail modal ── */
+.signal-modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  justify-content: center;
+  align-items: flex-start;
+  padding: 5vh 16px;
+  overflow-y: auto;
+}
+.signal-modal-overlay.open {
+  display: flex;
+}
+.signal-modal {
+  background: var(--bg);
+  border: 1px solid var(--rule-light);
+  border-radius: 4px;
+  max-width: 640px;
+  width: 100%;
+  padding: var(--space-5);
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+}
+.signal-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-size: 22px;
+  line-height: 1;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  transition: color 0.15s;
+}
+.signal-modal-close:hover {
+  color: var(--text);
+}
+.signal-modal .brief-text-content,
+.signal-modal .story-content,
+.signal-modal .column-content,
+.signal-modal .lead-content {
+  display: block !important;
+  -webkit-line-clamp: unset !important;
+  overflow: visible !important;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text);
+  margin-bottom: var(--space-3);
+  overflow-wrap: anywhere;
+}
+.signal-modal .brief-text-headline,
+.signal-modal .column-headline,
+.signal-modal .story-headline,
+.signal-modal .lead-headline {
+  font-family: var(--serif);
+  font-size: clamp(20px, 4vw, 28px);
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: var(--space-3);
+}
+.signal-modal .brief-text-attr,
+.signal-modal .column-attribution,
+.signal-modal .story-attribution,
+.signal-modal .lead-attribution {
+  font-size: 12px;
+  color: var(--text-faint);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--rule-faint);
+  margin-bottom: var(--space-3);
+}
+/* Show sources, tags, and disclosure inside modal */
+.signal-modal .signal-sources,
+.signal-modal .signal-tags,
+.signal-modal .signal-correction,
+.signal-modal .signal-disclosure,
+.signal-modal .brief-text-sources {
+  display: block !important;
+}
+.signal-modal .brief-more-count {
+  display: none;
+}
+.signal-modal .story-expand-toggle {
+  display: none;
+}
+.signal-modal-permalink {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--rule-faint);
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.signal-modal-permalink code {
+  font-family: var(--mono);
+  font-size: var(--text-xs);
+  background: var(--bg-card);
+  border: 1px solid var(--rule-faint);
+  padding: 2px 6px;
+  border-radius: 3px;
+  user-select: all;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.signal-modal-copy {
+  font-family: var(--sans);
+  font-size: var(--text-xs);
+  padding: 3px 8px;
+  border: 1px solid var(--rule-light);
+  border-radius: 3px;
+  background: var(--bg-card);
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.signal-modal-copy:hover { color: var(--text); }
