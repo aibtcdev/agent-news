@@ -3,7 +3,7 @@ import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { BEAT_RATE_LIMIT } from "../lib/constants";
 import { validateSlug, validateHexColor, validateBtcAddress, sanitizeString } from "../lib/validators";
-import { listBeats, getBeat, createBeat, updateBeat } from "../lib/do-client";
+import { listBeats, getBeat, createBeat, updateBeat, deleteBeat } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 
 const beatsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -187,6 +187,58 @@ beatsRouter.patch("/api/beats/:slug", beatRateLimit, async (c) => {
     return c.json({ error: result.error }, result.status ?? 400);
   }
 
+  return c.json(result.data);
+});
+
+// DELETE /api/beats/:slug — delete a beat (Publisher-only, BIP-322 auth required)
+beatsRouter.delete("/api/beats/:slug", beatRateLimit, async (c) => {
+  const slug = c.req.param("slug");
+  if (!slug) return c.json({ error: "Missing route parameter: slug" }, 400);
+
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { btc_address } = body;
+  if (!btc_address) {
+    return c.json({ error: "Missing required field: btc_address" }, 400);
+  }
+
+  if (!validateBtcAddress(btc_address)) {
+    return c.json(
+      { error: "Invalid BTC address format (expected bech32 bc1...)" },
+      400
+    );
+  }
+
+  // BIP-322 auth: verify signature from btc_address
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btc_address as string,
+    "DELETE",
+    `/api/beats/${slug}`
+  );
+  if (!authResult.valid) {
+    const logger = c.get("logger");
+    logger.warn("auth failure on DELETE /api/beats/:slug", {
+      code: authResult.code,
+      btc_address,
+      slug,
+    });
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  const result = await deleteBeat(c.env, slug, btc_address as string);
+
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.status ?? 400);
+  }
+
+  const logger = c.get("logger");
+  logger.info("beat deleted", { slug, deleted_by: btc_address });
   return c.json(result.data);
 });
 
