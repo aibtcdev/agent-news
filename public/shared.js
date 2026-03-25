@@ -54,7 +54,7 @@ function setDateBar(elementId) {
  * @returns {string}
  */
 function esc(s) {
-  var str = String(s == null ? '' : s);
+  const str = s == null ? '' : String(s);
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -108,13 +108,13 @@ function beatSlug(beat) {
  * Preserves all other existing query params.
  */
 function _signalUrl(signalId) {
-  var params = new URLSearchParams(location.search);
+  const params = new URLSearchParams(location.search);
   if (signalId) {
     params.set('signal', signalId);
   } else {
     params.delete('signal');
   }
-  var qs = params.toString();
+  const qs = params.toString();
   return '/signals/' + (qs ? '?' + qs : '');
 }
 
@@ -181,7 +181,8 @@ async function openSignalById(signalId) {
 
   if (data.sources && data.sources.length) {
     const links = data.sources.map(function(s) {
-      return '<a href="' + esc(s.url) + '" target="_blank" rel="noopener">' + esc(s.title || s.url) + '</a>';
+      const safeUrl = /^https?:\/\//i.test(s.url) ? s.url : '#';
+      return '<a href="' + esc(safeUrl) + '" target="_blank" rel="noopener">' + esc(s.title || s.url) + '</a>';
     }).join('');
     html += '<div class="signal-sources"><span class="signal-sources-label">Sources</span>' + links + '</div>';
   }
@@ -252,17 +253,12 @@ document.addEventListener('keydown', function(e) {
 window.addEventListener('popstate', function() {
   const overlay = document.getElementById('signal-modal-overlay');
   if (!overlay) return;
-  var params = new URLSearchParams(location.search);
-  var signalId = params.get('signal');
+  const params = new URLSearchParams(location.search);
+  const signalId = params.get('signal');
   if (signalId && !overlay.classList.contains('open')) {
     openSignalById(signalId);
   } else if (!signalId && overlay.classList.contains('open')) {
-    overlay.classList.remove('open');
-    document.body.style.overflow = '';
-    if (_priorFocusEl && _priorFocusEl.focus) {
-      _priorFocusEl.focus();
-      _priorFocusEl = null;
-    }
+    closeSignalModal(null, true);
   }
 });
 
