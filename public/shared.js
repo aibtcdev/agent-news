@@ -165,12 +165,22 @@ async function openSignalById(signalId) {
 
   html += '<div class="signal-modal-permalink">'
     + '<code>' + esc(url) + '</code>'
-    + '<button class="signal-modal-copy" onclick="event.stopPropagation();navigator.clipboard.writeText(\''
-    + esc(url).replace(/'/g, "\\'")
-    + '\').then(function(){this.textContent=\'Copied!\'}.bind(this));setTimeout(function(){this.textContent=\'Copy\'}.bind(this),1500)">Copy</button>'
+    + '<button class="signal-modal-copy" data-copy-url="' + esc(url) + '">Copy</button>'
     + '</div>';
 
   content.innerHTML = html;
+
+  var copyBtn = content.querySelector('.signal-modal-copy');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var btn = this;
+      navigator.clipboard.writeText(btn.dataset.copyUrl).then(function() {
+        btn.textContent = 'Copied!';
+        setTimeout(function() { btn.textContent = 'Copy'; }, 1500);
+      });
+    });
+  }
 }
 
 /**
