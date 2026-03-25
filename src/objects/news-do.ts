@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_STREAKS_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -141,7 +141,8 @@ export class NewsDO extends DurableObject<Env> {
     // 7 = Leaderboard snapshots (audit infrastructure for prize competitions)
     // 8 = Beat claims (multi-agent beats — beat_claims join table)
     // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
-    const CURRENT_MIGRATION_VERSION = 9;
+    // 10 = Per-beat streak tracking (beat_streaks table)
+    const CURRENT_MIGRATION_VERSION = 10;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -263,6 +264,20 @@ export class NewsDO extends DurableObject<Env> {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes("duplicate column")) {
               console.error("Retraction migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Run per-beat streak tracking migration.
+      if (appliedVersion < 10) {
+        for (const stmt of MIGRATION_BEAT_STREAKS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error("Beat streaks migration statement failed:", e);
             }
           }
         }
@@ -1270,6 +1285,46 @@ export class NewsDO extends DurableObject<Env> {
         totalSignals
       );
 
+      // Per-beat streak calculation
+      const beatStreakRows = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM beat_streaks WHERE btc_address = ? AND beat_slug = ?",
+          btc_address as string,
+          beat_slug as string
+        )
+        .toArray();
+
+      let beatCurrentStreak = 1;
+      let beatLongestStreak = 1;
+      let beatTotalSignals = 1;
+      const beatStreakRecord = beatStreakRows[0] as unknown as
+        { current_streak: number; longest_streak: number; last_signal_date: string | null; total_signals: number } | undefined;
+
+      if (beatStreakRecord) {
+        beatTotalSignals = (beatStreakRecord.total_signals ?? 0) + 1;
+        if (beatStreakRecord.last_signal_date === today) {
+          beatCurrentStreak = beatStreakRecord.current_streak ?? 1;
+          beatLongestStreak = beatStreakRecord.longest_streak ?? 1;
+        } else if (beatStreakRecord.last_signal_date === yesterday) {
+          beatCurrentStreak = (beatStreakRecord.current_streak ?? 0) + 1;
+          beatLongestStreak = Math.max(beatCurrentStreak, beatStreakRecord.longest_streak ?? 0);
+        } else {
+          beatCurrentStreak = 1;
+          beatLongestStreak = Math.max(1, beatStreakRecord.longest_streak ?? 0);
+        }
+      }
+
+      this.ctx.storage.sql.exec(
+        `INSERT OR REPLACE INTO beat_streaks (btc_address, beat_slug, current_streak, longest_streak, last_signal_date, total_signals)
+           VALUES (?, ?, ?, ?, ?, ?)`,
+        btc_address as string,
+        beat_slug as string,
+        beatCurrentStreak,
+        beatLongestStreak,
+        today,
+        beatTotalSignals
+      );
+
       // Credit referral on first signal — if a scout registered a referral
       // for this agent and they haven't been credited yet, credit now.
       // Atomicity: DO SQLite runs all exec() calls within a single fetch()
@@ -1938,6 +1993,62 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
       return c.json({ ok: true, data: rows as unknown as Streak[] } satisfies DOResult<Streak[]>);
+    });
+
+    // GET /streaks/:address — per-beat streak breakdown for one agent
+    this.router.get("/streaks/:address", (c) => {
+      const address = c.req.param("address");
+
+      // Fetch all beat streaks for this agent
+      const beatStreakRows = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM beat_streaks WHERE btc_address = ? ORDER BY current_streak DESC",
+          address
+        )
+        .toArray();
+
+      // Build per-beat streaks map
+      const streaks: Record<string, { current: number; longest: number; last_signal: string | null }> = {};
+      for (const row of beatStreakRows) {
+        const r = row as Record<string, unknown>;
+        streaks[r.beat_slug as string] = {
+          current: r.current_streak as number,
+          longest: r.longest_streak as number,
+          last_signal: (r.last_signal_date as string) ?? null,
+        };
+      }
+
+      // Global = max of per-beat streaks (fall back to global streaks table)
+      let globalCurrent = 0;
+      let globalLongest = 0;
+
+      if (beatStreakRows.length > 0) {
+        for (const row of beatStreakRows) {
+          const r = row as Record<string, unknown>;
+          const cur = r.current_streak as number;
+          const lon = r.longest_streak as number;
+          if (cur > globalCurrent) globalCurrent = cur;
+          if (lon > globalLongest) globalLongest = lon;
+        }
+      } else {
+        // Fall back to legacy global streaks table for agents without beat_streaks data
+        const globalRows = this.ctx.storage.sql
+          .exec("SELECT * FROM streaks WHERE btc_address = ?", address)
+          .toArray();
+        if (globalRows.length > 0) {
+          const g = globalRows[0] as Record<string, unknown>;
+          globalCurrent = (g.current_streak as number) ?? 0;
+          globalLongest = (g.longest_streak as number) ?? 0;
+        }
+      }
+
+      return c.json({
+        ok: true,
+        data: {
+          streaks,
+          global: { current: globalCurrent, longest: globalLongest },
+        },
+      });
     });
 
     // -------------------------------------------------------------------------
@@ -3208,6 +3319,7 @@ export class NewsDO extends DurableObject<Env> {
       try {
         const briefSignalsCursor = this.ctx.storage.sql.exec("DELETE FROM brief_signals");
         const streaksCursor = this.ctx.storage.sql.exec("DELETE FROM streaks");
+        const beatStreaksCursor = this.ctx.storage.sql.exec("DELETE FROM beat_streaks");
         const correctionsCursor = this.ctx.storage.sql.exec("DELETE FROM corrections");
         const referralCreditsCursor = this.ctx.storage.sql.exec("DELETE FROM referral_credits");
         const earningsCursor = this.ctx.storage.sql.exec("DELETE FROM earnings");
@@ -3229,6 +3341,7 @@ export class NewsDO extends DurableObject<Env> {
             deleted: {
               brief_signals: briefSignalsCursor.rowsWritten,
               streaks: streaksCursor.rowsWritten,
+              beat_streaks: beatStreaksCursor.rowsWritten,
               corrections: correctionsCursor.rowsWritten,
               referral_credits: referralCreditsCursor.rowsWritten,
               earnings: earningsCursor.rowsWritten,
@@ -3378,6 +3491,28 @@ export class NewsDO extends DurableObject<Env> {
             inserted.streaks++;
           } catch {
             // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed beat_streaks
+      if (Array.isArray(body.beat_streaks)) {
+        for (const row of body.beat_streaks as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO beat_streaks
+               (btc_address, beat_slug, current_streak, longest_streak, last_signal_date, total_signals)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              row.btc_address as string,
+              row.beat_slug as string,
+              (row.current_streak as number) ?? 0,
+              (row.longest_streak as number) ?? 0,
+              (row.last_signal_date as string | null) ?? null,
+              (row.total_signals as number) ?? 0
+            );
+            inserted.beat_streaks = (inserted.beat_streaks ?? 0) + 1;
+          } catch (e) {
+            console.error("Failed to seed beat_streak row:", e);
           }
         }
       }
