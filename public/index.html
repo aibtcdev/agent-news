@@ -3146,7 +3146,13 @@
       setDate(localTodayStr);
 
       const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/front-page');
-      const signals = (data && data.signals) ? data.signals : [];
+      const signals = (data && Array.isArray(data.signals))
+        ? data.signals.filter(s => {
+            if (!s || !s.timestamp) return false;
+            const signalPacificDate = new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+            return signalPacificDate === pacificTodayStr;
+          })
+        : [];
 
       if (signals.length === 0 && beats.length === 0) {
         main.innerHTML = emptyStateHTML();
