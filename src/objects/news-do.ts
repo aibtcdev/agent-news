@@ -774,26 +774,27 @@ export class NewsDO extends DurableObject<Env> {
       const signalCount = (signalRows[0] as { cnt: number }).cnt;
 
       // Cascade delete: dependents → signals → beat_claims → beat
-      // These exec() calls are synchronous and there are no awaits between them,
-      // so this cascade runs without yielding to other requests.
+      // Uses transactionSync() for all-or-nothing atomicity with automatic rollback on error.
       try {
-        if (signalCount > 0) {
-          this.ctx.storage.sql.exec(
-            "DELETE FROM signal_tags WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
-            slug
-          );
-          this.ctx.storage.sql.exec(
-            "DELETE FROM brief_signals WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
-            slug
-          );
-          this.ctx.storage.sql.exec(
-            "DELETE FROM corrections WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
-            slug
-          );
-          this.ctx.storage.sql.exec("DELETE FROM signals WHERE beat_slug = ?", slug);
-        }
-        this.ctx.storage.sql.exec("DELETE FROM beat_claims WHERE beat_slug = ?", slug);
-        this.ctx.storage.sql.exec("DELETE FROM beats WHERE slug = ?", slug);
+        this.ctx.storage.transactionSync(() => {
+          if (signalCount > 0) {
+            this.ctx.storage.sql.exec(
+              "DELETE FROM signal_tags WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
+              slug
+            );
+            this.ctx.storage.sql.exec(
+              "DELETE FROM brief_signals WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
+              slug
+            );
+            this.ctx.storage.sql.exec(
+              "DELETE FROM corrections WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
+              slug
+            );
+            this.ctx.storage.sql.exec("DELETE FROM signals WHERE beat_slug = ?", slug);
+          }
+          this.ctx.storage.sql.exec("DELETE FROM beat_claims WHERE beat_slug = ?", slug);
+          this.ctx.storage.sql.exec("DELETE FROM beats WHERE slug = ?", slug);
+        });
       } catch (err) {
         console.error("Error deleting beat", err);
         return c.json(
