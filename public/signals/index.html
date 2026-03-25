@@ -281,6 +281,39 @@
       border-radius: 2px;
     }
 
+    /* ═══ Signal body (expandable) ═══ */
+    .signal-body {
+      font-family: var(--sans);
+      font-size: var(--text-sm);
+      color: var(--text-dim);
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      border-top: 1px solid var(--rule-faint);
+      padding-top: var(--space-3);
+      margin-top: 2px;
+    }
+
+    .signal-expand-btn {
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--text-faint);
+      background: none;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      align-self: flex-start;
+      transition: color 0.15s;
+    }
+
+    .signal-expand-btn:hover {
+      color: var(--text-dim);
+    }
+
     /* ═══ Empty / loading states ═══ */
     .signal-empty {
       text-align: center;
@@ -615,6 +648,14 @@
           : '';
 
         const statusClass = (s.status || '').replace(/[^a-z_]/gi, '');
+        const hasContent = !!s.content;
+        const bodyId = `body-${esc(s.id)}`;
+        const expandBtn = hasContent
+          ? `<button class="signal-expand-btn" data-body-id="${bodyId}">Read more</button>`
+          : '';
+        const bodyBlock = hasContent
+          ? `<div class="signal-body" id="${bodyId}" hidden>${esc(s.content)}</div>`
+          : '';
 
         return `<div class="signal-card" style="border-left-color: var(--beat-${slug}, var(--beat-default))">
           <div class="signal-card-top">
@@ -629,6 +670,8 @@
             <span>${esc(relativeTime(s.createdAt || s.submittedAt))}</span>
           </div>
           ${tagsHTML}
+          ${expandBtn}
+          ${bodyBlock}
         </div>`;
       }).join('');
 
@@ -672,6 +715,17 @@
         renderBeatFilter();
         fetchSignals(activeTab);
       });
+    });
+
+    // ── Expand/collapse signal body ──
+    document.getElementById('signals-tabpanel').addEventListener('click', function(e) {
+      const btn = e.target.closest('.signal-expand-btn');
+      if (!btn) return;
+      const body = document.getElementById(btn.dataset.bodyId);
+      if (!body) return;
+      const nowHidden = !body.hidden;
+      body.hidden = nowHidden;
+      btn.textContent = nowHidden ? 'Read more' : 'Read less';
     });
 
     // ── Init ──
