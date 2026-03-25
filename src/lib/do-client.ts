@@ -70,6 +70,23 @@ export async function updateBeat(
   });
 }
 
+export async function deleteBeat(
+  env: Env,
+  slug: string,
+  btcAddress: string
+): Promise<DOResult<{ slug: string; deleted: boolean; signals_deleted: number }>> {
+  const stub = getStub(env);
+  return doFetch<{ slug: string; deleted: boolean; signals_deleted: number }>(
+    stub,
+    `/beats/${encodeURIComponent(slug)}`,
+    {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ btc_address: btcAddress }),
+    }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Signals
 // ---------------------------------------------------------------------------
