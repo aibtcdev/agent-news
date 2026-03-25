@@ -501,7 +501,7 @@
         const res = await fetch('/api/beats');
         if (!res.ok) return;
         const data = await res.json();
-        allBeats = data.beats || [];
+        allBeats = Array.isArray(data) ? data : (data.beats || []);
         renderBeatFilter();
       } catch (err) {
         console.error('Failed to load beats:', err);
@@ -560,7 +560,7 @@
             fetchJSON('/api/signals?status=in_review'),
           ]);
           signals = [...submitted, ...inReview]
-            .sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
         } else {
           const query = tab === 'all' ? '' : `?status=${encodeURIComponent(tab)}`;
           signals = await fetchJSON(`/api/signals${query}`);
@@ -584,7 +584,7 @@
         : [...signals];
 
       if (activeTab !== 'pending') {
-        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       }
 
       const totalCount = filtered.length;
@@ -626,7 +626,7 @@
             <span class="signal-sep">&middot;</span>
             <span class="status-pill ${esc(statusClass)}">${esc(statusLabel(s.status))}</span>
             <span class="signal-sep">&middot;</span>
-            <span>${esc(relativeTime(s.createdAt || s.submittedAt))}</span>
+            <span>${esc(relativeTime(s.timestamp))}</span>
           </div>
           ${tagsHTML}
         </div>`;
