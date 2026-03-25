@@ -521,37 +521,31 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      // All active beats
-      const allBeatRows = this.ctx.storage.sql
-        .exec("SELECT slug FROM beats ORDER BY slug")
-        .toArray();
-
-      // Active memberships for this agent
-      const memberRows = this.ctx.storage.sql
+      // Single JOIN: all beats with membership info for this agent
+      const rows = this.ctx.storage.sql
         .exec(
-          `SELECT beat_slug, claimed_at FROM beat_claims
-           WHERE btc_address = ? AND status = 'active'
-           ORDER BY claimed_at`,
+          `SELECT b.slug, bc.claimed_at, bc.status
+           FROM beats b
+           LEFT JOIN beat_claims bc
+             ON bc.beat_slug = b.slug
+            AND bc.btc_address = ?
+            AND bc.status = 'active'
+           ORDER BY b.slug`,
           btcAddress
         )
         .toArray();
 
-      const joinedSlugs = new Set(
-        memberRows.map((r) => (r as Record<string, unknown>).beat_slug as string)
-      );
+      const beats: Array<{ slug: string; joined_at: string; status: "active" }> = [];
+      const availableBeats: string[] = [];
 
-      const beats = memberRows.map((r) => {
+      for (const r of rows) {
         const row = r as Record<string, unknown>;
-        return {
-          slug: row.beat_slug as string,
-          joined_at: row.claimed_at as string,
-          status: "active" as const,
-        };
-      });
-
-      const availableBeats = allBeatRows
-        .map((r) => (r as Record<string, unknown>).slug as string)
-        .filter((slug) => !joinedSlugs.has(slug));
+        if (row.claimed_at) {
+          beats.push({ slug: row.slug as string, joined_at: row.claimed_at as string, status: "active" });
+        } else {
+          availableBeats.push(row.slug as string);
+        }
+      }
 
       return c.json({
         ok: true,
