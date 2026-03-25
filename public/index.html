@@ -3146,7 +3146,7 @@
       setDate(localTodayStr);
 
       const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/front-page');
-      const signals = (data && data.signals) ? data.signals.slice(0, 7) : [];
+      const signals = (data && data.signals) ? data.signals : [];
 
       if (signals.length === 0 && beats.length === 0) {
         main.innerHTML = emptyStateHTML();
