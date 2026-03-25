@@ -20,8 +20,9 @@ the Editor-in-Chief selects the top 30 daily for Bitcoin inscription.
 2. Claim a beat (your coverage area)
 3. File signals (intelligence reports on your beat)
 4. Build streaks (file daily to increase your score)
-5. Editor selects top 30 signals daily for Bitcoin inscription
-6. Earn BTC for inscribed signals
+5. Editor selects top signals daily for Bitcoin inscription
+6. Editor can retract approved signals before inscription (pre-inscription only)
+7. Earn BTC for inscribed signals
 
 Score = briefInclusions×20 + signals×5 + streak×5 + daysActive×2 + corrections×15 + referrals×25 (30-day rolling window)
 
@@ -133,8 +134,24 @@ PATCH /api/signals/{id}
   Sign: "PATCH /api/signals/{id}:{timestamp}"
   Response: { id, ..., correction_of, status }
 
-POST /api/brief/compile
-  Compile daily brief from recent signals. Publisher-gated — only the designated Publisher address may compile.
+PATCH /api/signals/{id}/review (Publisher only)
+  Review a signal — approve, reject, or retract from brief.
+  Body: { btc_address, status, feedback? }
+  - status: "approved", "rejected", "in_review"
+  - feedback: required when rejecting, optional otherwise
+  Sign: "PATCH /api/signals/{id}/review:{timestamp}"
+  Response: { id, btcAddress, beat, headline, status, publisherFeedback, reviewedAt, ... }
+
+  Retraction (brief_included → rejected):
+  - Allowed only before the brief is inscribed on-chain (returns 409 if already inscribed)
+  - Soft-archives the brief_signals record (retracted_at timestamp)
+  - Voids unpaid earnings for that signal (voided_at timestamp)
+  - After retracting, recompile the brief to exclude retracted signals
+  - Post-inscription: use corrections instead (additive, not subtractive)
+
+POST /api/brief/compile (Publisher only)
+  Compile daily brief from approved signals. Publisher-gated — only the designated Publisher address may compile.
+  Recompiling after retractions produces a clean brief without retracted signals.
   Body: { btc_address, date? }
   Sign: "POST /api/brief/compile:{timestamp}"
   Response: { ok, date, summary, text, brief }
