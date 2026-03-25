@@ -412,11 +412,11 @@
 
     <!-- ═══ Status tabs ═══ -->
     <div class="tab-bar" role="tablist">
-      <button class="tab-btn active" role="tab" data-tab="all">All</button>
-      <button class="tab-btn" role="tab" data-tab="pending">Pending Review</button>
-      <button class="tab-btn" role="tab" data-tab="approved">Approved</button>
-      <button class="tab-btn" role="tab" data-tab="brief_included">In Brief</button>
-      <button class="tab-btn" role="tab" data-tab="rejected">Rejected</button>
+      <button class="tab-btn active" role="tab" id="tab-all" data-tab="all" aria-selected="true" aria-controls="signals-tabpanel">All</button>
+      <button class="tab-btn" role="tab" id="tab-pending" data-tab="pending" aria-selected="false" aria-controls="signals-tabpanel">Pending Review</button>
+      <button class="tab-btn" role="tab" id="tab-approved" data-tab="approved" aria-selected="false" aria-controls="signals-tabpanel">Approved</button>
+      <button class="tab-btn" role="tab" id="tab-brief_included" data-tab="brief_included" aria-selected="false" aria-controls="signals-tabpanel">In Brief</button>
+      <button class="tab-btn" role="tab" id="tab-rejected" data-tab="rejected" aria-selected="false" aria-controls="signals-tabpanel">Rejected</button>
     </div>
 
     <!-- ═══ Beat filter ═══ -->
@@ -429,7 +429,7 @@
     <div class="count-bar" id="count-bar"></div>
 
     <!-- ═══ Signal output ═══ -->
-    <div id="signals-output">
+    <div id="signals-tabpanel" role="tabpanel" aria-labelledby="tab-all">
       <div class="signal-loading" id="skeleton">
         <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
         <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
@@ -535,7 +535,7 @@
 
     // ── Fetch signals for a tab ──
     async function fetchSignals(tab) {
-      const output = document.getElementById('signals-output');
+      const output = document.getElementById('signals-tabpanel');
       output.innerHTML = `<div class="signal-loading" id="skeleton">
         <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
         <div class="skeleton-card"><div class="skeleton-line skeleton-beat"></div><div class="skeleton-line skeleton-head"></div><div class="skeleton-line skeleton-meta"></div><div class="skeleton-line skeleton-tags"></div></div>
@@ -591,7 +591,7 @@
     }
 
     function renderSignals(signals) {
-      const output = document.getElementById('signals-output');
+      const output = document.getElementById('signals-tabpanel');
       const countBar = document.getElementById('count-bar');
 
       // Apply beat filter
@@ -690,8 +690,13 @@
     // ── Tab switching ──
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(b => {
+          b.classList.remove('active');
+          b.setAttribute('aria-selected', 'false');
+        });
         btn.classList.add('active');
+        btn.setAttribute('aria-selected', 'true');
+        document.getElementById('signals-tabpanel').setAttribute('aria-labelledby', btn.id);
         activeTab = btn.dataset.tab;
         activeBeat = null;
         currentPage = 1;
