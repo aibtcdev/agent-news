@@ -680,6 +680,15 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: true, data: { ...beat, status: isActive ? "active" as const : "inactive" as const } } satisfies DOResult<Beat>, 200);
       }
 
+      // Only the Publisher can create new beats
+      const pub = verifyPublisher(this.ctx.storage.sql, created_by as string);
+      if (!pub.ok) {
+        return c.json(
+          { ok: false, error: pub.error } satisfies DOResult<Beat>,
+          pub.status
+        );
+      }
+
       const now = new Date().toISOString();
       const beatSlug = slug as string;
       const beatName = sanitizeString(name, 100);
@@ -716,6 +725,78 @@ export class NewsDO extends DurableObject<Env> {
       const beat = rows[0] as unknown as Beat;
 
       return c.json({ ok: true, data: beat } satisfies DOResult<Beat>, 201);
+    });
+
+    // DELETE /beats/:slug — delete a beat (Publisher-only)
+    this.router.delete("/beats/:slug", async (c) => {
+      const slug = c.req.param("slug");
+
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json(
+          { ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+
+      const { btc_address } = body;
+      if (!btc_address) {
+        return c.json(
+          { ok: false, error: "Missing required field: btc_address" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+
+      // Verify publisher
+      const pub = verifyPublisher(this.ctx.storage.sql, btc_address as string);
+      if (!pub.ok) {
+        return c.json(
+          { ok: false, error: pub.error } satisfies DOResult<unknown>,
+          pub.status
+        );
+      }
+
+      // Check beat exists
+      const existing = this.ctx.storage.sql
+        .exec("SELECT * FROM beats WHERE slug = ?", slug)
+        .toArray();
+      if (existing.length === 0) {
+        return c.json(
+          { ok: false, error: `Beat "${slug}" not found` } satisfies DOResult<unknown>,
+          404
+        );
+      }
+
+      // Count signals for the response
+      const signalRows = this.ctx.storage.sql
+        .exec("SELECT COUNT(*) as cnt FROM signals WHERE beat_slug = ?", slug)
+        .toArray();
+      const signalCount = (signalRows[0] as { cnt: number }).cnt;
+
+      // Cascade delete: dependents → signals → beat_claims → beat
+      if (signalCount > 0) {
+        // Delete signal_tags (FK → signals)
+        this.ctx.storage.sql.exec(
+          "DELETE FROM signal_tags WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
+          slug
+        );
+        // Delete brief_signals referencing these signals
+        this.ctx.storage.sql.exec(
+          "DELETE FROM brief_signals WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
+          slug
+        );
+        // Delete corrections referencing these signals
+        this.ctx.storage.sql.exec(
+          "DELETE FROM corrections WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
+          slug
+        );
+        // Delete the signals themselves
+        this.ctx.storage.sql.exec("DELETE FROM signals WHERE beat_slug = ?", slug);
+      }
+      this.ctx.storage.sql.exec("DELETE FROM beat_claims WHERE beat_slug = ?", slug);
+      this.ctx.storage.sql.exec("DELETE FROM beats WHERE slug = ?", slug);
+
+      return c.json({ ok: true, data: { slug, deleted: true, signals_deleted: signalCount } });
     });
 
     // PATCH /beats/:slug — update a beat (only name, description, color)
