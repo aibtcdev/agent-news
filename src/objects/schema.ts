@@ -344,4 +344,4 @@ export const MIGRATION_BEAT_CLAIMS_SQL = [
 export const MIGRATION_RETRACTION_SQL = [
   "ALTER TABLE brief_signals ADD COLUMN retracted_at TEXT",
   "ALTER TABLE earnings ADD COLUMN voided_at TEXT",
-];
+] as const;

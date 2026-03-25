@@ -3315,6 +3315,64 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Seed config (publisher designation, etc.)
+      if (Array.isArray(body.config)) {
+        for (const row of body.config as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT INTO config (key, value, updated_at)
+               VALUES (?, ?, datetime('now'))
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+              row.key as string,
+              row.value as string
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed briefs
+      if (Array.isArray(body.briefs)) {
+        for (const row of body.briefs as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO briefs (date, text, json_data, compiled_at, inscribed_txid, inscription_id)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              row.date as string,
+              (row.text as string) ?? "",
+              (row.json_data as string) ?? "{}",
+              (row.compiled_at as string) ?? new Date().toISOString(),
+              (row.inscribed_txid as string | null) ?? null,
+              (row.inscription_id as string | null) ?? null
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed earnings
+      if (Array.isArray(body.earnings)) {
+        for (const row of body.earnings as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at, payout_txid)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.btc_address as string,
+              (row.amount_sats as number) ?? 0,
+              (row.reason as string) ?? "brief_inclusion",
+              (row.reference_id as string | null) ?? null,
+              (row.created_at as string) ?? new Date().toISOString(),
+              (row.payout_txid as string | null) ?? null
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
       return c.json({ ok: true, data: { inserted } });
     });
 
