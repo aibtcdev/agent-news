@@ -503,7 +503,9 @@
         const data = await res.json();
         allBeats = (data.beats || []);
         renderBeatFilter();
-      } catch {}
+      } catch (err) {
+        console.error('Failed to load beats:', err);
+      }
     }
 
     function renderBeatFilter() {
@@ -578,7 +580,8 @@
             signals = (data.signals || []);
           }
         }
-      } catch {
+      } catch (err) {
+        console.error('Failed to fetch signals:', err);
         output.innerHTML = `<div class="signal-empty">Could not load signals. Try again later.</div>`;
         return;
       }
