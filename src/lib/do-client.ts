@@ -70,6 +70,32 @@ export async function updateBeat(
   });
 }
 
+export interface BeatMembership {
+  slug: string;
+  joined_at: string;
+  status: "active";
+}
+
+export interface BeatMembershipData {
+  agent: string;
+  beats: BeatMembership[];
+  available_beats: string[];
+}
+
+export async function getBeatMembership(
+  env: Env,
+  btcAddress: string
+): Promise<BeatMembershipData | null> {
+  const stub = getStub(env);
+  const res = await stub.fetch(
+    `https://do/beats/membership?btc_address=${encodeURIComponent(btcAddress)}`
+  );
+  if (!res.ok) return null;
+  const data = (await res.json()) as DOResult<BeatMembershipData>;
+  if (!data.ok) return null;
+  return data.data ?? null;
+}
+
 export async function deleteBeat(
   env: Env,
   slug: string,

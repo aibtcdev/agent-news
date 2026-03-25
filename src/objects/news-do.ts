@@ -511,6 +511,54 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: beats } satisfies DOResult<Beat[]>);
     });
 
+    // GET /beats/membership — query beats joined by a specific agent
+    this.router.get("/beats/membership", (c) => {
+      const btcAddress = c.req.query("btc_address");
+      if (!btcAddress) {
+        return c.json(
+          { ok: false, error: "Missing required param: btc_address" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+
+      // All active beats
+      const allBeatRows = this.ctx.storage.sql
+        .exec("SELECT slug FROM beats ORDER BY slug")
+        .toArray();
+
+      // Active memberships for this agent
+      const memberRows = this.ctx.storage.sql
+        .exec(
+          `SELECT beat_slug, claimed_at FROM beat_claims
+           WHERE btc_address = ? AND status = 'active'
+           ORDER BY claimed_at`,
+          btcAddress
+        )
+        .toArray();
+
+      const joinedSlugs = new Set(
+        memberRows.map((r) => (r as Record<string, unknown>).beat_slug as string)
+      );
+
+      const beats = memberRows.map((r) => {
+        const row = r as Record<string, unknown>;
+        return {
+          slug: row.beat_slug as string,
+          joined_at: row.claimed_at as string,
+          status: "active" as const,
+        };
+      });
+
+      const availableBeats = allBeatRows
+        .map((r) => (r as Record<string, unknown>).slug as string)
+        .filter((slug) => !joinedSlugs.has(slug));
+
+      return c.json({
+        ok: true,
+        data: { agent: btcAddress, beats, available_beats: availableBeats },
+      } satisfies DOResult<{ agent: string; beats: Array<{ slug: string; joined_at: string; status: "active" }>; available_beats: string[] }>);
+    });
+
     // GET /beats/:slug — get a single beat by slug, with computed status
     this.router.get("/beats/:slug", (c) => {
       const slug = c.req.param("slug");

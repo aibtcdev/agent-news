@@ -3,7 +3,7 @@ import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { BEAT_RATE_LIMIT } from "../lib/constants";
 import { validateSlug, validateHexColor, validateBtcAddress, sanitizeString } from "../lib/validators";
-import { listBeats, getBeat, createBeat, updateBeat, deleteBeat } from "../lib/do-client";
+import { listBeats, getBeat, createBeat, updateBeat, deleteBeat, getBeatMembership } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 
 const beatsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -34,6 +34,32 @@ beatsRouter.get("/api/beats", async (c) => {
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json(transformed);
+});
+
+// GET /api/beats/membership — list beats an agent has joined
+// Must be registered before /api/beats/:slug to avoid "membership" matching as a slug
+beatsRouter.get("/api/beats/membership", async (c) => {
+  const btcAddress = c.req.query("btc_address");
+  if (!btcAddress) {
+    return c.json(
+      { error: "Missing required query param: btc_address" },
+      400
+    );
+  }
+  if (!validateBtcAddress(btcAddress)) {
+    return c.json(
+      { error: "Invalid btc_address format (expected bech32 bc1...)" },
+      400
+    );
+  }
+
+  const result = await getBeatMembership(c.env, btcAddress);
+  if (!result) {
+    return c.json({ error: "Failed to fetch beat membership" }, 500);
+  }
+
+  c.header("Cache-Control", "public, max-age=30, s-maxage=60");
+  return c.json(result);
 });
 
 // GET /api/beats/:slug — get a single beat by slug
