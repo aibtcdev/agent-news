@@ -990,10 +990,10 @@ export async function resetLeaderboard(
 // ---------------------------------------------------------------------------
 
 export interface BeatMembership {
-  beat_slug: string;
-  claimed_at: string;
+  slug: string;
+  name: string;
+  claimedAt: string;
   status: string;
-  beat_name?: string;
 }
 
 export interface AgentMembershipResult {

@@ -1,32 +1,35 @@
 import { describe, it, expect } from "vitest";
+import { SELF } from "cloudflare:test";
 
 describe("GET /api/beats/membership/:address", () => {
-  it("should reject invalid BTC address", async () => {
-    // Invalid address format should return 400
-    const invalidAddress = "not-a-btc-address";
-    // Validates that the route checks address format
-    expect(invalidAddress.startsWith("bc1")).toBe(false);
+  it("should reject invalid BTC address with 400", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/beats/membership/not-a-btc-address"
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("Invalid BTC address");
   });
 
   it("should return empty beats array for unknown address", async () => {
-    // An address with no beat memberships should get an empty array
-    const result = { agent: "bc1qtest123", beats: [] };
-    expect(result.beats).toHaveLength(0);
-    expect(result.agent).toBe("bc1qtest123");
+    const res = await SELF.fetch(
+      "http://example.com/api/beats/membership/bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{ agent: string; beats: unknown[] }>();
+    expect(body.agent).toBe(
+      "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+    );
+    expect(body.beats).toBeInstanceOf(Array);
   });
 
-  it("should include beat name and claimed_at in response", async () => {
-    // Response shape validation
-    const mockBeat = {
-      slug: "bitcoin-macro",
-      name: "Bitcoin Macro",
-      claimedAt: "2026-03-01T00:00:00Z",
-      status: "active",
-    };
-    expect(mockBeat).toHaveProperty("slug");
-    expect(mockBeat).toHaveProperty("name");
-    expect(mockBeat).toHaveProperty("claimedAt");
-    expect(mockBeat).toHaveProperty("status");
-    expect(mockBeat.status).toBe("active");
+  it("should set cache headers on success", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/beats/membership/bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+    );
+    expect(res.status).toBe(200);
+    const cacheControl = res.headers.get("Cache-Control");
+    expect(cacheControl).toContain("max-age=60");
+    expect(cacheControl).toContain("s-maxage=300");
   });
 });

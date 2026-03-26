@@ -242,8 +242,6 @@ beatsRouter.delete("/api/beats/:slug", beatRateLimit, async (c) => {
   return c.json(result.data);
 });
 
-export { beatsRouter };
-
 // GET /api/beats/membership/:address - check which beats an agent belongs to
 beatsRouter.get("/api/beats/membership/:address", async (c) => {
   const address = c.req.param("address");
@@ -257,23 +255,21 @@ beatsRouter.get("/api/beats/membership/:address", async (c) => {
 
   const beats = await listBeats(c.env);
 
-  // Find all beats where this address is a member or creator
-  const memberBeats = beats
-    .filter((b) => {
-      const isCreator = b.created_by === address;
-      const isMember = (b.members ?? []).some(
-        (m) => m.btc_address === address
-      );
-      return isCreator || isMember;
-    })
-    .map((b) => ({
-      slug: b.slug,
-      name: b.name,
-      claimedAt:
-        (b.members ?? []).find((m) => m.btc_address === address)
-          ?.claimed_at ?? b.created_at,
-      status: "active" as const,
-    }));
+  // Single-pass: find all beats where this address is a member or creator
+  const memberBeats = beats.flatMap((b) => {
+    const membership = (b.members ?? []).find(
+      (m) => m.btc_address === address
+    );
+    if (!membership && b.created_by !== address) return [];
+    return [
+      {
+        slug: b.slug,
+        name: b.name,
+        claimedAt: membership?.claimed_at ?? b.created_at,
+        status: "active" as const,
+      },
+    ];
+  });
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
@@ -281,3 +277,5 @@ beatsRouter.get("/api/beats/membership/:address", async (c) => {
     beats: memberBeats,
   });
 });
+
+export { beatsRouter };
