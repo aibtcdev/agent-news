@@ -78,11 +78,8 @@
         "BRIEFS_FREE": "true"
       },
 
-      // Staging KV namespace — create with:
-      //   npx wrangler kv:namespace create NEWS_KV --env staging
-      // then replace STAGING_KV_ID_REPLACE_ME with the returned id.
       "kv_namespaces": [
-        { "binding": "NEWS_KV", "id": "STAGING_KV_ID_REPLACE_ME" }
+        { "binding": "NEWS_KV", "id": "341f4de6834c4a908eb52f6cb556bbce" }
       ],
 
       "durable_objects": {

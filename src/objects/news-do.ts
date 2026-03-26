@@ -3313,6 +3313,7 @@ export class NewsDO extends DurableObject<Env> {
 
       const inserted: Record<string, number> = {
         signals: 0,
+        signal_tags: 0,
         brief_signals: 0,
         corrections: 0,
         referral_credits: 0,
@@ -3342,6 +3343,22 @@ export class NewsDO extends DurableObject<Env> {
               (row.disclosure as string) ?? ""
             );
             inserted.signals++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed signal_tags
+      if (Array.isArray(body.signal_tags)) {
+        for (const row of body.signal_tags as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO signal_tags (signal_id, tag) VALUES (?, ?)`,
+              row.signal_id as string,
+              row.tag as string
+            );
+            inserted.signal_tags++;
           } catch {
             // Skip invalid rows silently
           }
