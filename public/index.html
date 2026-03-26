@@ -1740,30 +1740,6 @@
 
     /* ═══ Tablet (768px) ═══ */
     @media (max-width: 768px) {
-      /* Datebar: date on its own row, nav below */
-      .datebar {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: var(--space-1) var(--space-2);
-        padding: var(--space-2) var(--page-padding);
-      }
-
-      .datebar-center {
-        width: 100%;
-        text-align: center;
-        padding-bottom: var(--space-1);
-      }
-
-      .datebar-left {
-        justify-content: center;
-      }
-
-      .datebar-right {
-        justify-content: center;
-        gap: var(--space-2);
-      }
-
       .pending-review-banner {
         /* Break out of .page padding so banner spans full width */
         margin-left: calc(-1 * var(--page-padding));
@@ -1786,7 +1762,7 @@
 
       .mosaic-sidebar {
         padding-left: 0;
-        border-top: 2px solid var(--rule);
+        border-top: 1px solid var(--rule-light);
         order: 2;
       }
 

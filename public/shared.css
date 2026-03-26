@@ -319,33 +319,11 @@ a:hover { color: var(--text); }
     font-size: 10px;
   }
 
-  /* Signal modal — near full-screen on mobile */
-  .signal-modal-overlay {
-    padding: 0;
-    align-items: stretch;
-  }
-
-  .signal-modal {
-    max-width: none;
-    border-radius: 0;
-    border: none;
-    min-height: 100dvh;
-    padding: var(--space-4);
-    padding-top: var(--space-6);
-  }
-
-  .signal-modal-close {
-    top: 8px;
-    right: 8px;
-    font-size: 28px;
-    padding: 8px 12px;
-  }
-
   /* Footer compact */
   .site-footer {
     padding: var(--space-4) var(--page-padding);
-    font-size: 9px;
-    line-height: 2;
+    font-size: 11px;
+    line-height: 1.8;
   }
 }
 
@@ -499,3 +477,27 @@ a:hover { color: var(--text); }
   white-space: nowrap;
 }
 .signal-modal-copy:hover { color: var(--text); }
+
+/* Signal modal — full-screen on mobile */
+@media (max-width: 640px) {
+  .signal-modal-overlay {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .signal-modal {
+    max-width: none;
+    border-radius: 0;
+    border: none;
+    min-height: 100dvh;
+    padding: var(--space-4);
+    padding-top: var(--space-6);
+  }
+
+  .signal-modal-close {
+    top: 8px;
+    right: 8px;
+    font-size: 28px;
+    padding: 8px 12px;
+  }
+}
