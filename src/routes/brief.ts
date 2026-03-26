@@ -106,16 +106,42 @@ briefRouter.get("/api/brief/:date", async (c) => {
 
     const verification = await verifyPayment(paymentHeader, BRIEF_PRICE_SATS, c.env);
     if (!verification.valid) {
+      // Nonce conflict — agent must recover sponsor nonce before retrying
+      if (
+        verification.errorCode === "SENDER_NONCE_STALE" ||
+        verification.errorCode === "SENDER_NONCE_DUPLICATE"
+      ) {
+        return c.json(
+          {
+            error: "Payment nonce conflict. Recover your sponsor nonce and retry.",
+            errorCode: verification.errorCode,
+            retryable: true,
+            hint: "Use the recover-nonce tool or check your relay nonce before retrying.",
+          },
+          409
+        );
+      }
+      // Transient relay failure — payer should not be charged again
       if (verification.relayError) {
         return c.json(
-          { error: "Payment relay unavailable. Your payment was not consumed — please retry shortly." },
+          {
+            error: "Payment relay unavailable. Your payment was not consumed — please retry shortly.",
+            retryable: true,
+          },
           503
         );
       }
+      // Payment invalid (bad sig, wrong amount, etc.)
       const reason = verification.relayReason
         ? ` Relay: ${verification.relayReason}`
         : "";
-      return c.json({ error: `Payment verification failed.${reason}` }, 402);
+      return c.json(
+        {
+          error: `Payment verification failed.${reason}`,
+          retryable: verification.retryable ?? false,
+        },
+        402
+      );
     }
 
     // Record earnings split: correspondent share + treasury remainder
