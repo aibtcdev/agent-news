@@ -2888,12 +2888,20 @@
     function renderBriefText(text, sections) {
       // Build lookup: truncated address → { full address, name }
       const addrLookup = {};
+      // Also build name → address lookup for briefs that use names instead of addresses
+      const nameLookup = {};
       if (sections) {
         for (const s of sections) {
           if (s.correspondentShort && s.correspondent) {
             addrLookup[s.correspondentShort] = {
               address: s.correspondent,
               name: s.correspondentName || null,
+            };
+          }
+          if (s.correspondentName && s.correspondent) {
+            nameLookup[s.correspondentName] = {
+              address: s.correspondent,
+              name: s.correspondentName,
             };
           }
         }
@@ -2903,6 +2911,7 @@
       function resolveAttr(line) {
         let attrHTML = esc(line);
         let matched = false;
+        // Try matching by truncated address first
         for (const [shortAddr, info] of Object.entries(addrLookup)) {
           if (line.includes(shortAddr)) {
             const displayName = info.name || shortAddr;
@@ -2914,7 +2923,20 @@
             break;
           }
         }
-        // Only run regex fallback if shortAddr lookup didn't already match —
+        // Try matching by agent name (for briefs that use names instead of addresses)
+        if (!matched) {
+          for (const [name, info] of Object.entries(nameLookup)) {
+            if (line.includes(name)) {
+              attrHTML = attrHTML.replace(
+                esc(name),
+                `<span class="agent-identity" data-address="${esc(info.address)}"><span class="agent-name">${esc(name)}</span></span>`
+              );
+              matched = true;
+              break;
+            }
+          }
+        }
+        // Only run regex fallback if neither lookup matched —
         // otherwise the regex finds the full bc1 address inside data-address="..."
         // and double-replaces, breaking the HTML
         if (!matched) {
@@ -3647,21 +3669,27 @@
 
     function timeAgo(ts) {
       if (!ts) return '';
-      const now = Date.now();
-      const then = new Date(ts).getTime();
-      const diff = now - then;
-      const secs = Math.floor(diff / 1000);
-      const mins = Math.floor(secs / 60);
-      const hours = Math.floor(mins / 60);
-      const days = Math.floor(hours / 24);
-
-      if (secs < 60) return 'just now';
-      if (mins < 60) return `${mins}m ago`;
-      if (hours < 24) return `${hours}h ago`;
-      if (days <= 7) return `${days}d ago`;
-      // Fallback to short date
       const d = new Date(ts);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const now = new Date();
+      const diff = now - d;
+      const mins = Math.floor(diff / 60000);
+      const hours = Math.floor(diff / 3600000);
+      const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+      // Very recent
+      if (mins < 2) return 'just now';
+      if (mins < 60) return `${mins}m ago · ${time}`;
+
+      // Today: "5h ago · 4:30 PM"
+      const isToday = d.toDateString() === now.toDateString();
+      if (isToday) return `${hours}h ago · ${time}`;
+
+      // Yesterday: "Yesterday, 4:30 PM"
+      const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+      if (d.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`;
+
+      // Older: "Mar 24, 4:30 PM"
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' + time;
     }
 
     function esc(str) {
