@@ -38,13 +38,19 @@ export interface RelayRPC {
     paymentPayload: Record<string, unknown>,
     paymentRequirements: Record<string, unknown>
   ): Promise<{
-    success: boolean;
+    /** Queue-based RPC fields (PR #228) */
+    accepted?: boolean;
+    paymentId?: string;
+    /** Legacy settle-style fields (HTTP /settle compat) */
+    success?: boolean;
     transaction?: string;
     payer?: string;
     status?: string;
     error?: string;
   }>;
-  checkPayment(txid: string): Promise<{ status: string; confirmed: boolean }>;
+  checkPayment(
+    paymentId: string
+  ): Promise<{ status: string; confirmed: boolean; transaction?: string; payer?: string }>;
 }
 
 /**

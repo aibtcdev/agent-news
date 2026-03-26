@@ -92,24 +92,43 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
  * Interpret a relay result (shared by both RPC and HTTP paths).
  * Returns a PaymentVerifyResult based on the success/status/error fields.
  */
-function interpretRelayResult(result: {
-  success: boolean;
-  transaction?: string;
-  payer?: string;
-  status?: string;
-  error?: string;
-}): PaymentVerifyResult {
-  // Treat "pending" as valid — the tx was broadcast successfully and
-  // confirmation is async. The relay just hasn't seen it confirm yet.
-  if (result.success || result.status === "pending") {
+/**
+ * Runtime type guard — verifies the binding exposes submitPayment().
+ * Mirrors the isLogsRPC() pattern used for the LOGS binding.
+ */
+function isRelayRPC(relay: unknown): relay is RelayRPC {
+  return (
+    typeof relay === "object" &&
+    relay !== null &&
+    typeof (relay as Record<string, unknown>).submitPayment === "function"
+  );
+}
+
+function interpretRelayResult(
+  result: {
+    success?: boolean;
+    accepted?: boolean;
+    transaction?: string;
+    paymentId?: string;
+    payer?: string;
+    status?: string;
+    error?: string;
+  },
+  path: "rpc" | "http"
+): PaymentVerifyResult {
+  // Normalise: RPC may return { accepted, paymentId } or legacy { success, transaction }
+  const isValid =
+    result.success || result.accepted || result.status === "pending";
+
+  if (isValid) {
     return {
       valid: true,
-      txid: result.transaction,
+      txid: result.transaction ?? result.paymentId,
       payer: result.payer,
     };
   }
 
-  console.error("[x402] relay settle rejected:", JSON.stringify(result));
+  console.error(`[x402] relay payment rejected (${path}):`, JSON.stringify(result));
   return {
     valid: false,
     relayReason: result.error ?? JSON.stringify(result),
@@ -151,19 +170,18 @@ export async function verifyPayment(
     maxTimeoutSeconds: 60,
   };
 
-  // --- RPC path (service binding available) ---
-  if (env?.X402_RELAY) {
-    const relay = env.X402_RELAY as RelayRPC;
+  // --- RPC path (service binding available and valid) ---
+  if (env?.X402_RELAY && isRelayRPC(env.X402_RELAY)) {
     let result: Awaited<ReturnType<RelayRPC["submitPayment"]>>;
     try {
       console.log("[x402] using RPC path via X402_RELAY service binding");
-      result = await relay.submitPayment(paymentPayload, paymentRequirements);
+      result = await env.X402_RELAY.submitPayment(paymentPayload, paymentRequirements);
     } catch (err) {
       // RPC call failure is a relay error — do not penalise the payer
       console.error("[x402] RPC submitPayment threw:", err);
       return { valid: false, relayError: true };
     }
-    return interpretRelayResult(result);
+    return interpretRelayResult(result, "rpc");
   }
 
   // --- HTTP fallback (local dev / binding not configured) ---
@@ -216,5 +234,5 @@ export async function verifyPayment(
     payer: result.payer as string | undefined,
     status: result.status as string | undefined,
     error: (result.error as string) ?? (result.message as string),
-  });
+  }, "http");
 }
