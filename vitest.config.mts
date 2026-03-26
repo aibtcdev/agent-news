@@ -16,6 +16,9 @@ export default defineConfig({
       miniflare: {
         serviceBindings: {
           LOGS: async () => new Response("ok"),
+          // X402_RELAY is stubbed so miniflare can start without the external service.
+          // Tests that exercise verifyPayment() pass their own mock via the Env argument.
+          X402_RELAY: async () => new Response("ok"),
         },
         bindings: {
           ENVIRONMENT: "test",
