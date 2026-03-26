@@ -35,6 +35,17 @@ export interface PaymentVerifyResult {
   relayError?: boolean;
   /** Human-readable reason from the relay when settlement fails (for diagnostics). */
   relayReason?: string;
+  /**
+   * Machine-readable error code from the relay (e.g. SENDER_NONCE_STALE,
+   * SENDER_NONCE_DUPLICATE, NOT_SPONSORED). Only present on RPC path failures.
+   * Callers can use this to distinguish nonce conflicts (409) from other rejections.
+   */
+  errorCode?: string;
+  /**
+   * Whether the agent should retry the payment after resolving the underlying issue.
+   * Propagated from relay SubmitPaymentResult.retryable and CheckPaymentResult.retryable.
+   */
+  retryable?: boolean;
 }
 
 /**
@@ -206,6 +217,8 @@ export async function verifyPayment(
       return {
         valid: false,
         relayReason: submitResult.error ?? submitResult.code ?? "Payment rejected by relay",
+        errorCode: submitResult.code,
+        retryable: submitResult.retryable,
       };
     }
 
@@ -237,6 +250,8 @@ export async function verifyPayment(
         return {
           valid: false,
           relayReason: checkResult.error ?? `Payment ${checkResult.status}`,
+          errorCode: checkResult.errorCode,
+          retryable: checkResult.retryable,
         };
       }
 
