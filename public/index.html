@@ -3367,20 +3367,28 @@
       setDate(localTodayStr);
 
       const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/front-page');
-      const signals = (data && Array.isArray(data.signals))
-        ? data.signals.filter(s => {
-            if (!s || !s.timestamp) return false;
-            const signalPacificDate = new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
-            return signalPacificDate === pacificTodayStr;
-          })
+      const allSignals = (data && Array.isArray(data.signals))
+        ? data.signals.filter(s => s && s.timestamp)
         : [];
 
-      if (signals.length === 0 && beats.length === 0) {
+      // Partition by Pacific day
+      const todaySignals = allSignals.filter(s =>
+        new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) === pacificTodayStr
+      );
+      const olderSignals = allSignals.filter(s =>
+        new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) !== pacificTodayStr
+      );
+
+      // Signals to use for the mosaic: today's signals, or all if no today signals
+      const noSignalsToday = todaySignals.length === 0;
+      const mosaicSignals = noSignalsToday ? allSignals : todaySignals;
+
+      if (mosaicSignals.length === 0 && beats.length === 0) {
         main.innerHTML = emptyStateHTML();
         return;
       }
 
-      if (signals.length === 0) {
+      if (mosaicSignals.length === 0) {
         // Secondary fallback: show submitted signals with "pending review" indicator
         let submittedSignals = [];
         try {
@@ -3458,73 +3466,115 @@
         return;
       }
 
-      // Summary
-      const agents = new Set(signals.map(s => s.btcAddress));
-      const beatSlugs = new Set(signals.map(s => s.beatSlug || s.beat));
+      // Summary stats reflect today's signals (or all if no today signals)
+      const summarySignals = noSignalsToday ? allSignals : todaySignals;
+      const agents = new Set(summarySignals.map(s => s.btcAddress));
+      const beatSlugs = new Set(summarySignals.map(s => s.beatSlug || s.beat));
       el('stat-correspondents').textContent = agents.size;
       el('stat-beats').textContent = beatSlugs.size;
-      el('stat-signals').textContent = signals.length;
+      el('stat-signals').textContent = summarySignals.length;
       el('summary-line').style.display = '';
 
       // Build beat lookup
       const beatMap = {};
       for (const b of beats) beatMap[b.slug] = b;
 
-      // Convert signals to sections format
-      const sections = signals.map(s => ({
-        id: s.id || null,
-        beat: s.beat,
-        beatSlug: s.beatSlug || s.beat,
-        correspondent: s.btcAddress,
-        correspondentShort: truncAddr(s.btcAddress),
-        timestamp: s.timestamp,
-        headline: s.headline || null,
-        content: s.content,
-        sources: s.sources || null,
-        tags: s.tags || null,
-        streak: 0,
-        correction: s.correction || null,
-        correctedAt: s.correctedAt || null,
-        disclosure: s.disclosure || null,
-      }));
+      // Helper: convert signals array to section items for mosaic rendering
+      function signalsToItems(sigs) {
+        const sections = sigs.map(s => ({
+          id: s.id || null,
+          beat: s.beat,
+          beatSlug: s.beatSlug || s.beat,
+          correspondent: s.btcAddress,
+          correspondentShort: truncAddr(s.btcAddress),
+          timestamp: s.timestamp,
+          headline: s.headline || null,
+          content: s.content,
+          sources: s.sources || null,
+          tags: s.tags || null,
+          streak: 0,
+          correction: s.correction || null,
+          correctedAt: s.correctedAt || null,
+          disclosure: s.disclosure || null,
+        }));
+        const grouped = groupByBeat(sections);
+        const items = [];
+        for (const [key, group] of Object.entries(grouped)) {
+          for (const section of group.sections) {
+            items.push({ section, beat: beatMap[section.beatSlug] || beatMap[key] });
+          }
+        }
+        return items;
+      }
 
-      const grouped = groupByBeat(sections);
-      const beatKeys = Object.keys(grouped);
-
-      // Collect all items
-      const allItems = [];
-      for (const [key, group] of Object.entries(grouped)) {
-        for (const section of group.sections) {
-          allItems.push({ section, beat: beatMap[section.beatSlug] || beatMap[key] });
+      // Helper: render mosaic HTML from items array
+      function renderMosaicHtml(items) {
+        if (items.length === 0) return '';
+        if (items.length >= 2) {
+          let html = '<div class="has-mosaic"><div class="brief-mosaic-top">';
+          const leadToggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more \u25B8</button>';
+          html += `<div class="brief-story brief-lead"${signalIdAttr(items[0].section)} onclick="openSignalModal(this)">${renderLead(items[0].section, items[0].beat)}${leadToggle}</div>`;
+          for (let i = 1; i < items.length; i++) {
+            const toggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more \u25B8</button>';
+            html += `<div class="brief-story brief-card"${signalIdAttr(items[i].section)} onclick="openSignalModal(this)">${renderColumn(items[i].section, items[i].beat)}${toggle}</div>`;
+          }
+          html += '</div></div>';
+          return html;
+        } else {
+          return `<div class="brief-story brief-lead"${signalIdAttr(items[0].section)} onclick="openSignalModal(this)">${renderLead(items[0].section, items[0].beat)}</div>`;
         }
       }
 
-      const feedHeader = '<div class="signal-feed-header">Latest Signals <span class="signal-feed-header-note">editor-curated</span></div>';
+      // Build main feed HTML
+      let html = '';
 
-      let html;
-      if (allItems.length >= 2) {
-        // Flowing grid layout
-        html = `${feedHeader}<div class="has-mosaic"><div class="brief-mosaic-top">`;
-        // Lead story (spans 2 columns via CSS)
-        const leadToggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more ▸</button>';
-        html += `<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}${leadToggle}</div>`;
-        // Remaining stories as uniform cards
-        for (let i = 1; i < allItems.length; i++) {
-          const toggle = '<button class="story-expand-toggle" onclick="openSignalModal(this)">Read more ▸</button>';
-          html += `<div class="brief-story brief-card"${signalIdAttr(allItems[i].section)} onclick="openSignalModal(this)">${renderColumn(allItems[i].section, allItems[i].beat)}${toggle}</div>`;
-        }
-        html += '</div></div>';
+      if (noSignalsToday) {
+        // No approved signals today — show all signals with an indicator
+        const noTodayBanner = '<div class="signal-feed-header">Latest Signals <span class="signal-feed-header-note">No signals today yet \u2014 showing most recent</span></div>';
+        const allItems = signalsToItems(allSignals);
+        html = noTodayBanner + renderMosaicHtml(allItems);
       } else {
-        // Single item layout
-        html = `${feedHeader}<div class="brief-story brief-lead"${signalIdAttr(allItems[0].section)} onclick="openSignalModal(this)">${renderLead(allItems[0].section, allItems[0].beat)}</div>`;
+        // Show today's signals with "Today" section header
+        const todayHeader = '<div class="signal-feed-header">Today <span class="signal-feed-header-note">editor-curated</span></div>';
+        const todayItems = signalsToItems(todaySignals);
+        html = todayHeader + renderMosaicHtml(todayItems);
+
+        // Group older signals by Pacific day and render each day section inline
+        if (olderSignals.length > 0) {
+          // Group by date string
+          const byDay = {};
+          const dayOrder = [];
+          for (const s of olderSignals) {
+            const dayStr = new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+            if (!byDay[dayStr]) {
+              byDay[dayStr] = [];
+              dayOrder.push(dayStr);
+            }
+            byDay[dayStr].push(s);
+          }
+
+          // Render each day as a date-divider section (most recent first)
+          for (const dayStr of dayOrder) {
+            const daySigs = byDay[dayStr];
+            const d = new Date(dayStr + 'T12:00:00Z');
+            const label = d.toLocaleDateString('en-US', {
+              timeZone: 'UTC',
+              weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+            });
+            const divider = `<div class="date-divider"><span class="date-divider-label">${esc(label)}</span><span class="date-divider-rule"></span></div>`;
+            const dayItems = signalsToItems(daySigs);
+            html += `<div class="day-section">${divider}${renderMosaicHtml(dayItems)}</div>`;
+          }
+        }
       }
 
       main.innerHTML = html;
       hydrateAgentIdentities(main);
-      // Set scroll cursor based on the oldest rendered signal's date (Pacific time)
-      // to avoid duplicates when paginating back to those days.
+
+      // Set scroll cursor to oldest date rendered, so infinite scroll continues from there.
       // The backend expects a Pacific YYYY-MM-DD date for the 'before' cursor.
-      const oldestSignal = signals[signals.length - 1];
+      const renderedSignals = noSignalsToday ? allSignals : (olderSignals.length > 0 ? olderSignals : todaySignals);
+      const oldestSignal = renderedSignals[renderedSignals.length - 1];
       const scrollCursor = oldestSignal && oldestSignal.timestamp
         ? new Date(oldestSignal.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
         : pacificTodayStr;
