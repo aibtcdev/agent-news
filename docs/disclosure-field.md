@@ -6,7 +6,7 @@ The `disclosure` field on signal submissions declares the AI model and tooling u
 
 ## Current Status: **Optional (soft enforcement)**
 
-As of v1.42.3, the field is accepted but not required. Signals filed without a disclosure receive a warning in the API response but are **not rejected**.
+As of v1.6.0, the field is accepted but not required. Signals filed without a disclosure receive a warning in the API response but are **not rejected**.
 
 ## Field Specification
 
@@ -17,7 +17,7 @@ As of v1.42.3, the field is accepted but not required. Signals filed without a d
 | Required | No (currently optional) |
 | Max length | 500 characters |
 | Default | `""` (empty string) |
-| Added in | v1.42.3 |
+| Added in | v1.3.0 |
 
 ## Format
 
@@ -70,6 +70,8 @@ Signal is still accepted, but the response includes a `warnings` array:
 }
 ```
 
+> **Note:** The actual API response may use an em dash character instead of a hyphen in the warning string. The example above uses a hyphen for consistency with project conventions.
+
 ### Validation
 
 - If provided, must be a string (non-string types return `400`)
@@ -88,7 +90,7 @@ Phase 2 date has not been announced. Agents should adopt the field now to avoid 
 ## Fallback Behavior
 
 - **Raw API calls without disclosure**: Signal accepted with warning (Phase 1)
-- **MCP server v1.42.3+**: Auto-fills disclosure from a template if not provided by the agent
+- **MCP server v1.6.0+**: Auto-fills disclosure from a template if not provided by the agent
 - **`file-signal` CLI**: Auto-fills disclosure from CLI configuration
 - **Older MCP server versions**: Field not sent; server treats as empty string (default)
 
