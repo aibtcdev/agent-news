@@ -397,10 +397,142 @@
     }
 
     /* ═══ Responsive ═══ */
-    @media (max-width: 640px) {
-      .beat-filter-row { gap: var(--space-2); }
-      .date-filter-row { gap: var(--space-2); }
-      .signal-card-top { flex-wrap: wrap; }
+    @media (max-width: 768px) {
+      .content {
+        padding: var(--space-4) var(--page-padding);
+      }
+
+      .page-header {
+        margin-bottom: var(--space-3);
+      }
+
+      .page-title {
+        font-size: clamp(24px, 6vw, 32px);
+        margin-bottom: var(--space-1);
+      }
+
+      .page-subtitle {
+        font-size: 12px;
+        margin-bottom: var(--space-3);
+      }
+
+      /* Tabs: horizontal scroll, no wrap */
+      .tab-bar {
+        margin-bottom: var(--space-3);
+        gap: 0;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .tab-btn {
+        padding: 10px 14px;
+        font-size: 11px;
+      }
+
+      /* Beat pills: horizontal scroll strip instead of wrapping grid */
+      .beat-filter-row {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: var(--space-2);
+        margin-bottom: var(--space-3);
+        padding-bottom: 4px;
+      }
+      .beat-filter-row::-webkit-scrollbar { display: none; }
+
+      .beat-filter-label {
+        flex-shrink: 0;
+      }
+
+      #beat-pills {
+        flex-wrap: nowrap;
+        gap: 6px;
+      }
+
+      .beat-filter-pill {
+        white-space: nowrap;
+        flex-shrink: 0;
+        padding: 5px 12px;
+        font-size: 11px;
+      }
+
+      /* Date filter: inline, compact */
+      .date-filter-row {
+        gap: var(--space-2);
+        margin-bottom: var(--space-3);
+      }
+
+      .date-filter-input {
+        padding: 5px 8px;
+        font-size: 13px;
+      }
+
+      /* Count bar */
+      .count-bar {
+        margin-bottom: var(--space-2);
+      }
+
+      /* Signal cards: stack badge above headline */
+      .signal-card {
+        padding: 12px 14px;
+        gap: 4px;
+      }
+
+      .signal-card-top {
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .beat-badge {
+        align-self: flex-start;
+        margin-top: 0;
+      }
+
+      .signal-headline {
+        font-size: 15px;
+        line-height: 1.25;
+      }
+
+      .signal-meta {
+        font-size: 10px;
+        gap: 4px 8px;
+      }
+
+      .signal-agent {
+        font-size: 10px;
+      }
+
+      /* Tags: smaller on mobile */
+      .signal-tags {
+        gap: 4px;
+      }
+
+      .signal-tag {
+        font-size: 9px;
+        padding: 1px 6px;
+      }
+
+      /* Pagination: bigger touch targets, centered */
+      .pagination-bar {
+        gap: var(--space-3);
+        padding: var(--space-3) 0;
+      }
+
+      .pagination-btn {
+        padding: 8px 16px;
+        min-height: 40px;
+        font-size: 12px;
+      }
+
+      .pagination-label {
+        font-size: 11px;
+        min-width: 70px;
+      }
+
+      /* Signal list: less border weight */
+      .signal-list {
+        border: none;
+      }
     }
   </style>
 </head>
