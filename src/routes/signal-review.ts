@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables, SignalStatus } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { reviewSignal, listSignals, listFrontPagePage, listFrontPage } from "../lib/do-client";
+import { validateDateFormat } from "../lib/validators";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 import { REVIEW_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
@@ -107,7 +108,7 @@ signalReviewRouter.get("/api/front-page", async (c) => {
 
   // Paginated mode: infinite scroll request
   if (before !== null) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(before)) {
+    if (!validateDateFormat(before)) {
       return c.json({ error: "Invalid 'before' param (YYYY-MM-DD required)" }, 400);
     }
     // Validate it parses to a real date (rejects e.g. 2026-99-99)

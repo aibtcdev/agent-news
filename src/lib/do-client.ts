@@ -17,11 +17,21 @@ async function doFetch<T>(
   init?: RequestInit
 ): Promise<DOResult<T>> {
   const res = await stub.fetch(`https://do${path}`, init);
-  const data = (await res.json()) as DOResult<T>;
-  if (!data.ok) {
-    return { ...data, status: res.status as DOErrorStatus };
+  if (!res.ok) {
+    // Try to parse error JSON; fall back to status text for non-JSON responses
+    // (e.g. CF infrastructure 502/503 returning HTML)
+    try {
+      const data = (await res.json()) as DOResult<T>;
+      return { ...data, status: res.status as DOErrorStatus };
+    } catch {
+      return {
+        ok: false,
+        error: `DO request failed: ${res.status} ${res.statusText}`,
+        status: res.status as DOErrorStatus,
+      } as DOResult<T>;
+    }
   }
-  return data;
+  return (await res.json()) as DOResult<T>;
 }
 
 // ---------------------------------------------------------------------------

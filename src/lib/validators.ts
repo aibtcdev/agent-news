@@ -54,6 +54,11 @@ export function validateTags(arr: unknown): arr is string[] {
   );
 }
 
+export function validateDateFormat(date: unknown): date is string {
+  if (!date || typeof date !== "string") return false;
+  return /^\d{4}-\d{2}-\d{2}$/.test(date);
+}
+
 export function validateSignatureFormat(sig: unknown): sig is string {
   if (!sig || typeof sig !== "string") return false;
   if (sig.length < 20 || sig.length > 200) return false;

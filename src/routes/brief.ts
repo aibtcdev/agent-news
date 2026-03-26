@@ -3,6 +3,7 @@ import type { Env, AppVariables } from "../lib/types";
 import { getLatestBrief, getBriefByDate, listBriefDates, recordEarning } from "../lib/do-client";
 import { BRIEF_PRICE_SATS, CORRESPONDENT_SHARE } from "../lib/constants";
 import { getPacificDate } from "../lib/helpers";
+import { validateDateFormat } from "../lib/validators";
 import { buildPaymentRequired, verifyPayment } from "../services/x402";
 
 const briefRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -77,7 +78,7 @@ briefRouter.get("/api/brief/:date", async (c) => {
   const date = c.req.param("date");
 
   // Validate date format YYYY-MM-DD
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!validateDateFormat(date)) {
     return c.json(
       { error: "Invalid date format", hint: "Use YYYY-MM-DD" },
       400
