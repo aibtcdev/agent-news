@@ -989,6 +989,15 @@ export async function resetLeaderboard(
 // Beat Membership (per-agent lookup)
 // ---------------------------------------------------------------------------
 
+/**
+ * BeatMembership and AgentMembershipResult types for the
+ * GET /api/beats/membership/:address Worker route.
+ *
+ * Note: This endpoint is handled by the Worker router (beatsRouter),
+ * NOT by the Durable Object. The route calls listBeats() directly,
+ * so no DO client helper is needed. These types are exported for
+ * any caller that needs to type the response shape.
+ */
 export interface BeatMembership {
   slug: string;
   name: string;
@@ -999,18 +1008,4 @@ export interface BeatMembership {
 export interface AgentMembershipResult {
   agent: string;
   beats: BeatMembership[];
-}
-
-export async function getAgentBeatMembership(
-  env: Env,
-  btcAddress: string
-): Promise<AgentMembershipResult> {
-  const stub = getStub(env);
-  const result = await doFetch<AgentMembershipResult>(
-    stub,
-    `/beats/membership/${encodeURIComponent(btcAddress)}`
-  );
-  if (!result.ok) throw new Error(result.error ?? "Failed to get beat membership");
-  if (result.data === undefined) throw new Error("Missing data in response");
-  return result.data;
 }
