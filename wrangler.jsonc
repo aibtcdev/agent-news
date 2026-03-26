@@ -32,8 +32,10 @@
   ],
 
   // Service binding to worker-logs via RPC
+  // Service binding to x402-sponsor-relay for queue-based payment processing via RPC
   "services": [
-    { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
+    { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" },
+    { "binding": "X402_RELAY", "service": "x402-sponsor-relay", "entrypoint": "RelayRPC" }
   ],
 
   // Smart Placement — moves Worker execution closer to the DO's storage location,
@@ -90,7 +92,8 @@
       ],
 
       "services": [
-        { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" }
+        { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" },
+        { "binding": "X402_RELAY", "service": "x402-sponsor-relay", "entrypoint": "RelayRPC" }
       ],
 
       // No custom domain for staging — use workers.dev URL
@@ -122,7 +125,8 @@
       ],
 
       "services": [
-        { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
+        { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" },
+        { "binding": "X402_RELAY", "service": "x402-sponsor-relay", "entrypoint": "RelayRPC" }
       ],
 
       "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
