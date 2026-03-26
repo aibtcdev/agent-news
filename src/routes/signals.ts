@@ -50,6 +50,10 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
     return c.json({ error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}` }, 400);
   }
 
+  if (since && isNaN(new Date(since).getTime())) {
+    return c.json({ error: "Invalid 'since' parameter. Use ISO 8601 format (e.g., 2026-03-25T00:00:00Z)" }, 400);
+  }
+
   const limitParam = c.req.query("limit");
   const resolvedLimit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
