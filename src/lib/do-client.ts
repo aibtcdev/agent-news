@@ -204,7 +204,14 @@ export interface CooldownInfo {
   waitMinutes: number;
 }
 
-export type CreateSignalResult = DOResult<Signal> & { cooldown?: CooldownInfo };
+export interface DailyLimitInfo {
+  limit: number;
+  filed_today: number;
+  reset_at: string;
+  retry_after: number;
+}
+
+export type CreateSignalResult = DOResult<Signal> & { cooldown?: CooldownInfo; daily_limit?: DailyLimitInfo };
 
 export async function createSignal(
   env: Env,

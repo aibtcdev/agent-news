@@ -1193,13 +1193,24 @@ export class NewsDO extends DurableObject<Env> {
         .toArray();
       const dailyCount = (dailyCountRows[0] as Record<string, unknown>).count as number;
       if (dailyCount >= MAX_SIGNALS_PER_DAY) {
-        return c.json(
+        // Compute seconds until the next Pacific-day reset
+        const tomorrowStart = getPacificDayStartUTC(getNextDate(today));
+        const retryAfterSecs = Math.ceil((new Date(tomorrowStart).getTime() - now.getTime()) / 1000);
+        const res = c.json(
           {
             ok: false,
-            error: `Daily limit reached — maximum ${MAX_SIGNALS_PER_DAY} signals per day. Try again tomorrow.`,
-          } satisfies DOResult<Signal>,
+            error: `Daily limit reached — maximum ${MAX_SIGNALS_PER_DAY} signals per day. Resets at midnight Pacific.`,
+            daily_limit: {
+              limit: MAX_SIGNALS_PER_DAY,
+              filed_today: dailyCount,
+              reset_at: tomorrowStart,
+              retry_after: retryAfterSecs,
+            },
+          } as unknown as DOResult<Signal>,
           429
         );
+        res.headers.set("Retry-After", String(retryAfterSecs));
+        return res;
       }
 
       const signalId = generateId();
