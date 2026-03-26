@@ -7,10 +7,6 @@
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": false },
-  // Custom domain — will activate once NS records propagate
-  // The existing DNS records must be removed from the dashboard first,
-  // or use the Cloudflare API to set override_existing_dns_record.
-  "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
 
   "vars": {
     "ENVIRONMENT": "production",
