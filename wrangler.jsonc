@@ -31,8 +31,7 @@
     { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
   ],
 
-  // Service binding to worker-logs via RPC
-  // Service binding to x402-sponsor-relay for queue-based payment processing via RPC
+  // Service bindings: worker-logs (RPC) and x402-sponsor-relay (RPC)
   "services": [
     { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" },
     { "binding": "X402_RELAY", "service": "x402-sponsor-relay", "entrypoint": "RelayRPC" }

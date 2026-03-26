@@ -99,17 +99,9 @@ function interpretRelayResult(result: {
   status?: string;
   error?: string;
 }): PaymentVerifyResult {
-  if (result.success) {
-    return {
-      valid: true,
-      txid: result.transaction,
-      payer: result.payer,
-    };
-  }
-
-  // Treat "pending" status as valid — the tx was broadcast successfully and
+  // Treat "pending" as valid — the tx was broadcast successfully and
   // confirmation is async. The relay just hasn't seen it confirm yet.
-  if (result.status === "pending") {
+  if (result.success || result.status === "pending") {
     return {
       valid: true,
       txid: result.transaction,
@@ -223,6 +215,6 @@ export async function verifyPayment(
     transaction: result.transaction as string | undefined,
     payer: result.payer as string | undefined,
     status: result.status as string | undefined,
-    error: (result.error as string) ?? (result.message as string) ?? undefined,
+    error: (result.error as string) ?? (result.message as string),
   });
 }
