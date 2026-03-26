@@ -53,8 +53,13 @@ const NONCE_CONFLICT_CODES = new Set([
   "SENDER_NONCE_STALE",
   "SENDER_NONCE_DUPLICATE",
   "SENDER_NONCE_GAP",
+  "SPONSOR_NONCE_STALE",
+  "SPONSOR_NONCE_DUPLICATE",
   "NONCE_CONFLICT",
 ]);
+
+/** Nonce gap codes require longer retry — gap resolution needs on-chain confirmation. */
+const NONCE_GAP_CODES = new Set(["SENDER_NONCE_GAP"]);
 
 /** Whether the nonce conflict originates from the sender (not the sponsor). */
 function isSenderNonceCode(code: string): boolean {
@@ -84,6 +89,8 @@ export function mapVerificationError(
       ? "Re-fetch your sender nonce and re-sign the transaction before retrying."
       : "Use the recover-nonce tool or check your relay nonce before retrying.";
 
+    const retryAfter = NONCE_GAP_CODES.has(code) ? "30" : "5";
+
     return {
       body: {
         error: `Payment nonce conflict (${side}).`,
@@ -92,7 +99,7 @@ export function mapVerificationError(
         hint,
       },
       status: 409,
-      headers: { "Retry-After": "5" },
+      headers: { "Retry-After": retryAfter },
     };
   }
 
@@ -100,6 +107,7 @@ export function mapVerificationError(
     return {
       body: {
         error: "Payment relay unavailable. Your payment was not consumed — please retry shortly.",
+        code: "RELAY_UNAVAILABLE",
         retryable: true,
       },
       status: 503,
