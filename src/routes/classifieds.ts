@@ -151,7 +151,7 @@ classifiedsRouter.post(
     }
 
     // Verify payment via x402 relay
-    const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS);
+    const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS, c.env);
     if (!verification.valid) {
       const logger = c.get("logger");
       if (verification.relayError) {

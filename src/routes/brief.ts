@@ -104,7 +104,7 @@ briefRouter.get("/api/brief/:date", async (c) => {
       });
     }
 
-    const verification = await verifyPayment(paymentHeader, BRIEF_PRICE_SATS);
+    const verification = await verifyPayment(paymentHeader, BRIEF_PRICE_SATS, c.env);
     if (!verification.valid) {
       if (verification.relayError) {
         return c.json(

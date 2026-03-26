@@ -3,6 +3,9 @@
  *
  * Constructs 402 Payment Required responses and verifies payments
  * via the x402 relay service.
+ *
+ * Payment verification uses the X402_RELAY service binding (RPC) when available,
+ * falling back to HTTP for local dev environments where the binding isn't present.
  */
 
 import {
@@ -10,6 +13,7 @@ import {
   SBTC_CONTRACT_MAINNET,
   X402_RELAY_URL,
 } from "../lib/constants";
+import type { Env, RelayRPC } from "../lib/types";
 
 export interface PaymentRequiredOpts {
   amount: number;
@@ -85,8 +89,59 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
 }
 
 /**
- * Verify an x402 payment via the relay's /settle endpoint.
+ * Interpret a relay result (shared by both RPC and HTTP paths).
+ * Returns a PaymentVerifyResult based on the success/status/error fields.
+ */
+/**
+ * Runtime type guard — verifies the binding exposes submitPayment().
+ * Mirrors the isLogsRPC() pattern used for the LOGS binding.
+ */
+function isRelayRPC(relay: unknown): relay is RelayRPC {
+  return (
+    typeof relay === "object" &&
+    relay !== null &&
+    typeof (relay as Record<string, unknown>).submitPayment === "function"
+  );
+}
+
+function interpretRelayResult(
+  result: {
+    success?: boolean;
+    accepted?: boolean;
+    transaction?: string;
+    paymentId?: string;
+    payer?: string;
+    status?: string;
+    error?: string;
+  },
+  path: "rpc" | "http"
+): PaymentVerifyResult {
+  // Normalise: RPC may return { accepted, paymentId } or legacy { success, transaction }
+  const isValid =
+    result.success || result.accepted || result.status === "pending";
+
+  if (isValid) {
+    return {
+      valid: true,
+      txid: result.transaction ?? result.paymentId,
+      payer: result.payer,
+    };
+  }
+
+  console.error(`[x402] relay payment rejected (${path}):`, JSON.stringify(result));
+  return {
+    valid: false,
+    relayReason: result.error ?? JSON.stringify(result),
+  };
+}
+
+/**
+ * Verify an x402 payment via the relay service.
  * The paymentHeader is the value of the X-PAYMENT or payment-signature header.
+ *
+ * When env.X402_RELAY is available (production/staging), uses the Cloudflare
+ * service binding RPC path (submitPayment). Falls back to HTTP POST /settle
+ * when the binding is absent (local dev).
  *
  * Result semantics:
  *   { valid: true }                    — payment verified, proceed
@@ -95,7 +150,8 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
  */
 export async function verifyPayment(
   paymentHeader: string,
-  amount: number
+  amount: number,
+  env?: Env
 ): Promise<PaymentVerifyResult> {
   let paymentPayload: Record<string, unknown>;
   try {
@@ -104,6 +160,32 @@ export async function verifyPayment(
     // Malformed payment header — client error, not a relay error
     return { valid: false };
   }
+
+  const paymentRequirements = {
+    scheme: "exact",
+    network: "stacks:1",
+    amount: String(amount),
+    asset: SBTC_CONTRACT_MAINNET,
+    payTo: TREASURY_STX_ADDRESS,
+    maxTimeoutSeconds: 60,
+  };
+
+  // --- RPC path (service binding available and valid) ---
+  if (env?.X402_RELAY && isRelayRPC(env.X402_RELAY)) {
+    let result: Awaited<ReturnType<RelayRPC["submitPayment"]>>;
+    try {
+      console.log("[x402] using RPC path via X402_RELAY service binding");
+      result = await env.X402_RELAY.submitPayment(paymentPayload, paymentRequirements);
+    } catch (err) {
+      // RPC call failure is a relay error — do not penalise the payer
+      console.error("[x402] RPC submitPayment threw:", err);
+      return { valid: false, relayError: true };
+    }
+    return interpretRelayResult(result, "rpc");
+  }
+
+  // --- HTTP fallback (local dev / binding not configured) ---
+  console.log("[x402] X402_RELAY not bound, falling back to HTTP");
 
   let settleRes: Response;
 
@@ -119,14 +201,7 @@ export async function verifyPayment(
         body: JSON.stringify({
           x402Version: 2,
           paymentPayload,
-          paymentRequirements: {
-            scheme: "exact",
-            network: "stacks:1",
-            amount: String(amount),
-            asset: SBTC_CONTRACT_MAINNET,
-            payTo: TREASURY_STX_ADDRESS,
-            maxTimeoutSeconds: 60,
-          },
+          paymentRequirements,
         }),
       });
     } finally {
@@ -153,27 +228,11 @@ export async function verifyPayment(
   // Relay returns 200 for both success and failure — check the success field.
   // 4xx = schema/idempotency error; 2xx + !success = payment rejected by relay.
   // Both are payment-invalid, not transient relay errors (5xx handled above).
-  if (!result.success) {
-    // Treat "pending" status as valid — the tx was broadcast successfully and
-    // confirmation is async.  The relay just hasn't seen it confirm yet.
-    if (result.status === "pending") {
-      return {
-        valid: true,
-        txid: result.transaction as string | undefined,
-        payer: result.payer as string | undefined,
-      };
-    }
-
-    console.error("[x402] relay settle rejected:", JSON.stringify(result));
-    return {
-      valid: false,
-      relayReason: (result.error as string) ?? (result.message as string) ?? JSON.stringify(result),
-    };
-  }
-
-  return {
-    valid: true,
-    txid: result.transaction as string | undefined,
+  return interpretRelayResult({
+    success: Boolean(result.success),
+    transaction: result.transaction as string | undefined,
     payer: result.payer as string | undefined,
-  };
+    status: result.status as string | undefined,
+    error: (result.error as string) ?? (result.message as string),
+  }, "http");
 }

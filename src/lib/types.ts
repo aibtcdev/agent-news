@@ -29,6 +29,31 @@ export interface LogsRPC {
 }
 
 /**
+ * RelayRPC interface (from x402-sponsor-relay service)
+ * Defined locally since x402-sponsor-relay isn't a published package.
+ * Matches the WorkerEntrypoint methods exposed by RelayRPC in PR #228.
+ */
+export interface RelayRPC {
+  submitPayment(
+    paymentPayload: Record<string, unknown>,
+    paymentRequirements: Record<string, unknown>
+  ): Promise<{
+    /** Queue-based RPC fields (PR #228) */
+    accepted?: boolean;
+    paymentId?: string;
+    /** Legacy settle-style fields (HTTP /settle compat) */
+    success?: boolean;
+    transaction?: string;
+    payer?: string;
+    status?: string;
+    error?: string;
+  }>;
+  checkPayment(
+    paymentId: string
+  ): Promise<{ status: string; confirmed: boolean; transaction?: string; payer?: string }>;
+}
+
+/**
  * Logger interface for request-scoped logging
  */
 export interface Logger {
@@ -46,6 +71,8 @@ export interface Env {
   NEWS_DO: DurableObjectNamespace;
   // LOGS is a service binding to worker-logs RPC, typed loosely to avoid complex Service<> generics
   LOGS?: unknown;
+  // X402_RELAY is a service binding to x402-sponsor-relay RPC (RelayRPC WorkerEntrypoint)
+  X402_RELAY?: unknown;
   ENVIRONMENT?: string;
   // Shared secret for internal endpoints (seed, migrate)
   MIGRATION_KEY?: string;

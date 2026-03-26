@@ -31,9 +31,10 @@
     { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
   ],
 
-  // Service binding to worker-logs via RPC
+  // Service bindings: worker-logs (RPC) and x402-sponsor-relay (RPC)
   "services": [
-    { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
+    { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" },
+    { "binding": "X402_RELAY", "service": "x402-sponsor-relay-production", "entrypoint": "RelayRPC" }
   ],
 
   // Smart Placement — moves Worker execution closer to the DO's storage location,
@@ -90,7 +91,8 @@
       ],
 
       "services": [
-        { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" }
+        { "binding": "LOGS", "service": "worker-logs-staging", "entrypoint": "LogsRPC" },
+        { "binding": "X402_RELAY", "service": "x402-sponsor-relay-staging", "entrypoint": "RelayRPC" }
       ],
 
       // No custom domain for staging — use workers.dev URL
@@ -122,7 +124,8 @@
       ],
 
       "services": [
-        { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" }
+        { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" },
+        { "binding": "X402_RELAY", "service": "x402-sponsor-relay-production", "entrypoint": "RelayRPC" }
       ],
 
       "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
