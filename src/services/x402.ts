@@ -12,8 +12,10 @@ import {
   TREASURY_STX_ADDRESS,
   SBTC_CONTRACT_MAINNET,
   X402_RELAY_URL,
+  RPC_POLL_MAX_ATTEMPTS,
+  RPC_POLL_INTERVAL_MS,
 } from "../lib/constants";
-import type { Env, RelayRPC } from "../lib/types";
+import type { Env, RelayRPC, SettleOptions } from "../lib/types";
 
 export interface PaymentRequiredOpts {
   amount: number;
@@ -172,16 +174,89 @@ export async function verifyPayment(
 
   // --- RPC path (service binding available and valid) ---
   if (env?.X402_RELAY && isRelayRPC(env.X402_RELAY)) {
-    let result: Awaited<ReturnType<RelayRPC["submitPayment"]>>;
+    // Extract the signed transaction hex from the payment payload.
+    // The x402 v2 payment payload shape is: { payload: { transaction: "<hex>" }, ... }
+    const innerPayload = paymentPayload.payload as Record<string, unknown> | undefined;
+    const txHex = typeof innerPayload?.transaction === "string" ? innerPayload.transaction : undefined;
+    if (!txHex) {
+      // Malformed payment payload — client error, not a relay error
+      console.error("[x402] RPC path: missing payload.transaction in payment header");
+      return { valid: false };
+    }
+
+    // Build SettleOptions from the payment requirements for this request.
+    const settle: SettleOptions = {
+      expectedRecipient: paymentRequirements.payTo,
+      minAmount: paymentRequirements.amount,
+    };
+
+    // Step 1: Submit the payment to the relay queue.
+    let submitResult: Awaited<ReturnType<RelayRPC["submitPayment"]>>;
     try {
       console.log("[x402] using RPC path via X402_RELAY service binding");
-      result = await env.X402_RELAY.submitPayment(paymentPayload, paymentRequirements);
+      submitResult = await env.X402_RELAY.submitPayment(txHex, settle);
     } catch (err) {
       // RPC call failure is a relay error — do not penalise the payer
       console.error("[x402] RPC submitPayment threw:", err);
       return { valid: false, relayError: true };
     }
-    return interpretRelayResult(result, "rpc");
+
+    if (!submitResult.accepted) {
+      console.error("[x402] RPC submitPayment rejected:", submitResult.code, submitResult.error);
+      return {
+        valid: false,
+        relayReason: submitResult.error ?? submitResult.code ?? "Payment rejected by relay",
+      };
+    }
+
+    const paymentId = submitResult.paymentId!;
+    console.log("[x402] RPC payment queued:", paymentId, submitResult.status);
+
+    // Step 2: Poll checkPayment() until confirmed, failed, or timeout.
+    for (let attempt = 0; attempt < RPC_POLL_MAX_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, RPC_POLL_INTERVAL_MS));
+      }
+
+      let checkResult: Awaited<ReturnType<RelayRPC["checkPayment"]>>;
+      try {
+        checkResult = await env.X402_RELAY.checkPayment(paymentId);
+      } catch (err) {
+        console.error("[x402] RPC checkPayment threw:", err);
+        // Treat as transient relay error — payer should not be penalised
+        return { valid: false, relayError: true };
+      }
+
+      console.log(`[x402] RPC checkPayment attempt ${attempt + 1}:`, checkResult.status);
+
+      if (checkResult.status === "confirmed") {
+        return { valid: true, txid: checkResult.txid };
+      }
+
+      if (checkResult.status === "failed" || checkResult.status === "replaced") {
+        return {
+          valid: false,
+          relayReason: checkResult.error ?? `Payment ${checkResult.status}`,
+        };
+      }
+
+      if (checkResult.status === "not_found") {
+        return {
+          valid: false,
+          relayReason: "Payment not found in relay — it may have expired",
+        };
+      }
+
+      // status is "queued", "submitted", "broadcasting", "mempool" — keep polling
+    }
+
+    // Exhausted all poll attempts — treat as transient so the payer is not charged again
+    console.error("[x402] RPC poll timed out waiting for settlement, paymentId:", paymentId);
+    return {
+      valid: false,
+      relayError: true,
+      relayReason: "RPC poll timed out waiting for settlement",
+    };
   }
 
   // --- HTTP fallback (local dev / binding not configured) ---

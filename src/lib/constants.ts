@@ -154,3 +154,9 @@ export const BRIEF_INSCRIBE_RATE_LIMIT = {
 
 // ── Config keys ──
 export const CONFIG_PUBLISHER_ADDRESS = "publisher_btc_address" as const;
+
+// ── x402 RPC polling ──
+/** Maximum number of checkPayment() poll attempts after submitPayment(). */
+export const RPC_POLL_MAX_ATTEMPTS = 8;
+/** Milliseconds between each checkPayment() poll attempt. */
+export const RPC_POLL_INTERVAL_MS = 2_000;

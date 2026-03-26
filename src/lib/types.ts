@@ -29,28 +29,98 @@ export interface LogsRPC {
 }
 
 /**
- * RelayRPC interface (from x402-sponsor-relay service)
+ * Settlement options passed to RelayRPC.submitPayment().
+ * Mirrors SettleOptions in x402-sponsor-relay/src/types.ts.
+ */
+export interface SettleOptions {
+  /** Expected recipient Stacks address */
+  expectedRecipient: string;
+  /** Minimum payment amount (smallest unit — microSTX or sats) as a string */
+  minAmount: string;
+  /** Token type (defaults to STX on the relay side) */
+  tokenType?: string;
+  /** Expected sender address (optional) */
+  expectedSender?: string;
+  /** API resource being accessed (optional, for relay tracking) */
+  resource?: string;
+  /** HTTP method being used (optional, for relay tracking) */
+  method?: string;
+  /** Maximum timeout in seconds for settlement (optional) */
+  maxTimeoutSeconds?: number;
+}
+
+/** Sender nonce health info returned by the relay. */
+export interface RelaySenderNonceInfo {
+  provided: number;
+  expected: number;
+  healthy: boolean;
+  warning?: string;
+}
+
+/**
+ * Result returned by RelayRPC.submitPayment().
+ * Mirrors SubmitPaymentResult in x402-sponsor-relay/src/rpc.ts.
+ */
+export interface SubmitPaymentResult {
+  /** Whether the submission was accepted into the relay queue */
+  accepted: boolean;
+  /** Unique payment identifier (pay_ prefix) — present when accepted */
+  paymentId?: string;
+  /** Initial status string */
+  status?: string;
+  /** Sender nonce health info */
+  senderNonce?: RelaySenderNonceInfo;
+  /** Warning for nonce gaps (accepted but flagged) */
+  warning?: {
+    code: string;
+    detail: string;
+    senderNonce: { provided: number; expected: number; lastSeen: number };
+    help: string;
+    action: string;
+  };
+  /** Human-readable error (only when accepted=false) */
+  error?: string;
+  /** Machine-readable error code (only when accepted=false) */
+  code?: string;
+  /** Whether the error is retryable */
+  retryable?: boolean;
+  /** Help URL for the caller */
+  help?: string;
+  /** Action the caller should take */
+  action?: string;
+  /** URL to check payment status */
+  checkStatusUrl?: string;
+}
+
+/**
+ * Result returned by RelayRPC.checkPayment().
+ * Mirrors CheckPaymentResult in x402-sponsor-relay/src/rpc.ts.
+ */
+export interface CheckPaymentResult {
+  paymentId: string;
+  /** Current payment status: "queued" | "submitted" | "broadcasting" | "mempool" | "confirmed" | "failed" | "replaced" | "not_found" */
+  status: string;
+  txid?: string;
+  blockHeight?: number;
+  confirmedAt?: string;
+  explorerUrl?: string;
+  error?: string;
+  errorCode?: string;
+  retryable?: boolean;
+  senderNonceInfo?: RelaySenderNonceInfo;
+}
+
+/**
+ * RelayRPC interface (from x402-sponsor-relay service).
  * Defined locally since x402-sponsor-relay isn't a published package.
- * Matches the WorkerEntrypoint methods exposed by RelayRPC in PR #228.
+ * Matches the WorkerEntrypoint methods exposed by RelayRPC in x402-sponsor-relay/src/rpc.ts.
+ *
+ * submitPayment(txHex, settle) — enqueue a sponsored transaction, returns immediately with paymentId.
+ * checkPayment(paymentId)      — poll for settlement result.
  */
 export interface RelayRPC {
-  submitPayment(
-    paymentPayload: Record<string, unknown>,
-    paymentRequirements: Record<string, unknown>
-  ): Promise<{
-    /** Queue-based RPC fields (PR #228) */
-    accepted?: boolean;
-    paymentId?: string;
-    /** Legacy settle-style fields (HTTP /settle compat) */
-    success?: boolean;
-    transaction?: string;
-    payer?: string;
-    status?: string;
-    error?: string;
-  }>;
-  checkPayment(
-    paymentId: string
-  ): Promise<{ status: string; confirmed: boolean; transaction?: string; payer?: string }>;
+  submitPayment(txHex: string, settle?: SettleOptions): Promise<SubmitPaymentResult>;
+  checkPayment(paymentId: string): Promise<CheckPaymentResult>;
 }
 
 /**
