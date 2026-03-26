@@ -20,6 +20,8 @@ import type { Env, RelayRPC, SettleOptions, SubmitPaymentResult, CheckPaymentRes
 export interface PaymentRequiredOpts {
   amount: number;
   description: string;
+  /** Machine-readable error code to include in the 402 body (e.g. from a failed retry). */
+  code?: string;
 }
 
 export interface PaymentVerifyResult {
@@ -66,8 +68,15 @@ function isSenderNonceCode(code: string): boolean {
   return code.startsWith("SENDER_NONCE_");
 }
 
+export interface VerificationErrorBody {
+  error: string;
+  code?: string;
+  retryable: boolean;
+  hint?: string;
+}
+
 export interface VerificationErrorResult {
-  body: Record<string, unknown>;
+  body: VerificationErrorBody;
   status: 402 | 409 | 503;
   headers?: Record<string, string>;
 }
@@ -118,7 +127,7 @@ export function mapVerificationError(
   const reason = verification.relayReason
     ? ` Relay: ${verification.relayReason}`
     : "";
-  const body: Record<string, unknown> = {
+  const body: VerificationErrorBody = {
     error: `Payment verification failed.${reason}`,
     retryable: verification.retryable ?? true,
   };
@@ -133,7 +142,7 @@ export function mapVerificationError(
  * Returns a proper 402 response with paymentRequirements JSON body.
  */
 export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
-  const { amount, description } = opts;
+  const { amount, description, code } = opts;
 
   const paymentRequirements = {
     x402Version: 2,
@@ -165,15 +174,20 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
     headers["payment-required"] = encoded;
   }
 
+  const body: Record<string, unknown> = {
+    error: "Payment Required",
+    message: description,
+    payTo: TREASURY_STX_ADDRESS,
+    amount,
+    asset: SBTC_CONTRACT_MAINNET,
+    x402: paymentRequirements,
+  };
+  if (code) {
+    body.code = code;
+  }
+
   return new Response(
-    JSON.stringify({
-      error: "Payment Required",
-      message: description,
-      payTo: TREASURY_STX_ADDRESS,
-      amount,
-      asset: SBTC_CONTRACT_MAINNET,
-      x402: paymentRequirements,
-    }),
+    JSON.stringify(body),
     {
       status: 402,
       headers,

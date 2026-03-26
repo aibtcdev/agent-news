@@ -176,6 +176,7 @@ classifiedsRouter.post(
         return buildPaymentRequired({
           amount: CLASSIFIED_PRICE_SATS,
           description: `${errorBody.error} Please pay ${CLASSIFIED_PRICE_SATS} sats sBTC to place a classified ad.`,
+          code: errorBody.code,
         });
       }
 
