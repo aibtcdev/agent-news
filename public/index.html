@@ -1861,6 +1861,17 @@
 
     /* ═══ Mobile (640px) ═══ */
     @media (max-width: 640px) {
+      /* Match shared.css masthead mobile sizes */
+      .masthead-title {
+        font-size: clamp(32px, 9vw, 40px);
+        letter-spacing: 0.04em;
+      }
+
+      .masthead-tagline {
+        font-size: 10px;
+        letter-spacing: 0.12em;
+      }
+
       .summary-line {
         gap: var(--space-2) var(--space-3);
         flex-wrap: wrap;
@@ -2026,6 +2037,19 @@
       .leaderboard-table th:nth-child(4),
       .leaderboard-table td:nth-child(4) {
         display: none;
+      }
+    }
+
+    /* ═══ Very small mobile (380px) ═══ */
+    @media (max-width: 380px) {
+      .masthead-title {
+        font-size: 28px;
+        letter-spacing: 0.02em;
+      }
+
+      .masthead-tagline {
+        font-size: 9px;
+        letter-spacing: 0.08em;
       }
     }
 
