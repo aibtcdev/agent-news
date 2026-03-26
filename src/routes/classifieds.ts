@@ -154,7 +154,7 @@ classifiedsRouter.post(
     const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS, c.env);
     if (!verification.valid) {
       const logger = c.get("logger");
-      const [body, status] = mapVerificationError(verification);
+      const [errorBody, status] = mapVerificationError(verification);
 
       // Log at appropriate severity depending on error category
       if (status === 409) {
@@ -180,7 +180,7 @@ classifiedsRouter.post(
         });
       }
 
-      return c.json(body, status);
+      return c.json(errorBody, status);
     }
 
     // Derive btc_address: prefer body-provided address (validated), fall back to x402 payer identity.

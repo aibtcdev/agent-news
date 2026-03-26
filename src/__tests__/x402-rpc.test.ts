@@ -117,6 +117,47 @@ describe("verifyPayment — RPC path — nonce errors", () => {
 });
 
 // =============================================================================
+// Nonce gap warning (accepted with warning)
+// =============================================================================
+
+describe("verifyPayment — RPC path — nonce gap warning", () => {
+  it("returns valid:true when submitPayment accepts with a nonce gap warning", async () => {
+    vi.useFakeTimers();
+
+    const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
+      accepted: true,
+      paymentId: "pay_gap",
+      status: "queued_with_warning",
+      warning: {
+        code: "SENDER_NONCE_GAP",
+        detail: "Nonce gap: sent 7, expected 5",
+        senderNonce: { provided: 7, expected: 5, lastSeen: 4 },
+        help: "https://docs.example.com/nonce",
+        action: "Payment queued but may sit in mempool until gap is filled",
+      },
+    });
+
+    const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
+      paymentId: "pay_gap",
+      status: "confirmed",
+      txid: "tx_gap_confirmed",
+    });
+
+    const env = makeEnv(submitPayment, checkPayment);
+
+    const resultPromise = verifyPayment(makePaymentHeader(), 100, env);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    // Payment proceeds despite the gap warning
+    expect(result.valid).toBe(true);
+    expect(result.txid).toBe("tx_gap_confirmed");
+    expect(submitPayment).toHaveBeenCalledOnce();
+    expect(checkPayment).toHaveBeenCalledWith("pay_gap");
+  });
+});
+
+// =============================================================================
 // Polling timeout
 // =============================================================================
 

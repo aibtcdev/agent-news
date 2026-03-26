@@ -88,7 +88,7 @@ export function mapVerificationError(
   return [
     {
       error: `Payment verification failed.${reason}`,
-      retryable: verification.retryable ?? false,
+      retryable: verification.retryable ?? true,
     },
     402,
   ];
@@ -155,7 +155,8 @@ function isRelayRPC(relay: unknown): relay is RelayRPC {
   return (
     typeof relay === "object" &&
     relay !== null &&
-    typeof (relay as Record<string, unknown>).submitPayment === "function"
+    typeof (relay as Record<string, unknown>).submitPayment === "function" &&
+    typeof (relay as Record<string, unknown>).checkPayment === "function"
   );
 }
 
@@ -259,7 +260,15 @@ export async function verifyPayment(
       };
     }
 
-    const paymentId = submitResult.paymentId!;
+    const paymentId = submitResult.paymentId;
+    if (!paymentId) {
+      console.error("[x402] RPC submitPayment accepted but did not return a paymentId");
+      return {
+        valid: false,
+        relayError: true,
+        relayReason: "Relay accepted payment but did not return a paymentId",
+      };
+    }
     console.log("[x402] RPC payment queued:", paymentId, submitResult.status);
 
     // Step 2: Poll checkPayment() until confirmed, failed, or timeout.
@@ -296,6 +305,7 @@ export async function verifyPayment(
         return {
           valid: false,
           relayReason: "Payment not found in relay — it may have expired",
+          retryable: true,
         };
       }
 
