@@ -5,7 +5,7 @@ import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPa
 import { CONFIG_PUBLISHER_ADDRESS, BRIEF_COMPILE_RATE_LIMIT } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
 import { getPacificDate, formatPacificShort } from "../lib/helpers";
-import { validateBtcAddress } from "../lib/validators";
+import { validateBtcAddress, validateDateFormat } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 
 const briefCompileRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -68,7 +68,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   const date = (body.date as string | undefined) ?? getPacificDate(now);
 
   // Validate date if provided
-  if (body.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (body.date !== undefined && !validateDateFormat(date)) {
     return c.json({ error: "Invalid date format", hint: "Use YYYY-MM-DD" }, 400);
   }
 

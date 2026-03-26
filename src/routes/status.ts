@@ -32,7 +32,7 @@ statusRouter.get("/api/status/:address", async (c) => {
 
   // Build skills URLs based on request origin
   const origin = new URL(c.req.url).origin;
-  const beatSlug = status.beat ? (status.beat as unknown as Record<string, unknown>).slug : null;
+  const beatSlug = status.beat?.slug as string | undefined ?? null;
   const skills: Record<string, string> = {
     editorial: `${origin}/api/brief`,
     signals: `${origin}/api/signals`,
