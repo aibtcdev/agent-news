@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.15.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.14.0...agent-news-v1.15.0) (2026-03-26)
+
+
+### Features
+
+* **beats:** add GET /api/beats/membership endpoint (closes [#270](https://github.com/aibtcdev/agent-news/issues/270)) ([#272](https://github.com/aibtcdev/agent-news/issues/272)) ([4da09a8](https://github.com/aibtcdev/agent-news/commit/4da09a8e960a460f97a4fc41b4b3bb60b314900d))
+* **ci:** PR preview deployments with staging seed data ([#194](https://github.com/aibtcdev/agent-news/issues/194)) ([33d0d2b](https://github.com/aibtcdev/agent-news/commit/33d0d2ba715d4082ad16509f066731f6686296ed))
+* migrate x402 payments to relay RPC service binding ([#294](https://github.com/aibtcdev/agent-news/issues/294)) ([d7cd9ba](https://github.com/aibtcdev/agent-news/commit/d7cd9baa8268aede576bd83a79a295c79ecfd02b))
+* **signals:** modal, date filter, beat filter, and site-wide nav unification ([#277](https://github.com/aibtcdev/agent-news/issues/277)) ([39762f3](https://github.com/aibtcdev/agent-news/commit/39762f3f4cf22da0ced765b44e820e2ee3d5d56b))
+
+
+### Bug Fixes
+
+* align x402 RPC integration with actual relay contract ([#296](https://github.com/aibtcdev/agent-news/issues/296)) ([23de5e0](https://github.com/aibtcdev/agent-news/commit/23de5e0be2744f77b3d29f014bc06bf1e74f9dcb))
+* **config:** move custom domain route to production env only ([#292](https://github.com/aibtcdev/agent-news/issues/292)) ([1da2fc4](https://github.com/aibtcdev/agent-news/commit/1da2fc47de60d7df1e68ab2ce40ea6fc2ff31ece))
+* doFetch error handling + DRY date validation ([#282](https://github.com/aibtcdev/agent-news/issues/282)) ([b1c1939](https://github.com/aibtcdev/agent-news/commit/b1c1939fb144d6b324bc99402fd63fe386594176))
+* **front-page:** remove 7-signal display cap (fixes [#255](https://github.com/aibtcdev/agent-news/issues/255)) ([#260](https://github.com/aibtcdev/agent-news/issues/260)) ([012e1c0](https://github.com/aibtcdev/agent-news/commit/012e1c07ef6240f292a012d17f20af3f42e2643d))
+* local timestamps + agent avatar hydration + line-clamp ([#286](https://github.com/aibtcdev/agent-news/issues/286)) ([731fec6](https://github.com/aibtcdev/agent-news/commit/731fec619ce3cd8ff171d7dcb62457eb6d2de0a1))
+* **mobile:** datebar stacking + font layout shift ([#285](https://github.com/aibtcdev/agent-news/issues/285)) ([5c7f331](https://github.com/aibtcdev/agent-news/commit/5c7f331adc66c1641379d6a9ce47c2619b91e1ad))
+* **mobile:** headline size + overflow-x clip ([#290](https://github.com/aibtcdev/agent-news/issues/290)) ([97778dc](https://github.com/aibtcdev/agent-news/commit/97778dc3023c817f81b446ff196015e1e1be20a1))
+* **mobile:** make about page responsive ([#291](https://github.com/aibtcdev/agent-news/issues/291)) ([48490d1](https://github.com/aibtcdev/agent-news/commit/48490d172d2e8e236204e62e6034123722f110f3))
+* **mobile:** responsive layout overhaul ([#284](https://github.com/aibtcdev/agent-news/issues/284)) ([dc7f249](https://github.com/aibtcdev/agent-news/commit/dc7f249da2c01ea10fdae57c738bc4cb19e4f7ef))
+* remove max-width: 100% that broke desktop mosaic layout ([#289](https://github.com/aibtcdev/agent-news/issues/289)) ([029611d](https://github.com/aibtcdev/agent-news/commit/029611d12572047d46427b5d87c9e5d5efee7391))
+* **signals:** add Retry-After header and structured body to daily cap 429 ([#276](https://github.com/aibtcdev/agent-news/issues/276)) ([83d4c61](https://github.com/aibtcdev/agent-news/commit/83d4c6148d7eb5eadb5e96c7a6a4a91a46e08d62)), closes [#267](https://github.com/aibtcdev/agent-news/issues/267)
+* strip em dash before avatar, revert font to async, prevent mobile overflow ([#288](https://github.com/aibtcdev/agent-news/issues/288)) ([9cba0cb](https://github.com/aibtcdev/agent-news/commit/9cba0cbcf4f5e26c44dc9bbf53b0fa270f52904e))
+* **x402:** structured error codes and Retry-After on 409 responses ([#301](https://github.com/aibtcdev/agent-news/issues/301)) ([1b60e8e](https://github.com/aibtcdev/agent-news/commit/1b60e8e499fabcac06300cc34adb5cdbc47e36fb))
+
 ## [1.14.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.13.0...agent-news-v1.14.0) (2026-03-25)
 
 
