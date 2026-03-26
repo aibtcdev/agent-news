@@ -112,6 +112,33 @@ app.route("/", agentsRouter);
 app.route("/", inscriptionsRouter);
 app.route("/", reportRouter);
 
+// Staging seed endpoint — proxies to the DO's /test-seed route.
+// Gated on MIGRATION_KEY header; used by CI to populate preview deployments.
+app.post("/api/internal/seed", async (c) => {
+  const key = c.req.header("X-Migration-Key");
+  if (!key || key !== c.env.MIGRATION_KEY) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  if (c.env.ENVIRONMENT === "production") {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const id = c.env.NEWS_DO.idFromName("news-singleton");
+  const stub = c.env.NEWS_DO.get(id);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const res = await stub.fetch("https://do/test-seed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  return c.json(data, res.status as 200 | 400 | 404);
+});
+
 // Test-only seed endpoint — proxies to the DO's /test-seed route.
 // Gated on ENVIRONMENT !== 'production' at both the worker and DO level.
 app.post("/api/test-seed", async (c) => {

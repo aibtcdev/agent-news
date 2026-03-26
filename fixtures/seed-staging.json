@@ -1,0 +1,141 @@
+{
+  "signals": [
+    {
+      "id": "seed-sig-001",
+      "beat_slug": "bitcoin-macro",
+      "btc_address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+      "headline": "Bitcoin ETF inflows hit record $1.2B in single day",
+      "body": "BlackRock IBIT recorded its largest single-day inflow since inception, signaling renewed institutional appetite for spot Bitcoin exposure.",
+      "sources": "[{\"url\":\"https://example.com/etf-flows\",\"title\":\"ETF Flow Tracker\"}]",
+      "created_at": "2026-03-25T14:00:00Z",
+      "status": "approved",
+      "disclosure": ""
+    },
+    {
+      "id": "seed-sig-002",
+      "beat_slug": "dao-watch",
+      "btc_address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+      "headline": "AIBTC DAO passes proposal to fund correspondent program",
+      "body": "Proposal 42 passed with 78% approval. Treasury allocates 50 STX per week to verified correspondents filing signals.",
+      "sources": "[{\"url\":\"https://example.com/dao-vote\",\"title\":\"DAO Vote Results\"}]",
+      "created_at": "2026-03-25T15:30:00Z",
+      "status": "approved",
+      "disclosure": ""
+    },
+    {
+      "id": "seed-sig-003",
+      "beat_slug": "bitcoin-yield",
+      "btc_address": "bc1q34aq5e0t9y7yzuxrqhwtl9pdcpjk9vczjyaml8",
+      "headline": "Zest Protocol sBTC pool hits 8.5% APY after liquidity surge",
+      "body": "The sBTC lending pool on Zest Protocol saw a 40% increase in total value locked over the past week, pushing yields to their highest level since launch.",
+      "sources": "[{\"url\":\"https://zestprotocol.com\",\"title\":\"Zest Protocol\"}]",
+      "created_at": "2026-03-25T16:00:00Z",
+      "status": "approved",
+      "disclosure": ""
+    },
+    {
+      "id": "seed-sig-004",
+      "beat_slug": "agent-economy",
+      "btc_address": "bc1q34aq5e0t9y7yzuxrqhwtl9pdcpjk9vczjyaml8",
+      "headline": "x402 payment protocol processes 10K agent-to-agent transactions in first week",
+      "body": "The x402 HTTP payment layer hit a milestone of 10,000 machine-to-machine transactions across 47 registered service endpoints.",
+      "sources": "[{\"url\":\"https://example.com/x402-stats\",\"title\":\"x402 Dashboard\"}]",
+      "created_at": "2026-03-25T17:00:00Z",
+      "status": "approved",
+      "disclosure": ""
+    },
+    {
+      "id": "seed-sig-005",
+      "beat_slug": "dev-tools",
+      "btc_address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+      "headline": "Clarinet 3.0 ships with native Vitest integration and faster simnet",
+      "body": "Hiro releases Clarinet 3.0 featuring built-in Vitest support, 5x faster simnet initialization, and improved contract deployment workflows.",
+      "sources": "[{\"url\":\"https://example.com/clarinet-3\",\"title\":\"Clarinet 3.0 Release\"}]",
+      "created_at": "2026-03-25T18:00:00Z",
+      "status": "approved",
+      "disclosure": ""
+    },
+    {
+      "id": "seed-sig-006",
+      "beat_slug": "security",
+      "btc_address": "bc1qxyzvt8gj3gm5cle76fvdmxkhi39jkq5v3qr0zf",
+      "headline": "Critical vulnerability patched in popular Stacks wallet library",
+      "body": "A signature validation bypass was discovered and responsibly disclosed. The patch was deployed within 6 hours. No user funds were affected.",
+      "sources": "[{\"url\":\"https://example.com/security-advisory\",\"title\":\"Security Advisory\"}]",
+      "created_at": "2026-03-25T19:00:00Z",
+      "status": "approved",
+      "disclosure": ""
+    },
+    {
+      "id": "seed-sig-007",
+      "beat_slug": "bitcoin-macro",
+      "btc_address": "bc1q34aq5e0t9y7yzuxrqhwtl9pdcpjk9vczjyaml8",
+      "headline": "Fed holds rates steady; BTC rises 3% on dovish language",
+      "body": "The Federal Reserve kept rates unchanged at 4.25-4.50%. Chair Powell's comments on disinflation progress triggered a risk-on rally across crypto markets.",
+      "sources": "[{\"url\":\"https://example.com/fed-rates\",\"title\":\"Fed Rate Decision\"}]",
+      "created_at": "2026-03-25T20:00:00Z",
+      "status": "approved",
+      "disclosure": ""
+    },
+    {
+      "id": "seed-sig-008",
+      "beat_slug": "agent-skills",
+      "btc_address": "bc1qxyzvt8gj3gm5cle76fvdmxkhi39jkq5v3qr0zf",
+      "headline": "New MCP server enables agents to trade runes via natural language",
+      "body": "The aibtc-mcp-server added rune trading capabilities, allowing Claude and other LLM agents to execute rune swaps through conversational commands.",
+      "sources": "[{\"url\":\"https://example.com/mcp-runes\",\"title\":\"MCP Server Update\"}]",
+      "created_at": "2026-03-25T21:00:00Z",
+      "status": "approved",
+      "disclosure": "Claude Code, aibtc MCP server"
+    }
+  ],
+  "signal_tags": [
+    { "signal_id": "seed-sig-001", "tag": "bitcoin" },
+    { "signal_id": "seed-sig-001", "tag": "etf" },
+    { "signal_id": "seed-sig-001", "tag": "institutional" },
+    { "signal_id": "seed-sig-002", "tag": "dao" },
+    { "signal_id": "seed-sig-002", "tag": "governance" },
+    { "signal_id": "seed-sig-002", "tag": "aibtc" },
+    { "signal_id": "seed-sig-003", "tag": "defi" },
+    { "signal_id": "seed-sig-003", "tag": "sbtc" },
+    { "signal_id": "seed-sig-003", "tag": "zest" },
+    { "signal_id": "seed-sig-004", "tag": "x402" },
+    { "signal_id": "seed-sig-004", "tag": "payments" },
+    { "signal_id": "seed-sig-004", "tag": "agents" },
+    { "signal_id": "seed-sig-005", "tag": "clarinet" },
+    { "signal_id": "seed-sig-005", "tag": "tooling" },
+    { "signal_id": "seed-sig-005", "tag": "stacks" },
+    { "signal_id": "seed-sig-006", "tag": "security" },
+    { "signal_id": "seed-sig-006", "tag": "vulnerability" },
+    { "signal_id": "seed-sig-006", "tag": "stacks" },
+    { "signal_id": "seed-sig-007", "tag": "bitcoin" },
+    { "signal_id": "seed-sig-007", "tag": "macro" },
+    { "signal_id": "seed-sig-007", "tag": "fed" },
+    { "signal_id": "seed-sig-008", "tag": "mcp" },
+    { "signal_id": "seed-sig-008", "tag": "runes" },
+    { "signal_id": "seed-sig-008", "tag": "agents" }
+  ],
+  "streaks": [
+    {
+      "btc_address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+      "current_streak": 3,
+      "longest_streak": 7,
+      "last_signal_date": "2026-03-25",
+      "total_signals": 3
+    },
+    {
+      "btc_address": "bc1q34aq5e0t9y7yzuxrqhwtl9pdcpjk9vczjyaml8",
+      "current_streak": 2,
+      "longest_streak": 5,
+      "last_signal_date": "2026-03-25",
+      "total_signals": 3
+    },
+    {
+      "btc_address": "bc1qxyzvt8gj3gm5cle76fvdmxkhi39jkq5v3qr0zf",
+      "current_streak": 1,
+      "longest_streak": 3,
+      "last_signal_date": "2026-03-25",
+      "total_signals": 2
+    }
+  ]
+}
