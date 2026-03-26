@@ -80,15 +80,27 @@ function truncAddr(addr) {
  */
 function relativeTime(iso) {
   if (!iso) return '';
-  const diff = Date.now() - new Date(iso).getTime();
+  const d = new Date(iso);
+  const now = new Date();
+  const diff = now - d;
   if (diff < 0) return 'just now';
-  const mins  = Math.floor(diff / 60000);
+  const mins = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
-  if (mins < 2)   return 'just now';
-  if (mins < 60)  return mins + 'm ago';
-  if (hours < 24) return hours + 'h ago';
-  return days + 'd ago';
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+  // Very recent
+  if (mins < 2) return 'just now';
+  if (mins < 60) return mins + 'm ago · ' + time;
+
+  // Today: "5h ago · 4:30 PM"
+  if (d.toDateString() === now.toDateString()) return hours + 'h ago · ' + time;
+
+  // Yesterday
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday, ' + time;
+
+  // Older
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' + time;
 }
 
 /**
