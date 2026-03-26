@@ -27,8 +27,15 @@ jobs:
       - name: Deploy preview
         id: deploy
         run: |
+          set +e
           OUTPUT=$(npx wrangler deploy --env staging 2>&1)
+          EXIT_CODE=$?
+          set -e
           echo "$OUTPUT"
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::wrangler deploy failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
           URL=$(echo "$OUTPUT" | grep -Eo 'https://[^[:space:]]*\.workers\.dev' | head -1)
           echo "url=$URL" >> "$GITHUB_OUTPUT"
         env:
