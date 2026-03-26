@@ -106,7 +106,12 @@ briefRouter.get("/api/brief/:date", async (c) => {
 
     const verification = await verifyPayment(paymentHeader, BRIEF_PRICE_SATS, c.env);
     if (!verification.valid) {
-      const [body, status] = mapVerificationError(verification);
+      const { body, status, headers } = mapVerificationError(verification);
+      if (headers) {
+        for (const [key, value] of Object.entries(headers)) {
+          c.header(key, value);
+        }
+      }
       return c.json(body, status);
     }
 

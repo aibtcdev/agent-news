@@ -48,50 +48,76 @@ export interface PaymentVerifyResult {
   retryable?: boolean;
 }
 
+/** Nonce error codes that should produce a 409 response. */
+const NONCE_CONFLICT_CODES = new Set([
+  "SENDER_NONCE_STALE",
+  "SENDER_NONCE_DUPLICATE",
+  "SENDER_NONCE_GAP",
+  "NONCE_CONFLICT",
+]);
+
+/** Whether the nonce conflict originates from the sender (not the sponsor). */
+function isSenderNonceCode(code: string): boolean {
+  return code.startsWith("SENDER_NONCE_");
+}
+
+export interface VerificationErrorResult {
+  body: Record<string, unknown>;
+  status: 402 | 409 | 503;
+  headers?: Record<string, string>;
+}
+
 /**
  * Map a failed PaymentVerifyResult to an HTTP error response.
- * Returns [body, statusCode] for the caller to pass to c.json().
+ * Returns body, status, and optional headers (e.g. Retry-After on 409).
  * Consolidates nonce-conflict (409), relay-error (503), and payment-invalid (402) logic
  * shared by brief.ts and classifieds.ts.
  */
 export function mapVerificationError(
   verification: PaymentVerifyResult
-): [body: Record<string, unknown>, status: 402 | 409 | 503] {
-  if (
-    verification.errorCode === "SENDER_NONCE_STALE" ||
-    verification.errorCode === "SENDER_NONCE_DUPLICATE"
-  ) {
-    return [
-      {
-        error: "Payment nonce conflict. Recover your sponsor nonce and retry.",
-        errorCode: verification.errorCode,
+): VerificationErrorResult {
+  const code = verification.errorCode;
+
+  if (code && NONCE_CONFLICT_CODES.has(code)) {
+    const side = isSenderNonceCode(code) ? "sender" : "sponsor";
+    const hint = side === "sender"
+      ? "Re-fetch your sender nonce and re-sign the transaction before retrying."
+      : "Use the recover-nonce tool or check your relay nonce before retrying.";
+
+    return {
+      body: {
+        error: `Payment nonce conflict (${side}).`,
+        code,
         retryable: true,
-        hint: "Use the recover-nonce tool or check your relay nonce before retrying.",
+        hint,
       },
-      409,
-    ];
+      status: 409,
+      headers: { "Retry-After": "5" },
+    };
   }
 
   if (verification.relayError) {
-    return [
-      {
+    return {
+      body: {
         error: "Payment relay unavailable. Your payment was not consumed — please retry shortly.",
         retryable: true,
       },
-      503,
-    ];
+      status: 503,
+      headers: { "Retry-After": "10" },
+    };
   }
 
   const reason = verification.relayReason
     ? ` Relay: ${verification.relayReason}`
     : "";
-  return [
-    {
-      error: `Payment verification failed.${reason}`,
-      retryable: verification.retryable ?? true,
-    },
-    402,
-  ];
+  const body: Record<string, unknown> = {
+    error: `Payment verification failed.${reason}`,
+    retryable: verification.retryable ?? true,
+  };
+  if (verification.errorCode) {
+    body.code = verification.errorCode;
+  }
+  return { body, status: 402 as const };
 }
 
 /**

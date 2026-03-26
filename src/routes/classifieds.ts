@@ -154,7 +154,7 @@ classifiedsRouter.post(
     const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS, c.env);
     if (!verification.valid) {
       const logger = c.get("logger");
-      const [errorBody, status] = mapVerificationError(verification);
+      const { body: errorBody, status, headers } = mapVerificationError(verification);
 
       // Log at appropriate severity depending on error category
       if (status === 409) {
@@ -173,13 +173,17 @@ classifiedsRouter.post(
 
       // When retryable, return full payment requirements so the agent can re-pay
       if (status === 402 && verification.retryable !== false) {
-        const reason = verification.relayReason ? ` Relay: ${verification.relayReason}` : "";
         return buildPaymentRequired({
           amount: CLASSIFIED_PRICE_SATS,
-          description: `Payment verification failed.${reason} Please pay ${CLASSIFIED_PRICE_SATS} sats sBTC to place a classified ad.`,
+          description: `${errorBody.error} Please pay ${CLASSIFIED_PRICE_SATS} sats sBTC to place a classified ad.`,
         });
       }
 
+      if (headers) {
+        for (const [key, value] of Object.entries(headers)) {
+          c.header(key, value);
+        }
+      }
       return c.json(errorBody, status);
     }
 
