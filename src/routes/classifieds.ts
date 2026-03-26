@@ -22,7 +22,7 @@ import {
   createClassified,
   getClassifiedsRotation,
 } from "../lib/do-client";
-import { buildPaymentRequired, verifyPayment } from "../services/x402";
+import { buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 
 /** Transform a Classified row to the camelCase API response shape. */
 export function transformClassified(cl: Classified) {
@@ -154,64 +154,33 @@ classifiedsRouter.post(
     const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS, c.env);
     if (!verification.valid) {
       const logger = c.get("logger");
-      // Nonce conflict — agent must recover sponsor nonce before retrying
-      if (
-        verification.errorCode === "SENDER_NONCE_STALE" ||
-        verification.errorCode === "SENDER_NONCE_DUPLICATE"
-      ) {
+      const [body, status] = mapVerificationError(verification);
+
+      // Log at appropriate severity depending on error category
+      if (status === 409) {
         logger.warn("nonce conflict during payment verification for POST /api/classifieds", {
-          category,
-          headline,
-          errorCode: verification.errorCode,
+          category, headline, errorCode: verification.errorCode,
         });
-        return c.json(
-          {
-            error: "Payment nonce conflict. Recover your sponsor nonce and retry.",
-            errorCode: verification.errorCode,
-            retryable: true,
-            hint: "Use the recover-nonce tool or check your relay nonce before retrying.",
-          },
-          409
-        );
-      }
-      // Transient relay failure — payer should not be charged again
-      if (verification.relayError) {
+      } else if (status === 503) {
         logger.error("relay error during payment verification for POST /api/classifieds", {
-          category,
-          headline,
+          category, headline,
         });
-        return c.json(
-          {
-            error: "Payment relay unavailable. Your payment was not consumed — please retry shortly.",
-            retryable: true,
-          },
-          503
-        );
+      } else {
+        logger.warn("payment verification failed for POST /api/classifieds", {
+          category, headline, relayReason: verification.relayReason,
+        });
       }
-      // Payment invalid (bad sig, wrong amount, etc.)
-      logger.warn("payment verification failed for POST /api/classifieds", {
-        category,
-        headline,
-        relayReason: verification.relayReason,
-      });
-      const reason = verification.relayReason
-        ? ` Relay: ${verification.relayReason}`
-        : "";
-      // When retryable is explicitly false the agent should not present payment UI again
-      // without first diagnosing the rejection — return a plain 402 JSON with the hint.
-      if (verification.retryable === false) {
-        return c.json(
-          {
-            error: `Payment verification failed.${reason}`,
-            retryable: false,
-          },
-          402
-        );
+
+      // When retryable, return full payment requirements so the agent can re-pay
+      if (status === 402 && verification.retryable !== false) {
+        const reason = verification.relayReason ? ` Relay: ${verification.relayReason}` : "";
+        return buildPaymentRequired({
+          amount: CLASSIFIED_PRICE_SATS,
+          description: `Payment verification failed.${reason} Please pay ${CLASSIFIED_PRICE_SATS} sats sBTC to place a classified ad.`,
+        });
       }
-      return buildPaymentRequired({
-        amount: CLASSIFIED_PRICE_SATS,
-        description: `Payment verification failed.${reason} Please pay ${CLASSIFIED_PRICE_SATS} sats sBTC to place a classified ad.`,
-      });
+
+      return c.json(body, status);
     }
 
     // Derive btc_address: prefer body-provided address (validated), fall back to x402 payer identity.

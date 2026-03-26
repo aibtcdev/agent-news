@@ -15,7 +15,7 @@ import {
   RPC_POLL_MAX_ATTEMPTS,
   RPC_POLL_INTERVAL_MS,
 } from "../lib/constants";
-import type { Env, RelayRPC, SettleOptions } from "../lib/types";
+import type { Env, RelayRPC, SettleOptions, SubmitPaymentResult, CheckPaymentResult } from "../lib/types";
 
 export interface PaymentRequiredOpts {
   amount: number;
@@ -46,6 +46,52 @@ export interface PaymentVerifyResult {
    * Propagated from relay SubmitPaymentResult.retryable and CheckPaymentResult.retryable.
    */
   retryable?: boolean;
+}
+
+/**
+ * Map a failed PaymentVerifyResult to an HTTP error response.
+ * Returns [body, statusCode] for the caller to pass to c.json().
+ * Consolidates nonce-conflict (409), relay-error (503), and payment-invalid (402) logic
+ * shared by brief.ts and classifieds.ts.
+ */
+export function mapVerificationError(
+  verification: PaymentVerifyResult
+): [body: Record<string, unknown>, status: 402 | 409 | 503] {
+  if (
+    verification.errorCode === "SENDER_NONCE_STALE" ||
+    verification.errorCode === "SENDER_NONCE_DUPLICATE"
+  ) {
+    return [
+      {
+        error: "Payment nonce conflict. Recover your sponsor nonce and retry.",
+        errorCode: verification.errorCode,
+        retryable: true,
+        hint: "Use the recover-nonce tool or check your relay nonce before retrying.",
+      },
+      409,
+    ];
+  }
+
+  if (verification.relayError) {
+    return [
+      {
+        error: "Payment relay unavailable. Your payment was not consumed — please retry shortly.",
+        retryable: true,
+      },
+      503,
+    ];
+  }
+
+  const reason = verification.relayReason
+    ? ` Relay: ${verification.relayReason}`
+    : "";
+  return [
+    {
+      error: `Payment verification failed.${reason}`,
+      retryable: verification.retryable ?? false,
+    },
+    402,
+  ];
 }
 
 /**
@@ -102,10 +148,6 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
 }
 
 /**
- * Interpret a relay result (shared by both RPC and HTTP paths).
- * Returns a PaymentVerifyResult based on the success/status/error fields.
- */
-/**
  * Runtime type guard — verifies the binding exposes submitPayment().
  * Mirrors the isLogsRPC() pattern used for the LOGS binding.
  */
@@ -117,31 +159,26 @@ function isRelayRPC(relay: unknown): relay is RelayRPC {
   );
 }
 
-function interpretRelayResult(
-  result: {
-    success?: boolean;
-    accepted?: boolean;
-    transaction?: string;
-    paymentId?: string;
-    payer?: string;
-    status?: string;
-    error?: string;
-  },
-  path: "rpc" | "http"
-): PaymentVerifyResult {
-  // Normalise: RPC may return { accepted, paymentId } or legacy { success, transaction }
-  const isValid =
-    result.success || result.accepted || result.status === "pending";
-
-  if (isValid) {
+/**
+ * Interpret an HTTP /settle response from the relay.
+ * Only used by the HTTP fallback path — the RPC path handles results inline.
+ */
+function interpretHttpRelayResult(result: {
+  success?: boolean;
+  transaction?: string;
+  payer?: string;
+  status?: string;
+  error?: string;
+}): PaymentVerifyResult {
+  if (result.success || result.status === "pending") {
     return {
       valid: true,
-      txid: result.transaction ?? result.paymentId,
+      txid: result.transaction,
       payer: result.payer,
     };
   }
 
-  console.error(`[x402] relay payment rejected (${path}):`, JSON.stringify(result));
+  console.error("[x402] relay payment rejected (http):", JSON.stringify(result));
   return {
     valid: false,
     relayReason: result.error ?? JSON.stringify(result),
@@ -202,7 +239,7 @@ export async function verifyPayment(
     };
 
     // Step 1: Submit the payment to the relay queue.
-    let submitResult: Awaited<ReturnType<RelayRPC["submitPayment"]>>;
+    let submitResult: SubmitPaymentResult;
     try {
       console.log("[x402] using RPC path via X402_RELAY service binding");
       submitResult = await env.X402_RELAY.submitPayment(txHex, settle);
@@ -231,7 +268,7 @@ export async function verifyPayment(
         await new Promise<void>((resolve) => setTimeout(resolve, RPC_POLL_INTERVAL_MS));
       }
 
-      let checkResult: Awaited<ReturnType<RelayRPC["checkPayment"]>>;
+      let checkResult: CheckPaymentResult;
       try {
         checkResult = await env.X402_RELAY.checkPayment(paymentId);
       } catch (err) {
@@ -318,11 +355,11 @@ export async function verifyPayment(
   // Relay returns 200 for both success and failure — check the success field.
   // 4xx = schema/idempotency error; 2xx + !success = payment rejected by relay.
   // Both are payment-invalid, not transient relay errors (5xx handled above).
-  return interpretRelayResult({
+  return interpretHttpRelayResult({
     success: Boolean(result.success),
     transaction: result.transaction as string | undefined,
     payer: result.payer as string | undefined,
     status: result.status as string | undefined,
     error: (result.error as string) ?? (result.message as string),
-  }, "http");
+  });
 }
