@@ -412,6 +412,12 @@ export const MIGRATION_BEAT_NETWORK_FOCUS_SQL = `
   UPDATE signals SET beat_slug = 'agent-social'     WHERE beat_slug = 'comics';
 
   -- ── Phase D: Delete retired beats ──────────────────────────────────
+  -- Remove beat_claims first (FK constraint on beats.slug blocks delete otherwise)
+  DELETE FROM beat_claims WHERE beat_slug IN (
+    'bitcoin-macro', 'bitcoin-culture', 'bitcoin-yield',
+    'ordinals', 'runes', 'art', 'world-intel', 'comics',
+    'aibtc-network', 'dao-watch', 'dev-tools'
+  );
   DELETE FROM beats WHERE slug IN (
     'bitcoin-macro', 'bitcoin-culture', 'bitcoin-yield',
     'ordinals', 'runes', 'art', 'world-intel', 'comics',

@@ -142,7 +142,8 @@ export class NewsDO extends DurableObject<Env> {
     // 8 = Beat claims (multi-agent beats — beat_claims join table)
     // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
     // 10 = Network-focus beats (reduce 17 → 10 beats, remap signals, delete retired beats)
-    const CURRENT_MIGRATION_VERSION = 10;
+    // 11 = Re-run network-focus (migration 10 failed silently due to beat_claims FK constraint)
+    const CURRENT_MIGRATION_VERSION = 11;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -277,6 +278,17 @@ export class NewsDO extends DurableObject<Env> {
           this.ctx.storage.sql.exec(MIGRATION_BEAT_NETWORK_FOCUS_SQL);
         } catch (e) {
           console.error("Beat network-focus migration failed:", e);
+        }
+      }
+
+      // Re-run network-focus migration — migration 10 failed silently on production
+      // because beat_claims FK constraint blocked DELETE FROM beats. The updated
+      // MIGRATION_BEAT_NETWORK_FOCUS_SQL now deletes beat_claims first.
+      if (appliedVersion < 11) {
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_BEAT_NETWORK_FOCUS_SQL);
+        } catch (e) {
+          console.error("Beat network-focus re-run migration failed:", e);
         }
       }
 
