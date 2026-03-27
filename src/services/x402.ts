@@ -27,8 +27,12 @@ const circuitBreaker = {
   openUntil: 0,
 };
 
-function isCircuitOpen(): boolean {
-  if (Date.now() < circuitBreaker.openUntil) return true;
+function shouldFastFail(): boolean {
+  // Half-open: when the timer expires, reset failures so one probe gets through.
+  if (circuitBreaker.openUntil > 0 && Date.now() >= circuitBreaker.openUntil) {
+    circuitBreaker.failures = 0;
+    circuitBreaker.openUntil = 0;
+  }
   if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
     circuitBreaker.openUntil = Date.now() + CIRCUIT_BREAKER_RESET_MS;
     return true;
@@ -281,7 +285,7 @@ export async function verifyPayment(
   env?: Env
 ): Promise<PaymentVerifyResult> {
   // Fast-fail if the relay circuit breaker is open (consecutive failures).
-  if (isCircuitOpen()) {
+  if (shouldFastFail()) {
     console.warn("[x402] circuit breaker open — fast-failing relay call");
     return { valid: false, relayError: true, relayReason: "Relay circuit breaker open — too many recent failures" };
   }
@@ -386,7 +390,9 @@ export async function verifyPayment(
       }
 
       if (checkResult.status === "failed" || checkResult.status === "replaced") {
-        recordRelayFailure();
+        // Payment-level failure, not a relay error — relay responded correctly.
+        // Do NOT record as relay failure; the circuit breaker should not trip
+        // on legitimate payment rejections (insufficient fee, RBF replaced, etc.).
         return {
           valid: false,
           relayReason: checkResult.error ?? `Payment ${checkResult.status}`,
