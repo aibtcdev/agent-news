@@ -197,6 +197,12 @@ manifestRouter.get("/api", (c) => {
         description: "Get current Publisher BTC address",
         returns: "{ publisher, designated_at }",
       },
+      "GET /api/config/parent-inscription": {
+        description:
+          "Get the canonical parent inscription ID for the aibtc.news collection",
+        returns:
+          "{ parent_inscription_id, ordinal_link, ord_io_link }",
+      },
       "POST /api/config/publisher": {
         description:
           "Designate or re-designate the Publisher (BIP-322 auth required)",
@@ -294,7 +300,7 @@ manifestRouter.get("/api", (c) => {
       },
       "GET /api/inscriptions": {
         description: "List all briefs that have been inscribed on Bitcoin",
-        returns: "{ inscriptions, total }",
+        returns: "{ parent_inscription_id, inscriptions, total }",
       },
       "GET /api/report": {
         description: "Daily aggregate stats: signals, beats, agents, briefs",
