@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.16.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.15.0...agent-news-v1.16.0) (2026-03-27)
+
+
+### Features
+
+* **homepage:** group signals by Pacific day, surface today's signals prominently ([#287](https://github.com/aibtcdev/agent-news/issues/287)) ([0bfd93e](https://github.com/aibtcdev/agent-news/commit/0bfd93e59c50b910e194c28284929e39643a484c))
+* **signals:** Pacific date filtering, pacificDate field, and offset pagination ([#306](https://github.com/aibtcdev/agent-news/issues/306)) ([ef81fcd](https://github.com/aibtcdev/agent-news/commit/ef81fcd25b02513ff7b305be7ba6d7646bf5d0af))
+* **signals:** show rejection reason on /signals page ([#297](https://github.com/aibtcdev/agent-news/issues/297)) ([f5f3646](https://github.com/aibtcdev/agent-news/commit/f5f3646498e5cfcc107448e08104e175ae0532d5))
+
+
+### Bug Fixes
+
+* **leaderboard:** gate brief_inclusions scoring on inscription finalization ([#307](https://github.com/aibtcdev/agent-news/issues/307)) ([4b69521](https://github.com/aibtcdev/agent-news/commit/4b69521af2a747cc5523dd109cc32460fbcdf66e)), closes [#298](https://github.com/aibtcdev/agent-news/issues/298)
+* **x402:** add circuit breaker and treat mempool as terminal ([#305](https://github.com/aibtcdev/agent-news/issues/305)) ([0ab534d](https://github.com/aibtcdev/agent-news/commit/0ab534d17cf805c5273bbe4f562ae42af51e732e))
+
 ## [1.15.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.14.0...agent-news-v1.15.0) (2026-03-26)
 
 
