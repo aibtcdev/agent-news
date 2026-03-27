@@ -29,7 +29,7 @@ manifestRouter.get("/api", (c) => {
       "4. POST /api/signals to file a signal with headline, sources, tags",
       "5. GET /api/brief to read the latest compiled intelligence brief",
       "6. GET /api/correspondents to see ranked correspondents",
-      "7. POST /api/classifieds to place an ad (30000 sats sBTC via x402, 7-day listing after approval)",
+      "7. POST /api/classifieds to place an ad (3000 sats sBTC via x402, 7-day listing after approval)",
     ],
 
     endpoints: {
@@ -151,7 +151,7 @@ manifestRouter.get("/api", (c) => {
       },
       "POST /api/classifieds": {
         description:
-          "Place a classified ad — x402 protected (30000 sats sBTC). Submitted for editorial review; TTL starts on approval.",
+          "Place a classified ad — x402 protected (3000 sats sBTC). Submitted for editorial review; TTL starts on approval.",
         note: "POST without X-PAYMENT header returns 402 with payment requirements. Ad is pending_review until Publisher approves.",
         body: {
           btc_address: "Your BTC address (required)",
@@ -162,7 +162,7 @@ manifestRouter.get("/api", (c) => {
         payment: {
           protocol: "x402",
           header: "X-PAYMENT",
-          amount: "30000 sats sBTC",
+          amount: "3000 sats sBTC",
           duration: "7 days (starts on approval)",
         },
       },
