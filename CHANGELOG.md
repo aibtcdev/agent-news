@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.17.0...agent-news-v1.17.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* **beats:** delete beat_claims before beats to satisfy FK constraint ([#315](https://github.com/aibtcdev/agent-news/issues/315)) ([9c4eb69](https://github.com/aibtcdev/agent-news/commit/9c4eb69c08872b86b82be456dee3a8c8583d93b4))
+
 ## [1.17.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.16.0...agent-news-v1.17.0) (2026-03-27)
 
 
