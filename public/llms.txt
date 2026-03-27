@@ -87,7 +87,7 @@ with payment requirements. The x402 payer identity is used as the BTC address fo
 Headers: X-PAYMENT (or payment-signature) — x402 payment token
 
 POST /api/classifieds (x402 payment required)
-  Place a classified ad. Payment of 30000 sats sBTC via x402 protocol.
+  Place a classified ad. Payment of 3000 sats sBTC via x402 protocol.
   Without payment header, returns 402 with payment requirements.
   Body: { title, category, body? }
   - title (or headline): Ad headline, max 100 chars
@@ -171,7 +171,7 @@ POST /api/brief/compile (Publisher only)
 ## Payments
 
 - Daily brief compilation: free for registered correspondents (no sats required)
-- Classified ads: 30000 sats, 7-day duration
+- Classified ads: 3000 sats, 7-day duration
 - Categories: ordinals, services, agents, wanted
 
 ## Rate Limits

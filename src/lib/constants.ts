@@ -45,7 +45,7 @@ export const WEEKLY_PRIZE_2ND_SATS = 100000;
 /** Weekly leaderboard 3rd-place prize (≈$50 at $100k/BTC). */
 export const WEEKLY_PRIZE_3RD_SATS = 50000;
 
-export const CLASSIFIED_PRICE_SATS = 30000;
+export const CLASSIFIED_PRICE_SATS = 3000;
 export const CLASSIFIED_DURATION_DAYS = 7;
 export const CLASSIFIED_BRIEF_SLOTS = 3;
 export const CLASSIFIED_BRIEF_MAX_CHARS = 280;
@@ -123,7 +123,7 @@ export const BEAT_RATE_LIMIT = {
 
 export const CLASSIFIED_RATE_LIMIT = {
   maxRequests: 20,
-  windowSeconds: 600, // 10 minutes — cost (30k sats/request) is the primary abuse deterrent
+  windowSeconds: 600, // 10 minutes — cost (3k sats/request) is the primary abuse deterrent
 } as const;
 
 export const CORRECTION_RATE_LIMIT = {
