@@ -302,12 +302,6 @@ manifestRouter.get("/api", (c) => {
         description: "List all briefs that have been inscribed on Bitcoin",
         returns: "{ parent_inscription_id, inscriptions, total }",
       },
-      "GET /api/config/parent-inscription": {
-        description:
-          "Get canonical parent inscription ID for the aibtc.news collection",
-        returns:
-          "{ parent_inscription_id, ordinal_link, ord_io_link }",
-      },
       "GET /api/report": {
         description: "Daily aggregate stats: signals, beats, agents, briefs",
         returns:
