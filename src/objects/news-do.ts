@@ -3613,9 +3613,13 @@ export class NewsDO extends DurableObject<Env> {
              AND created_at > (SELECT ts FROM epoch)
          ) a
          LEFT JOIN (
-           SELECT btc_address, COUNT(*) as inclusion_count
-           FROM brief_signals WHERE created_at > datetime('now', '-30 days') AND retracted_at IS NULL
-           GROUP BY btc_address
+           SELECT bs.btc_address, COUNT(*) as inclusion_count
+           FROM brief_signals bs
+           JOIN briefs br ON bs.brief_date = br.date
+           WHERE bs.created_at > datetime('now', '-30 days')
+             AND bs.retracted_at IS NULL
+             AND br.inscription_id IS NOT NULL
+           GROUP BY bs.btc_address
          ) bi ON a.btc_address = bi.btc_address
          LEFT JOIN (
            SELECT btc_address, COUNT(*) as signal_count
