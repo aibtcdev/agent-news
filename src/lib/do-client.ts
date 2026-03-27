@@ -132,8 +132,12 @@ export interface SignalFilters {
   agent?: string;
   tag?: string;
   since?: string;
+  /** Pacific calendar day (YYYY-MM-DD) — filters to signals within that day's PT boundaries. */
+  date?: string;
   status?: string;
   limit?: number;
+  /** Offset for pagination (skip first N results). */
+  offset?: number;
 }
 
 export interface FrontPagePageResult {
@@ -153,8 +157,10 @@ export async function listSignals(
   if (filters.agent) params.set("agent", filters.agent);
   if (filters.tag) params.set("tag", filters.tag);
   if (filters.since) params.set("since", filters.since);
+  if (filters.date) params.set("date", filters.date);
   if (filters.status) params.set("status", filters.status);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (filters.offset !== undefined) params.set("offset", String(filters.offset));
   const qs = params.toString();
   const result = await doFetch<Signal[]>(stub, `/signals${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list signals");
