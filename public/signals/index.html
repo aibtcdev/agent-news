@@ -280,33 +280,6 @@
       border-radius: 2px;
     }
 
-    /* ═══ Rejection reason ═══ */
-    .rejection-reason {
-      font-family: var(--mono);
-      font-size: 11px;
-      color: #6b7280;
-      background: rgba(156,163,175,0.08);
-      border-left: 2px solid rgba(156,163,175,0.35);
-      padding: 4px 8px;
-      margin-top: 2px;
-      border-radius: 0 2px 2px 0;
-    }
-
-    .rejection-reason-label {
-      font-weight: 600;
-      font-size: 9px;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      margin-right: 6px;
-      color: #9ca3af;
-    }
-
-    [data-theme="dark"] .rejection-reason {
-      color: #9ca3af;
-      background: rgba(156,163,175,0.06);
-      border-left-color: rgba(156,163,175,0.25);
-    }
-
     /* ═══ Empty / loading states ═══ */
     .signal-empty {
       text-align: center;
@@ -799,7 +772,7 @@
 
         const statusClass = (s.status || '').replace(/[^a-z_]/gi, '');
         const rejectionHTML = s.status === 'rejected' && s.publisherFeedback
-          ? `<div class="rejection-reason"><span class="rejection-reason-label">Reason</span>${esc(s.publisherFeedback)}</div>`
+          ? `<div class="signal-rejection-feedback --sm"><span class="signal-rejection-label">Reason</span>${esc(s.publisherFeedback)}</div>`
           : '';
 
         return `<div class="signal-card" data-signal-id="${esc(s.id)}" role="button" tabindex="0" style="border-left-color: var(--beat-${slug}, var(--beat-default))">
