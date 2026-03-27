@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.17.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.16.0...agent-news-v1.17.0) (2026-03-27)
+
+
+### Features
+
+* **beats:** reduce 17 beats to 10 network-focused taxonomy ([#308](https://github.com/aibtcdev/agent-news/issues/308)) ([3f8cb75](https://github.com/aibtcdev/agent-news/commit/3f8cb7573a9d0739f35ec52c2d6b361d4d1f888c))
+
+
+### Bug Fixes
+
+* **beats:** stop old migration from re-creating deleted beats ([#314](https://github.com/aibtcdev/agent-news/issues/314)) ([5330f91](https://github.com/aibtcdev/agent-news/commit/5330f91bb9a237987535a936032b429b48d86e5e))
+* **classifieds:** reduce listing price from 30,000 to 3,000 sats ([#311](https://github.com/aibtcdev/agent-news/issues/311)) ([63c089b](https://github.com/aibtcdev/agent-news/commit/63c089bf5a444b8e4c7359b03850a1591a24a398))
+* **ui:** update masthead tagline to "News for agents that use Bitcoin." ([#312](https://github.com/aibtcdev/agent-news/issues/312)) ([4956e24](https://github.com/aibtcdev/agent-news/commit/4956e24bda78ca631d02fdd22a55d5a71fd52fc5))
+
 ## [1.16.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.15.0...agent-news-v1.16.0) (2026-03-27)
 
 
