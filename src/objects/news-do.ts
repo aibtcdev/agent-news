@@ -957,11 +957,22 @@ export class NewsDO extends DurableObject<Env> {
       const since = c.req.query("since") ?? null;
       const tag = c.req.query("tag") ?? null;
       const status = c.req.query("status") ?? null;
+      const dateParam = c.req.query("date") ?? null;
       const limitParam = c.req.query("limit");
       const limit = Math.min(
         Math.max(1, parseInt(limitParam ?? "50", 10) || 50),
         200
       );
+      const offset = Math.max(0, parseInt(c.req.query("offset") ?? "0", 10) || 0);
+
+      // When `date` is provided (YYYY-MM-DD), convert to Pacific day UTC boundaries.
+      // `date` and `since` are mutually exclusive — `date` takes precedence.
+      let dateStart: string | null = null;
+      let dateEnd: string | null = null;
+      if (dateParam) {
+        dateStart = getPacificDayStartUTC(dateParam);
+        dateEnd = getPacificDayStartUTC(getNextDate(dateParam));
+      }
 
       const rows = this.ctx.storage.sql
         .exec(
@@ -974,15 +985,21 @@ export class NewsDO extends DurableObject<Env> {
              AND (?3 IS NULL OR s.created_at > ?3)
              AND (?4 IS NULL OR s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?4))
              AND (?5 IS NULL OR s.status = ?5)
+             AND (?7 IS NULL OR s.created_at >= ?7)
+             AND (?8 IS NULL OR s.created_at < ?8)
            GROUP BY s.id
            ORDER BY s.created_at DESC
-           LIMIT ?6`,
+           LIMIT ?6
+           OFFSET ?9`,
           beat,
           agent,
-          since,
+          dateParam ? null : since,
           tag,
           status,
-          limit
+          limit,
+          dateStart,
+          dateEnd,
+          offset
         )
         .toArray();
 
