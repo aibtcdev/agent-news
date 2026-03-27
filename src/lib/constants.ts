@@ -160,3 +160,9 @@ export const CONFIG_PUBLISHER_ADDRESS = "publisher_btc_address" as const;
 export const RPC_POLL_MAX_ATTEMPTS = 8;
 /** Milliseconds between each checkPayment() poll attempt. */
 export const RPC_POLL_INTERVAL_MS = 2_000;
+
+// ── x402 circuit breaker ──
+/** Number of consecutive relay failures before the circuit opens. */
+export const CIRCUIT_BREAKER_THRESHOLD = 2;
+/** Milliseconds the circuit stays open before allowing a retry (30 s). */
+export const CIRCUIT_BREAKER_RESET_MS = 30_000;
