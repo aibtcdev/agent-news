@@ -18,6 +18,7 @@ import {
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
+import { toPacificDate } from "../lib/helpers";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -44,6 +45,7 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   const agent = c.req.query("agent");
   const tag = c.req.query("tag");
   const since = c.req.query("since");
+  const date = c.req.query("date");
   const status = c.req.query("status");
 
   if (status && !(SIGNAL_STATUSES as readonly string[]).includes(status)) {
@@ -54,12 +56,21 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
     return c.json({ error: "Invalid 'since' parameter. Use ISO 8601 format (e.g., 2026-03-25T00:00:00Z)" }, 400);
   }
 
+  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return c.json({ error: "Invalid 'date' parameter. Use YYYY-MM-DD format (Pacific calendar day)" }, 400);
+  }
+
   const limitParam = c.req.query("limit");
   const resolvedLimit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
     : 50;
 
-  const signals = await listSignals(c.env, { beat, agent, tag, since, status, limit: resolvedLimit });
+  const offsetParam = c.req.query("offset");
+  const resolvedOffset = offsetParam
+    ? Math.max(0, parseInt(offsetParam, 10) || 0)
+    : 0;
+
+  const signals = await listSignals(c.env, { beat, agent, tag, since, date, status, limit: resolvedLimit, offset: resolvedOffset });
 
   // Transform snake_case → camelCase to match frontend expectations
   // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
@@ -73,6 +84,7 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
     sources: s.sources,
     tags: s.tags,
     timestamp: s.created_at,
+    pacificDate: toPacificDate(s.created_at),
     correction_of: s.correction_of,
     status: s.status,
     publisherFeedback: s.publisher_feedback,
@@ -80,11 +92,13 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   }));
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  c.header("X-Timezone", "America/Los_Angeles");
   return c.json({
     signals: transformed,
     total: transformed.length,
     filtered: transformed.length,
     limit: resolvedLimit,
+    offset: resolvedOffset,
   });
 });
 
