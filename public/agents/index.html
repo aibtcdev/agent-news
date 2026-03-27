@@ -337,7 +337,18 @@
       return;
     }
 
-    // Resolve agent names/avatars
+    // Pre-populate cache from server-resolved names to avoid redundant /api/agents calls.
+    // The correspondents API already resolves display_name server-side; use it directly.
+    for (const correspondent of correspondents) {
+      if (correspondent.display_name) {
+        agentCache.set(correspondent.address, {
+          name: correspondent.display_name,
+          avatar: correspondent.avatar,
+        });
+      }
+    }
+
+    // Resolve remaining agents (those where server-side resolution timed out)
     const addresses = correspondents.map(c => c.address).filter(Boolean);
     await resolveAgentsBatch(addresses);
 
@@ -349,7 +360,9 @@
 
     for (let i = 0; i < correspondents.length; i++) {
       const c = correspondents[i];
-      const agent = agentCache.get(c.address) || { name: c.addressShort, avatar: '' };
+      // Prefer server-resolved display_name over the cache fallback (which may be a
+      // truncated address when /api/agents returned null for an unwarmed KV cache).
+      const agent = agentCache.get(c.address) || { name: c.display_name || c.addressShort, avatar: c.avatar || '' };
       const beatNames = (c.beats || []).map(b => '<span class="beat-pill">' + esc(b.name) + '</span>').join(' ');
       const profileUrl = 'https://aibtc.com/agents/' + encodeURIComponent(c.address);
 
