@@ -284,7 +284,8 @@ export class NewsDO extends DurableObject<Env> {
       // Re-run network-focus migration — migration 10 failed silently on production
       // because beat_claims FK constraint blocked DELETE FROM beats. The updated
       // MIGRATION_BEAT_NETWORK_FOCUS_SQL now deletes beat_claims first.
-      if (appliedVersion < 11) {
+      // Only targets DBs already at version 10 to avoid double-execution on fresh DBs.
+      if (appliedVersion === 10) {
         try {
           this.ctx.storage.sql.exec(MIGRATION_BEAT_NETWORK_FOCUS_SQL);
         } catch (e) {

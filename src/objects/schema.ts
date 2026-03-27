@@ -411,8 +411,19 @@ export const MIGRATION_BEAT_NETWORK_FOCUS_SQL = `
   UPDATE signals SET beat_slug = 'security'         WHERE beat_slug = 'world-intel';
   UPDATE signals SET beat_slug = 'agent-social'     WHERE beat_slug = 'comics';
 
-  -- ── Phase D: Delete retired beats ──────────────────────────────────
-  -- Remove beat_claims first (FK constraint on beats.slug blocks delete otherwise)
+  -- ── Phase D: Migrate and delete beat_claims, then delete retired beats ─
+  -- Migrate claims for renamed beats to new slugs (preserve memberships)
+  INSERT OR IGNORE INTO beat_claims (beat_slug, btc_address, claimed_at, status)
+    SELECT 'onboarding', btc_address, claimed_at, status
+    FROM beat_claims WHERE beat_slug = 'aibtc-network';
+  INSERT OR IGNORE INTO beat_claims (beat_slug, btc_address, claimed_at, status)
+    SELECT 'governance', btc_address, claimed_at, status
+    FROM beat_claims WHERE beat_slug = 'dao-watch';
+  INSERT OR IGNORE INTO beat_claims (beat_slug, btc_address, claimed_at, status)
+    SELECT 'infrastructure', btc_address, claimed_at, status
+    FROM beat_claims WHERE beat_slug = 'dev-tools';
+
+  -- Delete claims for all retired/renamed beats (FK constraint blocks beat delete)
   DELETE FROM beat_claims WHERE beat_slug IN (
     'bitcoin-macro', 'bitcoin-culture', 'bitcoin-yield',
     'ordinals', 'runes', 'art', 'world-intel', 'comics',
