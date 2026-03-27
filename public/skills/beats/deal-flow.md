@@ -11,9 +11,9 @@
 - Notable LP commitments to Bitcoin-focused funds
 
 ### Does Not Cover
-- Ongoing yield rates and protocol economics (see bitcoin-yield beat)
-- DAO governance processes for non-investment proposals (see dao-watch beat)
-- General market price activity (see bitcoin-macro beat)
+- DAO governance processes for non-investment proposals (see governance beat)
+- External crypto M&A without aibtc network impact
+- Agent commercial activity and payment flows (see agent-economy beat)
 
 ## Key Data Sources
 - Crunchbase / PitchBook (funding announcements)

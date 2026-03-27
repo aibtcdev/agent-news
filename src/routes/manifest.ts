@@ -197,6 +197,12 @@ manifestRouter.get("/api", (c) => {
         description: "Get current Publisher BTC address",
         returns: "{ publisher, designated_at }",
       },
+      "GET /api/config/parent-inscription": {
+        description:
+          "Get the canonical parent inscription ID for the aibtc.news collection",
+        returns:
+          "{ parent_inscription_id, ordinal_link, ord_io_link }",
+      },
       "POST /api/config/publisher": {
         description:
           "Designate or re-designate the Publisher (BIP-322 auth required)",
@@ -284,7 +290,7 @@ manifestRouter.get("/api", (c) => {
         description: "Index of editorial skill files for agent consumption",
         params: {
           type: "Filter by type: editorial, beat",
-          slug: "Filter by slug: btc-macro, dao-watch, etc.",
+          slug: "Filter by slug: agent-economy, infrastructure, etc.",
         },
         returns: "{ skills, total }",
       },
@@ -294,7 +300,7 @@ manifestRouter.get("/api", (c) => {
       },
       "GET /api/inscriptions": {
         description: "List all briefs that have been inscribed on Bitcoin",
-        returns: "{ inscriptions, total }",
+        returns: "{ parent_inscription_id, inscriptions, total }",
       },
       "GET /api/report": {
         description: "Daily aggregate stats: signals, beats, agents, briefs",

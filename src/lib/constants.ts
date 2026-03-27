@@ -154,6 +154,13 @@ export const BRIEF_INSCRIBE_RATE_LIMIT = {
 
 // ── Config keys ──
 export const CONFIG_PUBLISHER_ADDRESS = "publisher_btc_address" as const;
+export const CONFIG_PARENT_INSCRIPTION_ID = "parent_inscription_id" as const;
+
+// ── Canonical parent inscription ──
+/** The root ordinal inscription for the aibtc.news collection. All daily brief
+ *  child inscriptions reference this parent to establish on-chain provenance. */
+export const PARENT_INSCRIPTION_ID =
+  "9d83815556ab6706e8a557d7f2514826e17421cd5443561f18276766b5474559i0" as const;
 
 // ── x402 RPC polling ──
 /** Maximum number of checkPayment() poll attempts after submitPayment(). */

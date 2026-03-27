@@ -13,9 +13,10 @@
 
 ### Does Not Cover
 - Clean audit reports with no significant findings (not newsworthy)
-- General cybersecurity news without Bitcoin/Stacks relevance
+- General cybersecurity news without aibtc network relevance
 - Price manipulation allegations without on-chain evidence
 - Speculative attack scenarios without identified threat actors
+- External crypto exploits with no impact on aibtc agents or infrastructure
 
 ## Key Data Sources
 - CVE database and security advisory feeds

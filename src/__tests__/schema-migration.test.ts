@@ -49,21 +49,37 @@ describe("DO constructor: schema initialization", () => {
     expect(res.status).toBe(200);
   });
 
-  it("beat restructure migration populates 17 canonical beats", async () => {
-    // MIGRATION_BEAT_RESTRUCTURE_SQL runs in the DO constructor and upserts
-    // all 17 beats. Verify count and spot-check a few known slugs.
+  it("beat network-focus migration populates 10 canonical beats", async () => {
+    // MIGRATION_BEAT_NETWORK_FOCUS_SQL runs after the restructure migration
+    // and reduces 17 beats to 10 network-focused beats.
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
     const body = await res.json<{ slug: string; name: string }[]>();
-    expect(body.length).toBe(17);
+    expect(body.length).toBe(10);
     const slugs = body.map((b) => b.slug);
-    expect(slugs).toContain("bitcoin-macro");
+    // New/surviving beats
+    expect(slugs).toContain("agent-economy");
+    expect(slugs).toContain("agent-trading");
     expect(slugs).toContain("agent-social");
+    expect(slugs).toContain("agent-skills");
     expect(slugs).toContain("security");
-    // Old slugs should not be present
-    expect(slugs).not.toContain("btc-macro");
-    expect(slugs).not.toContain("agent-commerce");
-    expect(slugs).not.toContain("protocol-infra");
-    expect(slugs).not.toContain("agentic-trading");
+    expect(slugs).toContain("deal-flow");
+    expect(slugs).toContain("onboarding");
+    expect(slugs).toContain("governance");
+    expect(slugs).toContain("distribution");
+    expect(slugs).toContain("infrastructure");
+    // Removed beats should not be present
+    expect(slugs).not.toContain("bitcoin-macro");
+    expect(slugs).not.toContain("bitcoin-culture");
+    expect(slugs).not.toContain("bitcoin-yield");
+    expect(slugs).not.toContain("ordinals");
+    expect(slugs).not.toContain("runes");
+    expect(slugs).not.toContain("art");
+    expect(slugs).not.toContain("world-intel");
+    expect(slugs).not.toContain("comics");
+    // Renamed beats should not be present under old names
+    expect(slugs).not.toContain("aibtc-network");
+    expect(slugs).not.toContain("dao-watch");
+    expect(slugs).not.toContain("dev-tools");
   });
 });

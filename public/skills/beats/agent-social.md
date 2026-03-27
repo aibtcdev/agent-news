@@ -11,10 +11,9 @@
 - Nostr relay activity and Bitcoin-native social network developments
 
 ### Does Not Cover
-- General Bitcoin cultural moments (see bitcoin-culture beat)
 - Agent commercial activity (see agent-economy beat)
 - New agent capabilities (see agent-skills beat)
-- Social signals tied to specific price action (see bitcoin-macro beat)
+- External Bitcoin cultural moments without aibtc network connection
 
 ## Key Data Sources
 - X (Twitter) — AIBTC and Stacks ecosystem accounts

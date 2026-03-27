@@ -345,3 +345,83 @@ export const MIGRATION_RETRACTION_SQL = [
   "ALTER TABLE brief_signals ADD COLUMN retracted_at TEXT",
   "ALTER TABLE earnings ADD COLUMN voided_at TEXT",
 ] as const;
+
+/**
+ * Migration 10 — Network-focus beats.
+ * Reduces 17 beats to 10, all focused on aibtc network activity.
+ *
+ * Removes external beats (bitcoin-macro, bitcoin-culture, bitcoin-yield,
+ * ordinals, runes, art, world-intel, comics). Renames aibtc-network →
+ * onboarding, dao-watch → governance, dev-tools → infrastructure. Adds
+ * distribution beat. Remaps all signals to closest surviving beat.
+ *
+ * Runs as a single exec() call for atomic write coalescing.
+ * All statements are idempotent — safe to re-run.
+ */
+export const MIGRATION_BEAT_NETWORK_FOCUS_SQL = `
+  -- ── Phase A: Upsert 10 network-focused canonical beats ────────────
+  INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
+    ('agent-economy',   'Agent Economy',    'Payments, bounties, x402 flows, sBTC transfers between agents, service marketplaces, and agent registration/reputation events.',     '#FF8F00', 'system', datetime('now'), datetime('now')),
+    ('agent-trading',   'Agent Trading',    'P2P ordinals, PSBT swaps, order book activity, autonomous trading strategies, on-chain position data, and agent-operated liquidity.', '#00ACC1', 'system', datetime('now'), datetime('now')),
+    ('agent-social',    'Agent Social',     'Collaborations, DMs, partnerships, reputation events, and social coordination between agents and humans.',                            '#D81B60', 'system', datetime('now'), datetime('now')),
+    ('agent-skills',    'Agent Skills',     'Skills built by agents, PRs, adoption metrics, capability milestones, and tool registrations.',                                       '#00897B', 'system', datetime('now'), datetime('now')),
+    ('security',        'Security',         'Vulnerabilities affecting aibtc agents and wallets, contract audit findings, agent-targeted threats, and network security events.',    '#E53935', 'system', datetime('now'), datetime('now')),
+    ('deal-flow',       'Deal Flow',        'Bounties, classifieds, sponsorships, contracts, and commercial activity within the aibtc network.',                                   '#8E24AA', 'system', datetime('now'), datetime('now')),
+    ('onboarding',      'Onboarding',       'New agent registrations, Genesis achievements, referrals, and first-time network participation events.',                              '#1E88E5', 'system', datetime('now'), datetime('now')),
+    ('governance',      'Governance',       'Multisig operations, elections, sBTC staking, DAO proposals, voting outcomes, and signer/council activity.',                           '#7C4DFF', 'system', datetime('now'), datetime('now')),
+    ('distribution',    'Distribution',     'Paperboy deliveries, correspondent recruitment, brief metrics, readership, and network content distribution.',                        '#26A69A', 'system', datetime('now'), datetime('now')),
+    ('infrastructure',  'Infrastructure',   'MCP server updates, relay health, API changes, protocol releases, and tooling that agents and builders depend on.',                   '#546E7A', 'system', datetime('now'), datetime('now'))
+  ON CONFLICT(slug) DO UPDATE SET
+    name        = excluded.name,
+    description = excluded.description,
+    color       = excluded.color,
+    updated_at  = datetime('now');
+
+  -- ── Phase B: Preserve correspondent claims across renames ──────────
+  -- aibtc-network → onboarding
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'aibtc-network'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'aibtc-network')
+  WHERE slug = 'onboarding'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'aibtc-network')
+    AND (SELECT created_by FROM beats WHERE slug = 'aibtc-network') != 'system';
+
+  -- dao-watch → governance
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'dao-watch'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'dao-watch')
+  WHERE slug = 'governance'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'dao-watch')
+    AND (SELECT created_by FROM beats WHERE slug = 'dao-watch') != 'system';
+
+  -- dev-tools → infrastructure
+  UPDATE beats SET
+    created_by = (SELECT created_by FROM beats WHERE slug = 'dev-tools'),
+    created_at = (SELECT created_at FROM beats WHERE slug = 'dev-tools')
+  WHERE slug = 'infrastructure'
+    AND EXISTS (SELECT 1 FROM beats WHERE slug = 'dev-tools')
+    AND (SELECT created_by FROM beats WHERE slug = 'dev-tools') != 'system';
+
+  -- ── Phase C: Remap signals.beat_slug ───────────────────────────────
+  -- Renames (1:1)
+  UPDATE signals SET beat_slug = 'onboarding'      WHERE beat_slug = 'aibtc-network';
+  UPDATE signals SET beat_slug = 'governance'       WHERE beat_slug = 'dao-watch';
+  UPDATE signals SET beat_slug = 'infrastructure'   WHERE beat_slug = 'dev-tools';
+
+  -- Retirements: remap to closest-fit surviving beat
+  UPDATE signals SET beat_slug = 'agent-economy'    WHERE beat_slug = 'bitcoin-macro';
+  UPDATE signals SET beat_slug = 'agent-social'     WHERE beat_slug = 'bitcoin-culture';
+  UPDATE signals SET beat_slug = 'agent-economy'    WHERE beat_slug = 'bitcoin-yield';
+  UPDATE signals SET beat_slug = 'agent-trading'    WHERE beat_slug = 'ordinals';
+  UPDATE signals SET beat_slug = 'agent-trading'    WHERE beat_slug = 'runes';
+  UPDATE signals SET beat_slug = 'agent-trading'    WHERE beat_slug = 'art';
+  UPDATE signals SET beat_slug = 'security'         WHERE beat_slug = 'world-intel';
+  UPDATE signals SET beat_slug = 'agent-social'     WHERE beat_slug = 'comics';
+
+  -- ── Phase D: Delete retired beats ──────────────────────────────────
+  DELETE FROM beats WHERE slug IN (
+    'bitcoin-macro', 'bitcoin-culture', 'bitcoin-yield',
+    'ordinals', 'runes', 'art', 'world-intel', 'comics',
+    'aibtc-network', 'dao-watch', 'dev-tools'
+  );
+`;
