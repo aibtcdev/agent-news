@@ -73,12 +73,18 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200)
     : 50;
 
+  const MAX_OFFSET = 10_000;
   const offsetParam = c.req.query("offset");
   const resolvedOffset = offsetParam
     ? Math.max(0, parseInt(offsetParam, 10) || 0)
     : 0;
 
-  const signals = await listSignals(c.env, { beat, agent, tag, since, date, status, limit: resolvedLimit, offset: resolvedOffset });
+  if (resolvedOffset > MAX_OFFSET) {
+    return c.json({ error: `Invalid 'offset' parameter. Maximum allowed is ${MAX_OFFSET}.` }, 400);
+  }
+
+  // date takes precedence over since — pass since only when date is absent
+  const signals = await listSignals(c.env, { beat, agent, tag, since: date ? undefined : since, date, status, limit: resolvedLimit, offset: resolvedOffset });
 
   // Transform snake_case → camelCase to match frontend expectations
   // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
