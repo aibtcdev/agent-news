@@ -28,13 +28,21 @@ const circuitBreaker = {
 };
 
 function shouldFastFail(): boolean {
-  // Half-open: when the timer expires, reset failures so one probe gets through.
-  if (circuitBreaker.openUntil > 0 && Date.now() >= circuitBreaker.openUntil) {
+  const now = Date.now();
+
+  // If the circuit is already open, fast-fail until the timer expires.
+  if (circuitBreaker.openUntil > 0) {
+    if (now < circuitBreaker.openUntil) {
+      return true;
+    }
+    // Half-open: timer expired — reset failures so one probe gets through.
     circuitBreaker.failures = 0;
     circuitBreaker.openUntil = 0;
   }
+
+  // Closed→open transition: only set openUntil once when threshold is crossed.
   if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
-    circuitBreaker.openUntil = Date.now() + CIRCUIT_BREAKER_RESET_MS;
+    circuitBreaker.openUntil = now + CIRCUIT_BREAKER_RESET_MS;
     return true;
   }
   return false;
@@ -284,18 +292,20 @@ export async function verifyPayment(
   amount: number,
   env?: Env
 ): Promise<PaymentVerifyResult> {
-  // Fast-fail if the relay circuit breaker is open (consecutive failures).
-  if (shouldFastFail()) {
-    console.warn("[x402] circuit breaker open — fast-failing relay call");
-    return { valid: false, relayError: true, relayReason: "Relay circuit breaker open — too many recent failures" };
-  }
-
   let paymentPayload: Record<string, unknown>;
   try {
     paymentPayload = JSON.parse(atob(paymentHeader)) as Record<string, unknown>;
   } catch {
     // Malformed payment header — client error, not a relay error
     return { valid: false };
+  }
+
+  // Fast-fail if the relay circuit breaker is open (consecutive failures).
+  // Placed after payload validation so malformed headers still get a proper
+  // 402 (client error) instead of being masked as a 503 (relay error).
+  if (shouldFastFail()) {
+    console.warn("[x402] circuit breaker open — fast-failing relay call");
+    return { valid: false, relayError: true, relayReason: "Relay circuit breaker open — too many recent failures" };
   }
 
   const paymentRequirements = {
