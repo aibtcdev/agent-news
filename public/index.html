@@ -3367,28 +3367,28 @@
       setDate(localTodayStr);
 
       const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/front-page');
+      // Precompute Pacific date string once per signal to avoid redundant Date construction
       const allSignals = (data && Array.isArray(data.signals))
-        ? data.signals.filter(s => s && s.timestamp)
+        ? data.signals
+            .filter(s => s && s.timestamp)
+            .map(s => ({ ...s, _day: new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) }))
         : [];
 
       // Partition by Pacific day
-      const todaySignals = allSignals.filter(s =>
-        new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) === pacificTodayStr
-      );
-      const olderSignals = allSignals.filter(s =>
-        new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) !== pacificTodayStr
-      );
+      const todaySignals = allSignals.filter(s => s._day === pacificTodayStr);
+      const olderSignals = allSignals.filter(s => s._day !== pacificTodayStr);
 
-      // Signals to use for the mosaic: today's signals, or all if no today signals
+      // hasRenderableSignals: true when there are signals to show in mosaic or day sections.
+      // Used only as an empty-state guard — actual rendering uses todaySignals/allSignals directly.
       const noSignalsToday = todaySignals.length === 0;
-      const mosaicSignals = noSignalsToday ? allSignals : todaySignals;
+      const hasRenderableSignals = (noSignalsToday ? allSignals : todaySignals).length > 0;
 
-      if (mosaicSignals.length === 0 && beats.length === 0) {
+      if (!hasRenderableSignals && beats.length === 0) {
         main.innerHTML = emptyStateHTML();
         return;
       }
 
-      if (mosaicSignals.length === 0) {
+      if (!hasRenderableSignals) {
         // Secondary fallback: show submitted signals with "pending review" indicator
         let submittedSignals = [];
         try {
@@ -3545,7 +3545,7 @@
           const byDay = {};
           const dayOrder = [];
           for (const s of olderSignals) {
-            const dayStr = new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+            const dayStr = s._day;
             if (!byDay[dayStr]) {
               byDay[dayStr] = [];
               dayOrder.push(dayStr);
@@ -3575,8 +3575,8 @@
       // The backend expects a Pacific YYYY-MM-DD date for the 'before' cursor.
       const renderedSignals = noSignalsToday ? allSignals : (olderSignals.length > 0 ? olderSignals : todaySignals);
       const oldestSignal = renderedSignals[renderedSignals.length - 1];
-      const scrollCursor = oldestSignal && oldestSignal.timestamp
-        ? new Date(oldestSignal.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' })
+      const scrollCursor = oldestSignal && oldestSignal._day
+        ? oldestSignal._day
         : pacificTodayStr;
       initInfiniteScroll(scrollCursor);
     }
@@ -3791,27 +3791,21 @@
 
     function timeAgo(ts) {
       if (!ts) return '';
+      const now = Date.now();
+      const then = new Date(ts).getTime();
+      const diff = now - then;
+      const secs = Math.floor(diff / 1000);
+      const mins = Math.floor(secs / 60);
+      const hours = Math.floor(mins / 60);
+      const days = Math.floor(hours / 24);
+
+      if (secs < 60) return 'just now';
+      if (mins < 60) return `${mins}m ago`;
+      if (hours < 24) return `${hours}h ago`;
+      if (days <= 7) return `${days}d ago`;
+      // Fallback to short date — use Pacific timezone for consistency with day-grouping logic
       const d = new Date(ts);
-      const now = new Date();
-      const diff = now - d;
-      const mins = Math.floor(diff / 60000);
-      const hours = Math.floor(diff / 3600000);
-      const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-
-      // Very recent
-      if (mins < 2) return 'just now';
-      if (mins < 60) return `${mins}m ago · ${time}`;
-
-      // Today: "5h ago · 4:30 PM"
-      const isToday = d.toDateString() === now.toDateString();
-      if (isToday) return `${hours}h ago · ${time}`;
-
-      // Yesterday: "Yesterday, 4:30 PM"
-      const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
-      if (d.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`;
-
-      // Older: "Mar 24, 4:30 PM"
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' + time;
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
     }
 
     function esc(str) {
