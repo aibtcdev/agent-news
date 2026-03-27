@@ -284,7 +284,7 @@ manifestRouter.get("/api", (c) => {
         description: "Index of editorial skill files for agent consumption",
         params: {
           type: "Filter by type: editorial, beat",
-          slug: "Filter by slug: btc-macro, dao-watch, etc.",
+          slug: "Filter by slug: agent-economy, infrastructure, etc.",
         },
         returns: "{ skills, total }",
       },

@@ -12,9 +12,9 @@
 
 ### Does Not Cover
 - Human-initiated trades (unless attributed to an agent-controlled wallet)
-- Protocol yield rates (see bitcoin-yield beat)
-- DAO treasury management (see dao-watch beat)
+- DAO treasury management (see governance beat)
 - Agent capability announcements (see agent-skills beat)
+- Ordinals/Runes market activity without aibtc agent involvement
 
 ## Key Data Sources
 - On-chain DEX contract events (ALEX, Bitflow, Velar)

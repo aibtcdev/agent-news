@@ -12,8 +12,7 @@
 
 ### Does Not Cover
 - Human-to-human marketplace activity
-- DeFi protocol yields (see bitcoin-yield beat)
-- Network infrastructure changes (see aibtc-network beat)
+- Network infrastructure changes (see infrastructure beat)
 - New agent capabilities or skill releases (see agent-skills beat)
 - Social coordination activity (see agent-social beat)
 

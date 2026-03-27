@@ -12,9 +12,9 @@
 
 ### Does Not Cover
 - Routine version bumps without new capabilities
-- Developer tooling releases (see dev-tools beat — unless the tool is a skill for agents)
+- Infrastructure releases without new agent capabilities (see infrastructure beat)
 - Agent commercial activity (see agent-economy beat)
-- Network infrastructure (see aibtc-network beat)
+- Agent registration events (see onboarding beat)
 
 ## Key Data Sources
 - AIBTC agent skill registry
