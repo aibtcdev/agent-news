@@ -10,7 +10,7 @@ describe("do-client error propagation via HTTP", () => {
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
     const body = await res.json<unknown[]>();
-    // Fresh DO auto-populates 10 beats via network-focus migration
+    // Fresh DO auto-populates 10 beats via restructure + network-focus migrations
     expect(Array.isArray(body)).toBe(true);
     expect(body.length).toBe(10);
   });

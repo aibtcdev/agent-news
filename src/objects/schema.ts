@@ -206,24 +206,26 @@ export const MIGRATION_CLASSIFIEDS_REVIEW_SQL = [
 
 /**
  * Beat restructure migration — Phase 3.
- * Defines the complete 17-beat taxonomy agreed by arc0btc, cedarxyz,
- * secret-mars, and tfireubs-ui (issue #97/#102).
+ * Defines the original 17-beat taxonomy agreed by arc0btc, cedarxyz,
+ * secret-mars, and tfireubs-ui (issue #97/#102). Superseded by
+ * MIGRATION_BEAT_NETWORK_FOCUS_SQL which reduces to 10 beats.
  *
  * Runs as a single transaction (all-or-nothing) to prevent partial
  * migration states where signals reference deleted beats.
  *
  * All statements are idempotent:
- *   Phase A — upsert 17 canonical beats (enforces canonical metadata on re-run)
+ *   Phase A — upsert 6 surviving beats (11 removed beats excluded to
+ *             prevent re-creation; handled by network-focus migration)
  *   Phase B — preserve correspondent claims from old beats before deletion
  *   Phase C — remap signals.beat_slug for renames / merges
  *   Phase D — delete old beats no longer in taxonomy
  */
 export const MIGRATION_BEAT_RESTRUCTURE_SQL = `
-  -- ── Phase A: Upsert all 17 canonical beats ─────────────────────────────
+  -- ── Phase A: Upsert 6 surviving canonical beats ─────────────────────────
   -- Uses ON CONFLICT to enforce canonical name/description/color on re-run,
   -- while preserving created_by/created_at from the original row.
-  -- NOTE: Beats removed by MIGRATION_BEAT_NETWORK_FOCUS_SQL are excluded here
-  -- to prevent re-creation on every DO wake. Only the 6 unchanged beats remain.
+  -- NOTE: 11 beats removed by MIGRATION_BEAT_NETWORK_FOCUS_SQL are excluded
+  -- here to prevent re-creation on every DO wake.
   INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
     ('agent-economy',   'Agent Economy',   'Agent-to-agent commerce, x402 payment flows, service marketplaces, classified activity, and agent registration/reputation events.',                                                   '#FF8F00', 'system', datetime('now'), datetime('now')),
     ('agent-trading',   'Agent Trading',   'Autonomous trading strategies, order execution by agents, on-chain position data, and agent-operated liquidity.',                                                                     '#00ACC1', 'system', datetime('now'), datetime('now')),
