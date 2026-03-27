@@ -14,8 +14,36 @@ import {
   X402_RELAY_URL,
   RPC_POLL_MAX_ATTEMPTS,
   RPC_POLL_INTERVAL_MS,
+  CIRCUIT_BREAKER_THRESHOLD,
+  CIRCUIT_BREAKER_RESET_MS,
 } from "../lib/constants";
 import type { Env, RelayRPC, SettleOptions, SubmitPaymentResult, CheckPaymentResult } from "../lib/types";
+
+// ── In-memory circuit breaker for relay calls ──
+// Prevents cascading failures when the relay is down by fast-failing after
+// consecutive errors. Resets on any successful relay interaction.
+const circuitBreaker = {
+  failures: 0,
+  openUntil: 0,
+};
+
+function isCircuitOpen(): boolean {
+  if (Date.now() < circuitBreaker.openUntil) return true;
+  if (circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
+    circuitBreaker.openUntil = Date.now() + CIRCUIT_BREAKER_RESET_MS;
+    return true;
+  }
+  return false;
+}
+
+function recordRelayFailure(): void {
+  circuitBreaker.failures++;
+}
+
+function recordRelaySuccess(): void {
+  circuitBreaker.failures = 0;
+  circuitBreaker.openUntil = 0;
+}
 
 export interface PaymentRequiredOpts {
   amount: number;
@@ -252,6 +280,12 @@ export async function verifyPayment(
   amount: number,
   env?: Env
 ): Promise<PaymentVerifyResult> {
+  // Fast-fail if the relay circuit breaker is open (consecutive failures).
+  if (isCircuitOpen()) {
+    console.warn("[x402] circuit breaker open — fast-failing relay call");
+    return { valid: false, relayError: true, relayReason: "Relay circuit breaker open — too many recent failures" };
+  }
+
   let paymentPayload: Record<string, unknown>;
   try {
     paymentPayload = JSON.parse(atob(paymentHeader)) as Record<string, unknown>;
@@ -295,6 +329,7 @@ export async function verifyPayment(
     } catch (err) {
       // RPC call failure is a relay error — do not penalise the payer
       console.error("[x402] RPC submitPayment threw:", err);
+      recordRelayFailure();
       return { valid: false, relayError: true };
     }
 
@@ -331,16 +366,27 @@ export async function verifyPayment(
       } catch (err) {
         console.error("[x402] RPC checkPayment threw:", err);
         // Treat as transient relay error — payer should not be penalised
+        recordRelayFailure();
         return { valid: false, relayError: true };
       }
 
       console.log(`[x402] RPC checkPayment attempt ${attempt + 1}:`, checkResult.status);
 
       if (checkResult.status === "confirmed") {
+        recordRelaySuccess();
+        return { valid: true, txid: checkResult.txid };
+      }
+
+      if (checkResult.status === "mempool") {
+        // Relay has broadcast the transaction — treat as success.
+        // On-chain confirmation is guaranteed barring a chain reorg.
+        console.log("[x402] RPC payment in mempool — treating as confirmed");
+        recordRelaySuccess();
         return { valid: true, txid: checkResult.txid };
       }
 
       if (checkResult.status === "failed" || checkResult.status === "replaced") {
+        recordRelayFailure();
         return {
           valid: false,
           relayReason: checkResult.error ?? `Payment ${checkResult.status}`,
@@ -357,7 +403,7 @@ export async function verifyPayment(
         };
       }
 
-      // status is "queued", "submitted", "broadcasting", "mempool" — keep polling
+      // status is "queued", "submitted", "broadcasting" — keep polling
     }
 
     // Exhausted all poll attempts — treat as transient so the payer is not charged again
@@ -394,11 +440,13 @@ export async function verifyPayment(
     }
   } catch {
     // Network error or timeout — relay unreachable, not a payment problem
+    recordRelayFailure();
     return { valid: false, relayError: true };
   }
 
   // 5xx from relay = relay-side problem, not an invalid payment
   if (settleRes.status >= 500) {
+    recordRelayFailure();
     return { valid: false, relayError: true };
   }
 
@@ -407,8 +455,12 @@ export async function verifyPayment(
     result = (await settleRes.json()) as Record<string, unknown>;
   } catch {
     // Unexpected non-JSON body from relay = relay error
+    recordRelayFailure();
     return { valid: false, relayError: true };
   }
+
+  // Relay returned a parseable response — reset circuit breaker.
+  recordRelaySuccess();
 
   // Relay returns 200 for both success and failure — check the success field.
   // 4xx = schema/idempotency error; 2xx + !success = payment rejected by relay.
