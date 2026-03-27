@@ -99,6 +99,22 @@ export function getPacificDayStartUTC(date: string): string {
 }
 
 /**
+ * Returns the UTC ISO string for the end of a Pacific day (midnight of the next day).
+ * Used together with getPacificDayStartUTC() to create a [start, end) range.
+ */
+export function getPacificDayEndUTC(date: string): string {
+  return getPacificDayStartUTC(getNextDate(date));
+}
+
+/**
+ * Compute the Pacific calendar date (YYYY-MM-DD) for an ISO/UTC timestamp string.
+ * Useful for annotating API responses so consumers don't need to convert themselves.
+ */
+export function toPacificDate(isoTimestamp: string): string {
+  return new Date(isoTimestamp).toLocaleDateString("en-CA", { timeZone: PACIFIC_TZ });
+}
+
+/**
  * Truncate a BTC address for display: "bc1q1234...5678"
  */
 export function truncAddr(addr: string): string {
