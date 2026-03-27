@@ -206,6 +206,13 @@ async function openSignalById(signalId) {
     html += '<div class="signal-tags">' + pills + '</div>';
   }
 
+  if (data.status === 'rejected' && data.publisherFeedback) {
+    html += '<div class="signal-rejection-feedback">'
+      + '<span class="signal-rejection-label">Rejection reason</span>'
+      + esc(data.publisherFeedback)
+      + '</div>';
+  }
+
   if (data.disclosure) {
     html += '<p class="signal-disclosure">' + esc(data.disclosure) + '</p>';
   }

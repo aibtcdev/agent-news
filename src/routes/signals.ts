@@ -75,6 +75,7 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
     timestamp: s.created_at,
     correction_of: s.correction_of,
     status: s.status,
+    publisherFeedback: s.publisher_feedback,
     disclosure: s.disclosure,
   }));
 

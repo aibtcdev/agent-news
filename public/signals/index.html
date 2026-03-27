@@ -771,6 +771,9 @@
           : '';
 
         const statusClass = (s.status || '').replace(/[^a-z_]/gi, '');
+        const rejectionHTML = s.status === 'rejected' && s.publisherFeedback
+          ? `<div class="signal-rejection-feedback --sm"><span class="signal-rejection-label">Reason</span>${esc(s.publisherFeedback)}</div>`
+          : '';
 
         return `<div class="signal-card" data-signal-id="${esc(s.id)}" role="button" tabindex="0" style="border-left-color: var(--beat-${slug}, var(--beat-default))">
           <div class="signal-card-top">
@@ -785,6 +788,7 @@
             <span>${esc(relativeTime(s.timestamp))}</span>
           </div>
           ${tagsHTML}
+          ${rejectionHTML}
         </div>`;
       }).join('');
 
