@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
-import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
+import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL } from "./schema";
 
@@ -143,7 +143,8 @@ export class NewsDO extends DurableObject<Env> {
     // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
     // 10 = Network-focus beats (reduce 17 → 10 beats, remap signals, delete retired beats)
     // 11 = Re-run network-focus (migration 10 failed silently due to beat_claims FK constraint)
-    const CURRENT_MIGRATION_VERSION = 11;
+    // 12 = Streak UTC migration (backfill last_signal_date from actual signal timestamps)
+    const CURRENT_MIGRATION_VERSION = 12;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -290,6 +291,22 @@ export class NewsDO extends DurableObject<Env> {
           this.ctx.storage.sql.exec(MIGRATION_BEAT_NETWORK_FOCUS_SQL);
         } catch (e) {
           console.error("Beat network-focus re-run migration failed:", e);
+        }
+      }
+
+      // Backfill last_signal_date on streaks from actual signal timestamps (UTC date).
+      // Corrects streaks that stored Pacific-derived dates before the UTC migration.
+      if (appliedVersion < 12) {
+        try {
+          this.ctx.storage.sql.exec(
+            `UPDATE streaks SET last_signal_date = SUBSTR(
+              (SELECT MAX(s.created_at) FROM signals s
+               WHERE s.btc_address = streaks.btc_address AND s.correction_of IS NULL),
+              1, 10
+            ) WHERE last_signal_date IS NOT NULL`
+          );
+        } catch (e) {
+          console.error("Streak UTC migration failed:", e);
         }
       }
 
@@ -990,13 +1007,13 @@ export class NewsDO extends DurableObject<Env> {
       );
       const offset = Math.min(Math.max(0, parseInt(c.req.query("offset") ?? "0", 10) || 0), 10_000);
 
-      // When `date` is provided (YYYY-MM-DD), convert to Pacific day UTC boundaries.
+      // When `date` is provided (YYYY-MM-DD), convert to UTC day boundaries.
       // `date` and `since` are mutually exclusive — `date` takes precedence.
       let dateStart: string | null = null;
       let dateEnd: string | null = null;
       if (dateParam) {
-        dateStart = getPacificDayStartUTC(dateParam);
-        dateEnd = getPacificDayEndUTC(dateParam);
+        dateStart = getUTCDayStart(dateParam);
+        dateEnd = getUTCDayEnd(dateParam);
       }
 
       const rows = this.ctx.storage.sql
@@ -1055,9 +1072,9 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // GET /signals/front-page-page — date-paginated curated signals for infinite scroll
-    // Query params: before (YYYY-MM-DD Pacific date, required), limit (unused, kept for compat)
-    // Uses 2-step query: (1) find the target Pacific day, (2) fetch ALL signals for that day.
-    // Returns signals from the most recent Pacific day strictly before `before`, with hasMore flag.
+    // Query params: before (YYYY-MM-DD UTC date, required), limit (unused, kept for compat)
+    // Uses 2-step query: (1) find the target UTC day, (2) fetch ALL signals for that day.
+    // Returns signals from the most recent UTC day strictly before `before`, with hasMore flag.
     this.router.get("/signals/front-page-page", (c) => {
       const before = c.req.query("before") ?? null;
 
@@ -1068,8 +1085,8 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      // Use Pacific-day boundaries to match brief date semantics
-      const beforeDayStartUTC = getPacificDayStartUTC(before);
+      // Use UTC day boundaries to match brief date semantics
+      const beforeDayStartUTC = getUTCDayStart(before);
 
       // Step 1: Find the target day — get the most recent signal strictly before the boundary
       const probeRows = this.ctx.storage.sql
@@ -1088,13 +1105,13 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: true, data: { signals: [], date: null, hasMore: false } });
       }
 
-      // Determine the Pacific date of the most recent signal before the boundary
+      // Determine the UTC date of the most recent signal before the boundary
       const probeTimestamp = (probeRows[0] as Record<string, unknown>).created_at as string;
-      const day = getPacificDate(new Date(probeTimestamp));
-      const dayStartUTC = getPacificDayStartUTC(day);
-      const dayEndUTC = getPacificDayStartUTC(getNextDate(day));
+      const day = getUTCDate(new Date(probeTimestamp));
+      const dayStartUTC = getUTCDayStart(day);
+      const dayEndUTC = getUTCDayStart(getNextDate(day));
 
-      // Step 2: Fetch ALL signals for that Pacific day (complete day, no limit)
+      // Step 2: Fetch ALL signals for that UTC day (complete day, no limit)
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
@@ -1261,10 +1278,10 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date();
       const nowIso = now.toISOString();
 
-      // Pacific-timezone date helpers (used for daily cap and streak)
-      const today = getPacificDate(now);
-      const yesterday = getPacificYesterday(now);
-      const todayStart = getPacificDayStartUTC(today);
+      // UTC date helpers (used for daily cap and streak)
+      const today = getUTCDate(now);
+      const yesterday = getUTCYesterday(now);
+      const todayStart = getUTCDayStart(today);
 
       // Daily signal cap per agent
       const dailyCountRows = this.ctx.storage.sql
@@ -1277,13 +1294,13 @@ export class NewsDO extends DurableObject<Env> {
         .toArray();
       const dailyCount = (dailyCountRows[0] as Record<string, unknown>).count as number;
       if (dailyCount >= MAX_SIGNALS_PER_DAY) {
-        // Compute seconds until the next Pacific-day reset
-        const tomorrowStart = getPacificDayStartUTC(getNextDate(today));
+        // Compute seconds until the next UTC day reset
+        const tomorrowStart = getUTCDayStart(getNextDate(today));
         const retryAfterSecs = Math.ceil((new Date(tomorrowStart).getTime() - now.getTime()) / 1000);
         const res = c.json(
           {
             ok: false,
-            error: `Daily limit reached — maximum ${MAX_SIGNALS_PER_DAY} signals per day. Resets at midnight Pacific.`,
+            error: `Daily limit reached — maximum ${MAX_SIGNALS_PER_DAY} signals per day. Resets at midnight UTC.`,
             daily_limit: {
               limit: MAX_SIGNALS_PER_DAY,
               filed_today: dailyCount,
@@ -1303,7 +1320,7 @@ export class NewsDO extends DurableObject<Env> {
       const signalTags = (tags as string[]) ?? [];
       const disclosure = body.disclosure ? sanitizeString(body.disclosure, 500) : "";
 
-      // Streak calculation (Pacific timezone)
+      // Streak calculation (UTC)
       const streakRows = this.ctx.storage.sql
         .exec("SELECT * FROM streaks WHERE btc_address = ?", btc_address as string)
         .toArray();
@@ -1316,7 +1333,7 @@ export class NewsDO extends DurableObject<Env> {
       if (currentStreakRecord) {
         totalSignals = (currentStreakRecord.total_signals ?? 0) + 1;
         if (currentStreakRecord.last_signal_date === today) {
-          // Already filed today (Pacific) — no streak change, but always count the new signal
+          // Already filed today (UTC) — no streak change, but always count the new signal
           currentStreak = currentStreakRecord.current_streak ?? 1;
           longestStreak = currentStreakRecord.longest_streak ?? 1;
         } else if (currentStreakRecord.last_signal_date === yesterday) {
@@ -1553,14 +1570,12 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const now = new Date();
-      const date = (body.date as string | undefined) ?? getPacificDate(now);
+      const date = (body.date as string | undefined) ?? getUTCDate(now);
 
-      // Compute Pacific day boundaries as UTC ISO strings.
-      // We find what UTC time corresponds to midnight Pacific on `date`.
-      // Strategy: use Intl.DateTimeFormat to find the UTC offset for that date,
-      // then derive start/end of the Pacific day in UTC.
-      const dayStart = getPacificDayStartUTC(date);
-      const dayEnd = getPacificDayStartUTC(getNextDate(date));
+      // Compute UTC day boundaries as ISO strings.
+      // Derive start/end of the UTC day for `date`.
+      const dayStart = getUTCDayStart(date);
+      const dayEnd = getUTCDayStart(getNextDate(date));
 
       const rows = this.ctx.storage.sql
         .exec(
@@ -2043,8 +2058,8 @@ export class NewsDO extends DurableObject<Env> {
     this.router.get("/status/:address", (c) => {
       const address = c.req.param("address");
       const now = new Date();
-      const today = getPacificDate(now);
-      const todayUTCStart = getPacificDayStartUTC(today);
+      const today = getUTCDate(now);
+      const todayUTCStart = getUTCDayStart(today);
 
       // Find all beats this agent is a member of (via beat_claims)
       const beatRows = this.ctx.storage.sql
@@ -2233,12 +2248,12 @@ export class NewsDO extends DurableObject<Env> {
     // GET /report
     this.router.get("/report", (c) => {
       const now = new Date();
-      const today = getPacificDate(now);
-      const yesterday = getPacificYesterday(now);
-      // Use UTC timestamp for today's Pacific day start to avoid DATE() timezone mismatch
-      const todayUTCStart = getPacificDayStartUTC(today);
+      const today = getUTCDate(now);
+      const yesterday = getUTCYesterday(now);
+      // Use UTC timestamp for today's UTC day start
+      const todayUTCStart = getUTCDayStart(today);
 
-      // Total signals today (Pacific day, UTC comparison, excluding corrections)
+      // Total signals today (UTC day, excluding corrections)
       const signalsTodayRows = this.ctx.storage.sql
         .exec(
           `SELECT COUNT(*) as count FROM signals WHERE correction_of IS NULL AND created_at >= ?`,
@@ -2256,7 +2271,7 @@ export class NewsDO extends DurableObject<Env> {
         .exec("SELECT COUNT(*) as count FROM signals WHERE correction_of IS NULL")
         .toArray();
 
-      // Active correspondents today (Pacific day, UTC comparison, excluding corrections)
+      // Active correspondents today (UTC day, excluding corrections)
       const activeRows = this.ctx.storage.sql
         .exec(
           `SELECT COUNT(DISTINCT btc_address) as count FROM signals WHERE correction_of IS NULL AND created_at >= ?`,
@@ -3588,25 +3603,24 @@ export class NewsDO extends DurableObject<Env> {
    * Update both places when changing weights. SQL literals are used directly
    * because SQLite bind parameters cannot substitute column expressions.
    *
-   * ── Scoring timeline (Pacific time) ──────────────────────────────────────
-   * This system is operated by a Pacific-based publisher. All streak and day
-   * boundaries use Pacific time (America/Los_Angeles), so a scout's "day" runs
-   * midnight-to-midnight PT regardless of UTC offset.
+   * ── Scoring timeline (UTC) ───────────────────────────────────────────────
+   * All streak and day boundaries use UTC midnight, so a scout's "day" runs
+   * midnight-to-midnight UTC.
    *
    * Daily editorial cycle:
-   *   - Scouts file signals any time during the Pacific day.
-   *   - The publisher compiles the brief at ~11 pm PT each night.
-   *   - Signals approved before the 11 pm PT cutoff are eligible for that
+   *   - Scouts file signals any time during the UTC day.
+   *   - The publisher compiles the brief once per day.
+   *   - Signals approved before the compile cutoff are eligible for that
    *     day's brief inclusion (brief_inclusions_30d).
-   *   - Streak logic (in POST /signals) uses getPacificDate() / getPacificYesterday()
-   *     to determine whether today or yesterday (Pacific) already has a signal.
+   *   - Streak logic (in POST /signals) uses getUTCDate() / getUTCYesterday()
+   *     to determine whether today or yesterday (UTC) already has a signal.
    *
    * Rolling window:
    *   - signal_count, days_active, approved_corrections, and referral_credits
    *     all use datetime('now', '-30 days') which is UTC-based.
    *   - brief_inclusions uses the same UTC window on brief_signals.created_at.
    *   - Streaks are NOT windowed — current_streak reflects unbroken consecutive
-   *     Pacific days up to the most recent signal, regardless of the 30-day limit.
+   *     UTC days up to the most recent signal, regardless of the 30-day limit.
    *
    * ── Tie-breaking order ────────────────────────────────────────────────────
    * To ensure the leaderboard is fully deterministic (critical for prize payouts):
