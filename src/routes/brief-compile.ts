@@ -4,7 +4,7 @@ import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig, getClassifiedsRotation } from "../lib/do-client";
 import { CONFIG_PUBLISHER_ADDRESS, BRIEF_COMPILE_RATE_LIMIT } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
-import { getPacificDate, formatPacificShort } from "../lib/helpers";
+import { getUTCDate, formatUTCShort } from "../lib/helpers";
 import { validateBtcAddress, validateDateFormat } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 
@@ -65,7 +65,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   }
 
   const now = new Date();
-  const date = (body.date as string | undefined) ?? getPacificDate(now);
+  const date = (body.date as string | undefined) ?? getUTCDate(now);
 
   // Validate date if provided
   if (body.date !== undefined && !validateDateFormat(date)) {
@@ -200,7 +200,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
       }
       text += `— ${section.correspondentName}`;
       if (section.streak > 1) text += ` (${section.streak}d streak)`;
-      text += ` · ${formatPacificShort(section.timestamp)}\n\n`;
+      text += ` · ${formatUTCShort(section.timestamp)}\n\n`;
     }
     text += `${separator}\n`;
   }
