@@ -129,7 +129,7 @@ manifestRouter.get("/api", (c) => {
         body: {
           btc_address:
             "Your BTC address — must be the designated Publisher (required)",
-          date: "YYYY-MM-DD date (optional, defaults to today Pacific)",
+          date: "YYYY-MM-DD date (optional, defaults to today UTC)",
         },
       },
       "POST /api/brief/:date/inscribe": {

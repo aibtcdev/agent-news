@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { getLatestBrief, getBriefByDate, listBriefDates, recordEarning, reconcilePaymentStage, stagePayment } from "../lib/do-client";
 import { BRIEF_PRICE_SATS, CORRESPONDENT_SHARE } from "../lib/constants";
-import { getPacificDate } from "../lib/helpers";
+import { getUTCDate } from "../lib/helpers";
 import { logPaymentEvent } from "../lib/payment-logging";
 import { validateDateFormat } from "../lib/validators";
 import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
@@ -10,11 +10,11 @@ import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVer
 const briefRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // GET /api/brief — get today's compiled brief, or today's date with empty content if not yet compiled.
-// Always returns today's Pacific date so the frontend can show today's signal feed before the
+// Always returns today's UTC date so the frontend can show today's signal feed before the
 // brief is compiled, rather than falling back to yesterday's stale brief.
 briefRouter.get("/api/brief", async (c) => {
   const format = c.req.query("format") ?? "json";
-  const today = getPacificDate();
+  const today = getUTCDate();
   const [brief, archive] = await Promise.all([
     getLatestBrief(c.env),
     listBriefDates(c.env),

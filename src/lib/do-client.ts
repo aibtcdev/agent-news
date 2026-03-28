@@ -132,7 +132,7 @@ export interface SignalFilters {
   agent?: string;
   tag?: string;
   since?: string;
-  /** Pacific calendar day (YYYY-MM-DD) — filters to signals within that day's PT boundaries. */
+  /** UTC calendar day (YYYY-MM-DD) — filters to signals within that day's UTC boundaries. */
   date?: string;
   status?: string;
   limit?: number;

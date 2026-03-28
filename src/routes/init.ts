@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { getInitBundle } from "../lib/do-client";
 import { transformClassified } from "./classifieds";
-import { getPacificDate, truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
+import { getUTCDate, truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
 import { BRIEF_PRICE_SATS } from "../lib/constants";
 
 
@@ -19,7 +19,7 @@ const initRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 // GET /api/init — all initial page load data in one response
 initRouter.get("/api/init", async (c) => {
   const bundle = await getInitBundle(c.env);
-  const today = getPacificDate();
+  const today = getUTCDate();
 
   // --- Brief ---
   const todaysBrief = bundle.brief?.date === today ? bundle.brief : null;

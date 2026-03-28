@@ -18,7 +18,7 @@ import {
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
-import { toPacificDate, resolveNamesWithTimeout } from "../lib/helpers";
+import { toUTCDate, resolveNamesWithTimeout } from "../lib/helpers";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -58,7 +58,7 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
 
   if (date) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T12:00:00Z`).getTime())) {
-      return c.json({ error: "Invalid 'date' parameter. Use YYYY-MM-DD format (Pacific calendar day)" }, 400);
+      return c.json({ error: "Invalid 'date' parameter. Use YYYY-MM-DD format (UTC calendar day)" }, 400);
     }
     // Reject dates that JS silently rolls over (e.g., Feb 31 → Mar 3)
     const parsed = new Date(`${date}T12:00:00Z`);
@@ -109,7 +109,7 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
       sources: s.sources,
       tags: s.tags,
       timestamp: s.created_at,
-      pacificDate: toPacificDate(s.created_at),
+      utcDate: toUTCDate(s.created_at),
       correction_of: s.correction_of,
       status: s.status,
       publisherFeedback: s.publisher_feedback,
@@ -118,7 +118,7 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   });
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  c.header("X-Timezone", "America/Los_Angeles");
+  c.header("X-Timezone", "UTC");
   return c.json({
     signals: transformed,
     total: transformed.length,
