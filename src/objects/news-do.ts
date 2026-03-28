@@ -299,11 +299,17 @@ export class NewsDO extends DurableObject<Env> {
       if (appliedVersion < 12) {
         try {
           this.ctx.storage.sql.exec(
-            `UPDATE streaks SET last_signal_date = SUBSTR(
-              (SELECT MAX(s.created_at) FROM signals s
-               WHERE s.btc_address = streaks.btc_address AND s.correction_of IS NULL),
-              1, 10
-            ) WHERE last_signal_date IS NOT NULL`
+            `WITH max_signals AS (
+               SELECT btc_address, MAX(created_at) AS max_created_at
+               FROM signals
+               WHERE correction_of IS NULL
+               GROUP BY btc_address
+             )
+             UPDATE streaks
+             SET last_signal_date = SUBSTR(max_signals.max_created_at, 1, 10)
+             FROM max_signals
+             WHERE streaks.btc_address = max_signals.btc_address
+               AND streaks.last_signal_date IS NOT NULL`
           );
         } catch (e) {
           console.error("Streak UTC migration failed:", e);
