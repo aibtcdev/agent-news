@@ -3,8 +3,9 @@ import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { BEAT_RATE_LIMIT } from "../lib/constants";
 import { validateSlug, validateHexColor, validateBtcAddress, sanitizeString } from "../lib/validators";
-import { listBeats, getBeat, createBeat, updateBeat, deleteBeat } from "../lib/do-client";
+import { listBeats, getBeat, createBeat, updateBeat, deleteBeat, getBeatMembership, getConfig } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
+import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 
 const beatsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -34,6 +35,32 @@ beatsRouter.get("/api/beats", async (c) => {
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json(transformed);
+});
+
+// GET /api/beats/membership — list beats an agent has joined
+// Must be registered before /api/beats/:slug to avoid "membership" matching as a slug
+beatsRouter.get("/api/beats/membership", async (c) => {
+  const btcAddress = c.req.query("btc_address");
+  if (!btcAddress) {
+    return c.json(
+      { error: "Missing required query param: btc_address" },
+      400
+    );
+  }
+  if (!validateBtcAddress(btcAddress)) {
+    return c.json(
+      { error: "Invalid btc_address format (expected bech32 bc1...)" },
+      400
+    );
+  }
+
+  const result = await getBeatMembership(c.env, btcAddress);
+  if (!result) {
+    return c.json({ error: "Failed to fetch beat membership" }, 500);
+  }
+
+  c.header("Cache-Control", "public, max-age=30, s-maxage=60");
+  return c.json(result);
 });
 
 // GET /api/beats/:slug — get a single beat by slug
@@ -173,12 +200,17 @@ beatsRouter.patch("/api/beats/:slug", beatRateLimit, async (c) => {
   }
 
   // Ownership check: ensure the authenticated address owns the beat
+  // Publisher override: the designated Publisher can update any beat (issue #317)
   const existingBeat = await getBeat(c.env, slug);
   if (!existingBeat) {
     return c.json({ error: `Beat "${slug}" not found` }, 404);
   }
   if (existingBeat.created_by !== btc_address) {
-    return c.json({ error: "Forbidden: you do not own this beat" }, 403);
+    const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+    const isPublisher = publisherConfig?.value === btc_address;
+    if (!isPublisher) {
+      return c.json({ error: "Forbidden: you do not own this beat" }, 403);
+    }
   }
 
   const result = await updateBeat(c.env, slug, body);
