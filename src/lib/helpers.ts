@@ -2,59 +2,37 @@ import type { Beat } from "./types";
 import type { AgentInfo } from "../services/agent-resolver";
 import { resolveAgentNames } from "../services/agent-resolver";
 
-export const PACIFIC_TZ = "America/Los_Angeles";
-
 /**
- * WHY Pacific time?
- *
- * This news system is operated by a Pacific-based publisher. The editorial day
- * runs midnight-to-midnight PT (America/Los_Angeles), which automatically handles
- * both PST (UTC-8) and PDT (UTC-7) via the IANA timezone database.
- *
- * Key timing anchors:
- *   - Briefs are compiled at ~11 pm PT each night. Signals approved before
- *     that cutoff count toward that day's brief and brief_inclusions score.
- *   - Streak boundaries align with the editorial day: a scout must file at
- *     least one approved signal on each consecutive Pacific calendar day to
- *     maintain their streak. Missing a Pacific day breaks the streak even if
- *     only a few UTC hours passed between their last two signals.
- *   - The 30-day rolling window in SQL uses datetime('now', '-30 days') (UTC).
- *     This is intentionally different from streak/day boundaries — it is a
- *     sliding competition window, not an editorial-day boundary.
+ * Returns the current date in YYYY-MM-DD format in UTC.
+ * Use this for streak and day-boundary calculations.
  */
-
-/**
- * Returns the current date in YYYY-MM-DD format in Pacific time.
- * Use this for streak and day-boundary calculations, not for UTC timestamps.
- */
-export function getPacificDate(now = new Date()): string {
-  return now.toLocaleDateString("en-CA", { timeZone: PACIFIC_TZ });
+export function getUTCDate(now = new Date()): string {
+  return now.toISOString().slice(0, 10);
 }
 
 /**
- * Returns yesterday's date in YYYY-MM-DD format in Pacific time.
- * "Yesterday" here is Pacific yesterday — a scout who filed at 11:59 pm PT
- * and files again at 12:01 am PT the next day has a consecutive-day streak.
- * The same two signals in UTC could span a very different day boundary.
+ * Returns yesterday's date in YYYY-MM-DD format in UTC.
  */
-export function getPacificYesterday(now = new Date()): string {
+export function getUTCYesterday(now = new Date()): string {
   const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  return getPacificDate(yesterday);
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+  return getUTCDate(yesterday);
 }
 
 /**
- * Formats an ISO date string to a short Pacific time representation
- * e.g. "Mar 3, 10:30 AM"
+ * Formats an ISO date string to a short UTC time representation
+ * e.g. "Mar 3, 10:30 AM UTC"
  */
-export function formatPacificShort(isoStr: string): string {
-  return new Date(isoStr).toLocaleString("en-US", {
-    timeZone: PACIFIC_TZ,
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+export function formatUTCShort(isoStr: string): string {
+  return (
+    new Date(isoStr).toLocaleString("en-US", {
+      timeZone: "UTC",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }) + " UTC"
+  );
 }
 
 /**
@@ -68,50 +46,32 @@ export function generateId(): string {
  * Returns the date string for the day after the given YYYY-MM-DD string
  */
 export function getNextDate(date: string): string {
-  const d = new Date(date + "T12:00:00Z"); // noon UTC to avoid DST edge
+  const d = new Date(date + "T12:00:00Z"); // noon UTC to avoid date rollover at midnight
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
 
 /**
- * Returns the UTC ISO string for midnight Pacific time on the given YYYY-MM-DD date.
- * Uses Intl.DateTimeFormat offset detection to handle PST/PDT automatically.
+ * Returns the UTC ISO string for midnight UTC on the given YYYY-MM-DD date.
  */
-export function getPacificDayStartUTC(date: string): string {
-  // Try noon Pacific to avoid DST edge cases when finding the offset
-  // We create a Date at noon UTC and check what Pacific time it shows
-  // Then we compute: utcMidnightPacific = midnightUTC + pacificOffsetMs
-  // Pacific offset: PST = UTC-8, PDT = UTC-7
-  // We detect it by formatting a UTC noon time for the given date
-  const noonUTC = new Date(date + "T20:00:00Z"); // 20:00 UTC = noon PST or 1pm PDT
-  const formatter = new Intl.DateTimeFormat("en-US", {
-    timeZone: PACIFIC_TZ,
-    hour: "numeric",
-    hour12: false,
-    timeZoneName: "short",
-  });
-  const parts = formatter.formatToParts(noonUTC);
-  const tzName = parts.find((p) => p.type === "timeZoneName")?.value ?? "PST";
-  const offsetHours = tzName === "PDT" ? -7 : -8;
-  // Midnight Pacific = midnight UTC minus the negative offset = midnight UTC + |offset|
-  const midnightUTCMs = Date.parse(date + "T00:00:00Z") - offsetHours * 3600000;
-  return new Date(midnightUTCMs).toISOString();
+export function getUTCDayStart(date: string): string {
+  return date + "T00:00:00.000Z";
 }
 
 /**
- * Returns the UTC ISO string for the end of a Pacific day (midnight of the next day).
- * Used together with getPacificDayStartUTC() to create a [start, end) range.
+ * Returns the UTC ISO string for the end of a UTC day (midnight of the next day).
+ * Used together with getUTCDayStart() to create a [start, end) range.
  */
-export function getPacificDayEndUTC(date: string): string {
-  return getPacificDayStartUTC(getNextDate(date));
+export function getUTCDayEnd(date: string): string {
+  return getNextDate(date) + "T00:00:00.000Z";
 }
 
 /**
- * Compute the Pacific calendar date (YYYY-MM-DD) for an ISO/UTC timestamp string.
+ * Compute the UTC calendar date (YYYY-MM-DD) for an ISO/UTC timestamp string.
  * Useful for annotating API responses so consumers don't need to convert themselves.
  */
-export function toPacificDate(isoTimestamp: string): string {
-  return new Date(isoTimestamp).toLocaleDateString("en-CA", { timeZone: PACIFIC_TZ });
+export function toUTCDate(isoTimestamp: string): string {
+  return new Date(isoTimestamp).toISOString().slice(0, 10);
 }
 
 /**
@@ -197,4 +157,3 @@ export async function resolveNamesWithTimeout(
   waitUntil(nameResolution.catch(() => {}));
   return nameMap;
 }
-
