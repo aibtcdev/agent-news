@@ -1883,7 +1883,7 @@ export class NewsDO extends DurableObject<Env> {
       const probeTimestamp = (probeRows[0] as Record<string, unknown>).created_at as string;
       const day = getUTCDate(new Date(probeTimestamp));
       const dayStartUTC = getUTCDayStart(day);
-      const dayEndUTC = getUTCDayStart(getNextDate(day));
+      const dayEndUTC = getUTCDayEnd(day);
 
       // Step 2: Fetch ALL signals for that UTC day (complete day, no limit)
       const rows = this.ctx.storage.sql
@@ -2075,7 +2075,7 @@ export class NewsDO extends DurableObject<Env> {
       const dailyCount = (dailyCountRows[0] as Record<string, unknown>).count as number;
       if (dailyCount >= MAX_SIGNALS_PER_DAY) {
         // Compute seconds until the next UTC day reset
-        const tomorrowStart = getUTCDayStart(getNextDate(today));
+        const tomorrowStart = getUTCDayEnd(today);
         const retryAfterSecs = Math.ceil((new Date(tomorrowStart).getTime() - now.getTime()) / 1000);
         const res = c.json(
           {
@@ -2355,7 +2355,7 @@ export class NewsDO extends DurableObject<Env> {
       // Compute UTC day boundaries as ISO strings.
       // Derive start/end of the UTC day for `date`.
       const dayStart = getUTCDayStart(date);
-      const dayEnd = getUTCDayStart(getNextDate(date));
+      const dayEnd = getUTCDayEnd(date);
 
       // Simplified compile: the roster IS the set of approved signals for the day.
       // All curation happened at review time via cap-enforced approval.

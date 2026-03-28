@@ -46,7 +46,7 @@ export function generateId(): string {
  * Returns the date string for the day after the given YYYY-MM-DD string
  */
 export function getNextDate(date: string): string {
-  const d = new Date(date + "T12:00:00Z"); // noon UTC to avoid DST edge
+  const d = new Date(date + "T12:00:00Z"); // noon UTC to avoid date rollover at midnight
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
