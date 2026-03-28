@@ -3321,23 +3321,23 @@
     // ── Render signal feed (fallback when no brief is available) ──
     async function renderSignalFeed(prefetchedData = null) {
       const main = el('main-content');
-      // pacificTodayStr is used as a pagination cursor for the backend, which expects Pacific dates.
+      // utcTodayStr is used as a pagination cursor for the backend, which now expects UTC dates.
       // localTodayStr is used only for display in setDate().
-      const pacificTodayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const utcTodayStr = new Date().toISOString().slice(0, 10);
       const localTodayStr = new Date().toLocaleDateString('en-CA');
       setDate(localTodayStr);
 
       const data = prefetchedData !== null ? prefetchedData : await fetchJSON('/api/front-page');
-      // Precompute Pacific date string once per signal to avoid redundant Date construction
+      // Precompute UTC date string once per signal — timestamps are ISO UTC strings so slice is sufficient
       const allSignals = (data && Array.isArray(data.signals))
         ? data.signals
             .filter(s => s && s.timestamp)
-            .map(s => ({ ...s, _day: new Date(s.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }) }))
+            .map(s => ({ ...s, _day: s.timestamp.slice(0, 10) }))
         : [];
 
-      // Partition by Pacific day
-      const todaySignals = allSignals.filter(s => s._day === pacificTodayStr);
-      const olderSignals = allSignals.filter(s => s._day !== pacificTodayStr);
+      // Partition by UTC day
+      const todaySignals = allSignals.filter(s => s._day === utcTodayStr);
+      const olderSignals = allSignals.filter(s => s._day !== utcTodayStr);
 
       // hasRenderableSignals: true when there are signals to show in mosaic or day sections.
       // Used only as an empty-state guard — actual rendering uses todaySignals/allSignals directly.
@@ -3502,7 +3502,7 @@
         const todayItems = signalsToItems(todaySignals);
         html = todayHeader + renderMosaicHtml(todayItems);
 
-        // Group older signals by Pacific day and render each day section inline
+        // Group older signals by UTC day and render each day section inline
         if (olderSignals.length > 0) {
           // Group by date string
           const byDay = {};
@@ -3535,12 +3535,12 @@
       hydrateAgentIdentities(main);
 
       // Set scroll cursor to oldest date rendered, so infinite scroll continues from there.
-      // The backend expects a Pacific YYYY-MM-DD date for the 'before' cursor.
+      // The backend expects a UTC YYYY-MM-DD date for the 'before' cursor.
       const renderedSignals = noSignalsToday ? allSignals : (olderSignals.length > 0 ? olderSignals : todaySignals);
       const oldestSignal = renderedSignals[renderedSignals.length - 1];
       const scrollCursor = oldestSignal && oldestSignal._day
         ? oldestSignal._day
-        : pacificTodayStr;
+        : utcTodayStr;
       initInfiniteScroll(scrollCursor);
     }
 
@@ -3766,9 +3766,9 @@
       if (mins < 60) return `${mins}m ago`;
       if (hours < 24) return `${hours}h ago`;
       if (days <= 7) return `${days}d ago`;
-      // Fallback to short date — use Pacific timezone for consistency with day-grouping logic
+      // Fallback to short date — use browser-local timezone for display
       const d = new Date(ts);
-      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'America/Los_Angeles' });
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
 
     function esc(str) {
