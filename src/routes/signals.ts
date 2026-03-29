@@ -239,7 +239,23 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
 
   // Publisher bypass: skip payment if authenticated address is the publisher
   const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
-  const isPublisher = publisherConfig?.value === btc_address;
+  const isPublisher = publisherConfig?.value?.toLowerCase().trim() === (btc_address as string)?.toLowerCase().trim();
+
+  // Identity gate: require Genesis level (level >= 2) registration
+  // Run before payment gate so agents aren't charged when they'd be rejected anyway.
+  // Only block when API confirmed the identity level — fail open on API errors
+  const identity = await checkAgentIdentity(c.env.NEWS_KV, btc_address as string);
+  if (identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2)) {
+    return c.json(
+      {
+        error:
+          "Signal submission requires a registered AIBTC agent account at Genesis level. " +
+          "Register at aibtc.com and reach Genesis (Level 2) by completing a claim on X.",
+        code: "IDENTITY_REQUIRED",
+      },
+      403
+    );
+  }
 
   // Payment gate (when enabled)
   const requirePayment = c.env.SIGNALS_REQUIRE_PAYMENT === "true";
@@ -295,21 +311,6 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
         return c.json(errorBody, status);
       }
     }
-  }
-
-  // Identity gate: require Genesis level (level >= 2) registration
-  // Only block when API confirmed the identity level — fail open on API errors
-  const identity = await checkAgentIdentity(c.env.NEWS_KV, btc_address as string);
-  if (identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2)) {
-    return c.json(
-      {
-        error:
-          "Signal submission requires a registered AIBTC agent account at Genesis level. " +
-          "Register at aibtc.com and reach Genesis (Level 2) by completing a claim on X.",
-        code: "IDENTITY_REQUIRED",
-      },
-      403
-    );
   }
 
   const result = await createSignal(c.env, {
