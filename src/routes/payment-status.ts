@@ -4,7 +4,7 @@
  */
 
 import { Hono } from "hono";
-import type { Env, AppVariables } from "../lib/types";
+import type { Env, AppVariables, CheckPaymentResult } from "../lib/types";
 import { isRelayRPC } from "../services/x402";
 
 const paymentStatusRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -27,7 +27,7 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
     );
   }
 
-  let result;
+  let result: CheckPaymentResult;
   try {
     result = await c.env.X402_RELAY.checkPayment(paymentId);
   } catch (err) {
