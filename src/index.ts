@@ -50,7 +50,7 @@ app.use(
 			// Standard
 			"Content-Type",
 		],
-		exposeHeaders: ["payment-required", "payment-response"],
+		exposeHeaders: ["payment-required", "payment-response", "x-payment-status", "x-payment-id"],
 	}),
 );
 

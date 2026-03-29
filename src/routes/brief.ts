@@ -137,13 +137,9 @@ briefRouter.get("/api/brief/:date", async (c) => {
   const format = c.req.query("format") ?? "json";
 
   if (format === "text") {
-    return new Response(brief.text, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Access-Control-Allow-Origin": "*",
-        "Cache-Control": "no-store",
-      },
-    });
+    c.header("Content-Type", "text/plain; charset=utf-8");
+    c.header("Cache-Control", "no-store");
+    return c.body(brief.text);
   }
 
   const jsonData = brief.json_data ? (JSON.parse(brief.json_data) as Record<string, unknown>) : {};

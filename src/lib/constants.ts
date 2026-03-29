@@ -163,9 +163,10 @@ export const PARENT_INSCRIPTION_ID =
 
 // ── x402 RPC polling ──
 /** Maximum number of checkPayment() poll attempts after submitPayment().
- *  Kept intentionally low (2 = ~4s) so that poll exhaustion returns a "pending"
- *  status rather than timing out the HTTP request. Agents can re-check via
- *  the payment-status endpoint once on-chain confirmation arrives. */
+ *  Kept intentionally low (2 attempts ≈ 2s worst-case extra wait) so that poll
+ *  exhaustion returns a "pending" status rather than timing out the HTTP
+ *  request. Agents can re-check via the payment-status endpoint once on-chain
+ *  confirmation arrives. */
 export const RPC_POLL_MAX_ATTEMPTS = 2;
 /** Milliseconds between each checkPayment() poll attempt. */
 export const RPC_POLL_INTERVAL_MS = 2_000;

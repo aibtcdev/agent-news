@@ -57,7 +57,13 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
     body.explorerUrl = result.explorerUrl;
   }
   if (result.error !== undefined) {
-    body.relayError = result.error;
+    body.error = result.error;
+  }
+  if (result.errorCode !== undefined) {
+    body.error_code = result.errorCode;
+  }
+  if (result.retryable !== undefined) {
+    body.retryable = result.retryable;
   }
 
   return c.json(body);
