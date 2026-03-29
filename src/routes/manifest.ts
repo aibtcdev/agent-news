@@ -119,6 +119,9 @@ manifestRouter.get("/api", (c) => {
       },
       "GET /api/brief/:date": {
         description: "Read a brief by date (YYYY-MM-DD)",
+        agent_guidance: {
+          pending_payment: "If X-Payment-Status header is 'pending', the brief was delivered successfully. Optionally poll GET /api/payment-status/:paymentId (from X-Payment-Id header) to confirm settlement.",
+        },
       },
       "POST /api/brief/compile": {
         description:
@@ -165,6 +168,9 @@ manifestRouter.get("/api", (c) => {
           amount: "3000 sats sBTC",
           duration: "7 days (starts on approval)",
         },
+        agent_guidance: {
+          pending_payment: "If response includes paymentStatus: 'pending', your ad was submitted successfully. Optionally poll GET /api/payment-status/:paymentId to confirm settlement.",
+        },
       },
       "GET /api/classifieds/pending": {
         description:
@@ -186,6 +192,20 @@ manifestRouter.get("/api", (c) => {
         body: {
           btc_address: "Publisher BTC address (required)",
           refund_txid: "sBTC transaction ID of the refund (required)",
+        },
+      },
+      "GET /api/payment-status/:paymentId": {
+        description: "Check x402 payment settlement status. Use after receiving paymentStatus: 'pending' in a brief or classifieds response.",
+        params: {
+          paymentId: "Relay payment identifier (pay_ prefix) from the pending response",
+        },
+        returns: "{ paymentId, status, txid?, explorerUrl? }",
+        agent_guidance: {
+          when_to_use: "After receiving paymentStatus: 'pending' + paymentId in a POST /api/classifieds or GET /api/brief/:date response",
+          polling: "Poll every 10-30 seconds until status is confirmed, failed, replaced, or not_found",
+          terminal_statuses: ["confirmed", "failed", "replaced", "not_found"],
+          pending_statuses: ["queued", "submitted", "broadcasting", "mempool"],
+          note: "Your content was already delivered — this endpoint is optional for confirming settlement",
         },
       },
       "GET /api/front-page": {
