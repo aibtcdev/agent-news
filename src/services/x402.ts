@@ -250,7 +250,7 @@ export function buildPaymentRequired(opts: PaymentRequiredOpts): Response {
  * Runtime type guard — verifies the binding exposes submitPayment().
  * Mirrors the isLogsRPC() pattern used for the LOGS binding.
  */
-function isRelayRPC(relay: unknown): relay is RelayRPC {
+export function isRelayRPC(relay: unknown): relay is RelayRPC {
   return (
     typeof relay === "object" &&
     relay !== null &&
