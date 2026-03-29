@@ -328,6 +328,9 @@ export async function verifyPayment(
     maxTimeoutSeconds: 60,
   };
 
+  /** Statuses that indicate the relay is still processing the payment (not terminal). */
+  const PENDING_STATUSES = new Set(["queued", "submitted", "broadcasting", "mempool"]);
+
   // --- RPC path (service binding available and valid) ---
   if (env?.X402_RELAY && isRelayRPC(env.X402_RELAY)) {
     // Extract the signed transaction hex from the payment payload.
@@ -380,6 +383,7 @@ export async function verifyPayment(
     console.log("[x402] RPC payment queued:", paymentId, submitResult.status);
 
     // Step 2: Poll checkPayment() until confirmed, failed, or timeout.
+    let lastCheckResult: CheckPaymentResult | undefined;
     for (let attempt = 0; attempt < RPC_POLL_MAX_ATTEMPTS; attempt++) {
       if (attempt > 0) {
         await new Promise<void>((resolve) => setTimeout(resolve, RPC_POLL_INTERVAL_MS));
@@ -395,6 +399,7 @@ export async function verifyPayment(
         return { valid: false, relayError: true };
       }
 
+      lastCheckResult = checkResult;
       console.log(`[x402] RPC checkPayment attempt ${attempt + 1}:`, checkResult.status);
 
       if (checkResult.status === "confirmed") {
@@ -433,16 +438,42 @@ export async function verifyPayment(
       // status is "queued", "submitted", "broadcasting" — keep polling
     }
 
-    // Poll exhausted — payment was accepted by relay and is still processing.
-    // Return valid=true with paymentStatus="pending" so the HTTP request succeeds
-    // and the agent receives the resource. The circuit breaker should NOT trip here
-    // because the relay is healthy — it is just waiting for on-chain confirmation.
-    console.warn("[x402] RPC poll exhausted — payment still pending, paymentId:", paymentId);
-    recordRelaySuccess();
+    // Poll exhausted — decide based on last known status.
+    if (lastCheckResult && PENDING_STATUSES.has(lastCheckResult.status)) {
+      // Payment was accepted by relay and is still processing a known pending status.
+      // Return valid=true with paymentStatus="pending" so the HTTP request succeeds
+      // and the agent receives the resource. The circuit breaker should NOT trip here
+      // because the relay is healthy — it is just waiting for on-chain confirmation.
+      console.warn("[x402] RPC poll exhausted — payment still pending, paymentId:", paymentId);
+      recordRelaySuccess();
+      return {
+        valid: true,
+        paymentStatus: "pending",
+        paymentId,
+      };
+    }
+
+    if (!lastCheckResult) {
+      // We never got a successful checkPayment response (all attempts may have
+      // been skipped or the loop ran zero times). Treat as pending — the relay
+      // accepted the payment via submitPayment so it is likely still processing.
+      console.warn("[x402] RPC poll exhausted — no check response received, paymentId:", paymentId);
+      recordRelaySuccess();
+      return {
+        valid: true,
+        paymentStatus: "pending",
+        paymentId,
+      };
+    }
+
+    // Safety net: poll exhausted with an unexpected status we don't recognise.
+    // This should not happen in normal operation but guards against future relay
+    // status values that this code does not yet handle.
+    console.warn("[x402] RPC poll exhausted with unexpected status:", lastCheckResult.status, "paymentId:", paymentId);
     return {
-      valid: true,
-      paymentStatus: "pending",
-      paymentId,
+      valid: false,
+      relayError: true,
+      relayReason: `Poll exhausted with unexpected status: ${lastCheckResult.status}`,
     };
   }
 
