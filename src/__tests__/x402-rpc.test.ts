@@ -162,7 +162,7 @@ describe("verifyPayment — RPC path — nonce gap warning", () => {
 // =============================================================================
 
 describe("verifyPayment — RPC path — polling timeout", () => {
-  it("returns relayError:true when checkPayment never confirms within max attempts", async () => {
+  it("returns valid:true with paymentStatus pending when poll exhausts with known pending status", async () => {
     vi.useFakeTimers();
 
     const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
@@ -184,11 +184,38 @@ describe("verifyPayment — RPC path — polling timeout", () => {
     await vi.runAllTimersAsync();
     const result = await resultPromise;
 
+    expect(result.valid).toBe(true);
+    expect(result.paymentStatus).toBe("pending");
+    expect(result.paymentId).toBe("pay_002");
+    // checkPayment should have been called RPC_POLL_MAX_ATTEMPTS (2) times
+    expect(checkPayment).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns relayError:true when poll exhausts with unexpected status (safety net)", async () => {
+    vi.useFakeTimers();
+
+    const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
+      accepted: true,
+      paymentId: "pay_unexpected",
+      status: "queued",
+    });
+
+    // Return an unknown future status the code does not handle
+    const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
+      paymentId: "pay_unexpected",
+      status: "some_future_unknown_status" as CheckPaymentResult["status"],
+    });
+
+    const env = makeEnv(submitPayment, checkPayment);
+
+    const resultPromise = verifyPayment(makePaymentHeader(), 100, env);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
     expect(result.valid).toBe(false);
     expect(result.relayError).toBe(true);
-    expect(result.relayReason).toMatch(/timed out/i);
-    // checkPayment should have been called RPC_POLL_MAX_ATTEMPTS (8) times
-    expect(checkPayment).toHaveBeenCalledTimes(8);
+    expect(result.relayReason).toMatch(/unexpected status/i);
+    expect(checkPayment).toHaveBeenCalledTimes(2);
   });
 });
 
