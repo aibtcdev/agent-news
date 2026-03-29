@@ -53,9 +53,9 @@ export async function resolveAgentName(
 
       const info: AgentInfo = { name: displayName, btcAddress: canonicalBtc };
 
-      // Cache result as JSON (empty name signals "no name" to avoid repeated fetches)
+      // Cache resolved names for 24h; null names for 5min so newly-registered agents resolve promptly
       await kv.put(cacheKey, JSON.stringify(info), {
-        expirationTtl: CACHE_TTL_SECONDS,
+        expirationTtl: displayName ? CACHE_TTL_SECONDS : 300,
       });
 
       return info;
