@@ -125,6 +125,13 @@ briefRouter.get("/api/brief/:date", async (c) => {
         reference_id: verification.txid ?? null,
       });
     }
+
+    // If the payment is still pending on-chain, include the paymentId so the
+    // agent can verify settlement via /api/payment-status/:paymentId later.
+    if (verification.paymentStatus === "pending" && verification.paymentId) {
+      c.header("X-Payment-Status", "pending");
+      c.header("X-Payment-Id", verification.paymentId);
+    }
   }
 
   const format = c.req.query("format") ?? "json";

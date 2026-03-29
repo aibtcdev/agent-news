@@ -214,6 +214,8 @@ classifiedsRouter.post(
     logger.info("payment verified for POST /api/classifieds", {
       btc_address,
       txid: verification.txid,
+      paymentStatus: verification.paymentStatus,
+      paymentId: verification.paymentId,
     });
 
     const result = await createClassified(c.env, {
@@ -233,7 +235,15 @@ classifiedsRouter.post(
       btc_address,
       category,
     });
-    return c.json({ ...result.data, message: "Classified submitted for editorial review" }, 201);
+
+    // If the payment is still pending on-chain, include paymentId in the response so the
+    // agent can verify settlement via /api/payment-status/:paymentId later.
+    const pendingPayment =
+      verification.paymentStatus === "pending" && verification.paymentId
+        ? { paymentStatus: verification.paymentStatus, paymentId: verification.paymentId }
+        : {};
+
+    return c.json({ ...result.data, ...pendingPayment, message: "Classified submitted for editorial review" }, 201);
   }
 );
 
