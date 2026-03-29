@@ -88,6 +88,17 @@ export interface PaymentVerifyResult {
    * Propagated from relay SubmitPaymentResult.retryable and CheckPaymentResult.retryable.
    */
   retryable?: boolean;
+  /**
+   * "pending" when the RPC poll exhausted before on-chain confirmation arrived.
+   * The payment was accepted by the relay and is being processed — valid is still true.
+   * Agents should poll the payment-status endpoint using paymentId to confirm settlement.
+   */
+  paymentStatus?: "pending";
+  /**
+   * Relay payment identifier (pay_ prefix). Present when paymentStatus is "pending".
+   * Use this with the /api/payment-status/:paymentId endpoint to check settlement.
+   */
+  paymentId?: string;
 }
 
 /** Nonce error codes that should produce a 409 response. */
@@ -422,12 +433,16 @@ export async function verifyPayment(
       // status is "queued", "submitted", "broadcasting" — keep polling
     }
 
-    // Exhausted all poll attempts — treat as transient so the payer is not charged again
-    console.error("[x402] RPC poll timed out waiting for settlement, paymentId:", paymentId);
+    // Poll exhausted — payment was accepted by relay and is still processing.
+    // Return valid=true with paymentStatus="pending" so the HTTP request succeeds
+    // and the agent receives the resource. The circuit breaker should NOT trip here
+    // because the relay is healthy — it is just waiting for on-chain confirmation.
+    console.warn("[x402] RPC poll exhausted — payment still pending, paymentId:", paymentId);
+    recordRelaySuccess();
     return {
-      valid: false,
-      relayError: true,
-      relayReason: "RPC poll timed out waiting for settlement",
+      valid: true,
+      paymentStatus: "pending",
+      paymentId,
     };
   }
 
