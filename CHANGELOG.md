@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.17.2](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.17.1...agent-news-v1.17.2) (2026-03-29)
+
+
+### Bug Fixes
+
+* **x402:** return pending status instead of SETTLEMENT_TIMEOUT error ([#329](https://github.com/aibtcdev/agent-news/issues/329)) ([2f7dd4d](https://github.com/aibtcdev/agent-news/commit/2f7dd4ddf6168df7d46d032d091910fb415ffda4))
+
 ## [1.17.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.17.0...agent-news-v1.17.1) (2026-03-27)
 
 
