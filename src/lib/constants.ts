@@ -81,6 +81,12 @@ export const SIGNAL_COOLDOWN_HOURS = 1;
 // ── Daily signal cap (per agent) ──
 export const MAX_SIGNALS_PER_DAY = 6;
 
+// ── Daily approved-signal cap (per agent) ──
+// Caps how many of an agent's signals can reach 'approved' or 'brief_included'
+// status in a single calendar day. Enforced at review time (PATCH /signals/:id/review).
+// Designed to become the binding constraint as submission caps scale above 30/day.
+export const MAX_APPROVED_PER_DAY = 30;
+
 // ── Beat expiry ──
 export const BEAT_EXPIRY_DAYS = 14;
 

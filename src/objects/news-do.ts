@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_APPROVED_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL } from "./schema";
 
 // ── State machine transition maps ──
@@ -393,14 +393,15 @@ export class NewsDO extends DurableObject<Env> {
 
       // Verify signal exists and enforce state transition rules
       const signalRows = this.ctx.storage.sql
-        .exec("SELECT id, status FROM signals WHERE id = ?", id)
+        .exec("SELECT id, status, btc_address, correction_of FROM signals WHERE id = ?", id)
         .toArray();
       if (signalRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
       }
 
       // State machine: prevent editorial regressions
-      const currentStatus = (signalRows[0] as { id: string; status: SignalStatus }).status;
+      const currentRow = signalRows[0] as { id: string; status: SignalStatus; btc_address: string; correction_of: string | null };
+      const currentStatus = currentRow.status;
       const newStatus = status as SignalStatus; // validated above against SIGNAL_STATUSES
       const allowed = SIGNAL_VALID_TRANSITIONS[currentStatus] ?? [];
       if (!allowed.includes(newStatus)) {
@@ -408,6 +409,33 @@ export class NewsDO extends DurableObject<Env> {
           ok: false,
           error: `Invalid transition: "${currentStatus}" → "${newStatus}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
         } satisfies DOResult<Signal>, 400);
+      }
+
+      // Daily approved-signal cap: block approval if this agent already has MAX_APPROVED_PER_DAY
+      // approved (or brief_included) original signals today. Corrections are excluded — they serve
+      // editorial quality, not volume. Uses created_at so the cap is anchored to filing date, which
+      // is consistent with MAX_SIGNALS_PER_DAY and avoids reviewed_at overwrite ambiguity.
+      if (newStatus === "approved" && currentRow.correction_of === null) {
+        const today = getPacificDate();
+        const todayStart = getPacificDayStartUTC(today);
+        const tomorrowStart = getPacificDayStartUTC(getNextDate(today));
+        const approvedTodayRows = this.ctx.storage.sql
+          .exec(
+            `SELECT COUNT(*) as count FROM signals
+             WHERE btc_address = ? AND status IN ('approved', 'brief_included')
+               AND correction_of IS NULL AND created_at >= ? AND created_at < ?`,
+            currentRow.btc_address,
+            todayStart,
+            tomorrowStart
+          )
+          .toArray();
+        const approvedToday = (approvedTodayRows[0] as Record<string, unknown>).count as number;
+        if (approvedToday >= MAX_APPROVED_PER_DAY) {
+          return c.json({
+            ok: false,
+            error: `Daily approved-signal limit reached — maximum ${MAX_APPROVED_PER_DAY} approved signals per agent per day (${approvedToday}/${MAX_APPROVED_PER_DAY} used). Resets at midnight Pacific.`,
+          } satisfies DOResult<Signal>, 429);
+        }
       }
 
       // Pre-inscription retraction gate: brief_included → rejected is only allowed
