@@ -205,6 +205,10 @@ export interface Signal {
   readonly reviewed_at: string | null;
   /** Models, tools, and skills used to produce this signal */
   readonly disclosure: string;
+  /** Auto-computed quality score (0–100) assigned at submission time */
+  readonly quality_score: number | null;
+  /** Per-dimension breakdown of quality_score (parsed from JSON in DB) */
+  readonly score_breakdown: Record<string, number> | null;
 }
 
 /**

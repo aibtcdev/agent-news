@@ -5,7 +5,8 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL } from "./schema";
+import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -47,6 +48,8 @@ interface RawSignalRow {
   publisher_feedback: string | null;
   reviewed_at: string | null;
   disclosure: string;
+  quality_score: number | null;
+  score_breakdown: string | null; // JSON-encoded SignalScoreBreakdown
 }
 
 interface RawCompiledSignalRow extends CompiledSignalRow {
@@ -77,6 +80,8 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     publisher_feedback: raw.publisher_feedback ?? null,
     reviewed_at: raw.reviewed_at ?? null,
     disclosure: raw.disclosure ?? "",
+    quality_score: raw.quality_score ?? null,
+    score_breakdown: raw.score_breakdown ? JSON.parse(raw.score_breakdown) : null,
   };
 }
 
@@ -288,7 +293,8 @@ export class NewsDO extends DurableObject<Env> {
     // 21 = Leaderboard composite indexes — accelerate 30-day rolling window queries (#319)
     // 22 = Beat consolidation — 12 → 3 beats, retire old beats, create aibtc-network (#423)
     // 23 = Streak UTC migration (backfill last_signal_date from actual signal timestamps)
-    const CURRENT_MIGRATION_VERSION = 23;
+    // 24 = Signal quality auto-scoring — quality_score INTEGER, score_breakdown TEXT (#343)
+    const CURRENT_MIGRATION_VERSION = 24;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -617,6 +623,21 @@ export class NewsDO extends DurableObject<Env> {
         } catch (e) {
           console.error("Streak UTC migration failed:", e);
           throw e;
+        }
+      }
+
+      // Signal quality auto-scoring — adds quality_score and score_breakdown
+      // columns to the signals table. Both are nullable; existing rows stay valid.
+      if (appliedVersion < 24) {
+        for (const stmt of MIGRATION_SIGNAL_SCORING_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
+              console.error("Signal scoring migration statement failed:", e);
+            }
+          }
         }
       }
 
@@ -2186,6 +2207,16 @@ export class NewsDO extends DurableObject<Env> {
       const signalTags = (tags as string[]) ?? [];
       const disclosure = body.disclosure ? sanitizeString(body.disclosure, 500) : "";
 
+      // Auto-score the signal before insert (pure function, no I/O)
+      const signalScore = scoreSignal({
+        headline: headline as string,
+        body: sanitizedBody,
+        sources: (sources as Array<{ url: string; title: string }>) ?? [],
+        tags: signalTags,
+        beat_slug: beat_slug as string,
+        disclosure,
+      });
+
       // Streak calculation (UTC)
       const streakRows = this.ctx.storage.sql
         .exec("SELECT * FROM streaks WHERE btc_address = ?", btc_address as string)
@@ -2217,8 +2248,8 @@ export class NewsDO extends DurableObject<Env> {
       // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
       // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
       this.ctx.storage.sql.exec(
-        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?)`,
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, quality_score, score_breakdown)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?, ?, ?)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -2227,7 +2258,9 @@ export class NewsDO extends DurableObject<Env> {
         sourcesJson,
         nowIso,
         nowIso,
-        disclosure
+        disclosure,
+        signalScore.total,
+        JSON.stringify(signalScore.breakdown)
       );
 
       for (const t of signalTags) {
