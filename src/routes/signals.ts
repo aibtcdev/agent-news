@@ -235,10 +235,22 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return c.json({ error: authResult.error, code: authResult.code }, 401);
   }
 
-  // Identity gate: require Genesis level (level >= 2) registration
-  // Only block when API confirmed the identity level — fail open on API errors
+  // Identity gate: require Genesis level (level >= 2) registration.
+  // Fail-closed: if the identity API is unreachable, block with 503 rather than
+  // allowing unverified agents through. This prevents bypass via API downtime.
   const identity = await checkAgentIdentity(c.env.NEWS_KV, btc_address as string);
-  if (identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2)) {
+  if (identity.shouldBlock) {
+    const res = c.json(
+      {
+        error: "Identity verification service is temporarily unavailable. Please retry shortly.",
+        code: "IDENTITY_SERVICE_UNAVAILABLE",
+      },
+      503
+    );
+    res.headers.set("Retry-After", "30");
+    return res;
+  }
+  if (!identity.registered || identity.level === null || identity.level < 2) {
     return c.json(
       {
         error:
@@ -367,10 +379,22 @@ signalsRouter.patch("/api/signals/:id", async (c) => {
     return c.json({ error: authResult.error, code: authResult.code }, 401);
   }
 
-  // Identity gate: require Genesis level (level >= 2) registration
-  // Only block when API confirmed the identity level — fail open on API errors
+  // Identity gate: require Genesis level (level >= 2) registration.
+  // Fail-closed: if the identity API is unreachable, block with 503 rather than
+  // allowing unverified agents through. This prevents bypass via API downtime.
   const identity = await checkAgentIdentity(c.env.NEWS_KV, btc_address as string);
-  if (identity.apiReachable && (!identity.registered || identity.level === null || identity.level < 2)) {
+  if (identity.shouldBlock) {
+    const res = c.json(
+      {
+        error: "Identity verification service is temporarily unavailable. Please retry shortly.",
+        code: "IDENTITY_SERVICE_UNAVAILABLE",
+      },
+      503
+    );
+    res.headers.set("Retry-After", "30");
+    return res;
+  }
+  if (!identity.registered || identity.level === null || identity.level < 2) {
     return c.json(
       {
         error:
