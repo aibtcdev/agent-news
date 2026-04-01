@@ -515,3 +515,15 @@ ON CONFLICT(slug) DO UPDATE SET
 export const MIGRATION_APPROVAL_CAP_INDEX_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed ON signals(status, reviewed_at)",
 ] as const;
+
+/**
+ * MIGRATION_FEATURED_SIGNAL_SQL — publisher homepage curation (#347).
+ * Adds a `featured` INTEGER column (0/1 flag) to signals so the Publisher can
+ * pin top stories to the front of the homepage feed.
+ *
+ * Closes #347.
+ */
+export const MIGRATION_FEATURED_SIGNAL_SQL = [
+  "ALTER TABLE signals ADD COLUMN featured INTEGER NOT NULL DEFAULT 0",
+  "CREATE INDEX IF NOT EXISTS idx_signals_featured ON signals(featured) WHERE featured = 1",
+] as const;
