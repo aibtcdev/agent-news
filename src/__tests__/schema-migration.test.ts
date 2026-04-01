@@ -49,15 +49,15 @@ describe("DO constructor: schema initialization", () => {
     expect(res.status).toBe(200);
   });
 
-  it("beat network-focus migration populates 10 canonical beats", async () => {
-    // MIGRATION_BEAT_NETWORK_FOCUS_SQL runs after the restructure migration
-    // and reduces 17 beats to 10 network-focused beats.
+  it("beat network-focus migration populates 11 canonical beats", async () => {
+    // MIGRATION_BEAT_NETWORK_FOCUS_SQL reduces 17 beats to 10 network-focused beats.
+    // MIGRATION_BITCOIN_MACRO_SQL (migration 12) re-adds bitcoin-macro, bringing the total to 11.
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
     const body = await res.json<{ slug: string; name: string }[]>();
-    expect(body.length).toBe(10);
+    expect(body.length).toBe(11);
     const slugs = body.map((b) => b.slug);
-    // New/surviving beats
+    // Network-focused beats (migration 11)
     expect(slugs).toContain("agent-economy");
     expect(slugs).toContain("agent-trading");
     expect(slugs).toContain("agent-social");
@@ -68,8 +68,9 @@ describe("DO constructor: schema initialization", () => {
     expect(slugs).toContain("governance");
     expect(slugs).toContain("distribution");
     expect(slugs).toContain("infrastructure");
-    // Removed beats should not be present
-    expect(slugs).not.toContain("bitcoin-macro");
+    // Re-added beat (migration 12)
+    expect(slugs).toContain("bitcoin-macro");
+    // Other previously-removed beats should not be present
     expect(slugs).not.toContain("bitcoin-culture");
     expect(slugs).not.toContain("bitcoin-yield");
     expect(slugs).not.toContain("ordinals");
