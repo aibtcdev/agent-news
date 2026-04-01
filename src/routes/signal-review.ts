@@ -114,6 +114,7 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
 // PATCH /api/signals/:id/feature — Publisher pins/unpins a signal as a top story (BIP-322 auth required)
 signalReviewRouter.patch("/api/signals/:id/feature", reviewRateLimit, async (c) => {
   const signalId = c.req.param("id");
+  if (!signalId) return c.json({ error: "Missing signal ID" }, 400);
 
   let body: Record<string, unknown>;
   try {
