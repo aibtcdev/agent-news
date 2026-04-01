@@ -259,7 +259,7 @@ async function handleBriefCompile(
       }
       const logger = c.get("logger");
       logger.error("Failed to record brief signals", { date, error: briefSignalsResult.error });
-      briefSignalsWarning = `Failed to record brief_signals: ${briefSignalsResult.error ?? "unknown error"}. Signals remain in 'approved' state — retry compile to fix.`;
+      briefSignalsWarning = `Failed to record brief_signals: ${briefSignalsResult.error ?? "unknown error"}. Roster reconciliation did not run and brief signal state may be out of sync — retry compile after resolving this issue.`;
     }
   }
 
@@ -296,6 +296,7 @@ async function handleBriefCompile(
     } else {
       const logger = c.get("logger");
       logger.error("Failed to record brief inclusion payouts", { date, error: payoutResult.error });
+      return c.json({ error: payoutResult.error ?? "Failed to reconcile brief inclusion payouts" }, 500);
     }
   }
 
