@@ -99,6 +99,7 @@ briefInscribeRouter.post(
       return c.json(
         {
           error: `Brief for ${date} is already inscribed (${brief.inscription_id})`,
+          hint: `To update the inscription ID (e.g. after re-inscribing an amended brief), use PATCH /api/brief/${date}/inscribe with { btc_address, inscription_id, inscribed_txid? }.`,
         },
         409
       );
