@@ -2257,8 +2257,20 @@ export class NewsDO extends DurableObject<Env> {
 
       // Simplified compile: the roster IS the set of approved signals for the day.
       // All curation happened at review time via cap-enforced approval.
+      // Count total candidates before applying the cap so overflow is reported accurately.
+      const totalCandidates = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as cnt FROM signals
+           WHERE created_at >= ?1 AND created_at < ?2
+             AND status IN ('approved', 'brief_included')`,
+          dayStart,
+          dayEnd
+        )
+        .toArray()[0]?.cnt as number ?? 0;
+
       // Include both 'approved' (new) and 'brief_included' (recompile) signals.
-      const candidateRows = this.ctx.storage.sql
+      // Earliest-approved first; LIMIT enforces the 30-signal cap at the DB layer.
+      const selectedSignals = this.ctx.storage.sql
         .exec(
           `SELECT s.id, s.beat_slug, s.btc_address, s.headline, s.body, s.sources,
                   s.created_at, s.correction_of, s.reviewed_at,
@@ -2270,18 +2282,15 @@ export class NewsDO extends DurableObject<Env> {
            WHERE s.created_at >= ?1
              AND s.created_at < ?2
              AND s.status IN ('approved', 'brief_included')
-           ORDER BY s.reviewed_at DESC, s.created_at DESC, s.id ASC`,
+           ORDER BY s.reviewed_at ASC, s.created_at ASC, s.id ASC
+           LIMIT ?3`,
           dayStart,
-          dayEnd
+          dayEnd,
+          MAX_INCLUDED_SIGNALS_PER_BRIEF
         )
         .toArray()
         .map((row) => rowToCompiledSignal(row as Record<string, unknown>));
 
-      // Safety cap at MAX_INCLUDED_SIGNALS_PER_BRIEF. Each beat editor approves up to
-      // their beat's daily_approved_limit (e.g. 6/30 for quantum); the publisher fills
-      // remaining slots from other beats. Per-beat caps should sum to <= 30, so this
-      // slice is a hard ceiling for misconfigured caps, not a curation mechanism.
-      const selectedSignals = candidateRows.slice(0, MAX_INCLUDED_SIGNALS_PER_BRIEF);
       const includedSignals = buildIncludedSignalMetadata(selectedSignals);
 
       const compiledAt = now.toISOString();
@@ -2291,8 +2300,8 @@ export class NewsDO extends DurableObject<Env> {
         signals: selectedSignals,
         included_signal_ids: includedSignals.map((signal) => signal.signal_id),
         included_signals: includedSignals,
-        candidate_count: candidateRows.length,
-        overflow_count: Math.max(0, candidateRows.length - MAX_INCLUDED_SIGNALS_PER_BRIEF),
+        candidate_count: totalCandidates,
+        overflow_count: Math.max(0, totalCandidates - MAX_INCLUDED_SIGNALS_PER_BRIEF),
       };
 
       return c.json({ ok: true, data } satisfies DOResult<CompiledBriefData>);
