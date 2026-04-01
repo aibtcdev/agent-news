@@ -66,6 +66,14 @@ type SeedPayload = {
     created_at: string;
     position?: number;
   }>;
+  briefs?: Array<{
+    date: string;
+    text?: string;
+    json_data?: string;
+    compiled_at: string;
+    inscription_id?: string | null;
+    inscribed_txid?: string | null;
+  }>;
   corrections?: Array<{
     id: string;
     signal_id: string;
@@ -190,12 +198,16 @@ describe("brief_inclusions: weight x" + SCORING_WEIGHTS.brief_inclusions, () => 
       // brief_signals looks up btc_address from signals table via signal_id,
       // so we need signals to exist for the FK lookup. Status doesn't matter here.
       signals: [
-        { id: signalId1, beat_slug: "bitcoin-macro", btc_address: ADDR_BRIEF, headline: "Brief signal 1", created_at: ts },
-        { id: signalId2, beat_slug: "bitcoin-macro", btc_address: ADDR_BRIEF, headline: "Brief signal 2", created_at: recentTs(4) },
+        { id: signalId1, beat_slug: "agent-economy", btc_address: ADDR_BRIEF, headline: "Brief signal 1", created_at: ts },
+        { id: signalId2, beat_slug: "agent-economy", btc_address: ADDR_BRIEF, headline: "Brief signal 2", created_at: recentTs(4) },
       ],
       brief_signals: [
         { brief_date: "2026-03-20", signal_id: signalId1, btc_address: ADDR_BRIEF, created_at: ts },
         { brief_date: "2026-03-21", signal_id: signalId2, btc_address: ADDR_BRIEF, created_at: recentTs(4) },
+      ],
+      briefs: [
+        { date: "2026-03-20", compiled_at: ts, inscription_id: "brief-inscription-001", inscribed_txid: "brief-txid-001" },
+        { date: "2026-03-21", compiled_at: recentTs(4), inscription_id: "brief-inscription-002", inscribed_txid: "brief-txid-002" },
       ],
     });
 
@@ -221,9 +233,9 @@ describe("signal_count: weight x" + SCORING_WEIGHTS.signal_count, () => {
 
     await seed({
       signals: [
-        { id: "sig-count-001", beat_slug: "bitcoin-macro", btc_address: ADDR_SIG, headline: "Signal 1", created_at: ts1 },
-        { id: "sig-count-002", beat_slug: "bitcoin-macro", btc_address: ADDR_SIG, headline: "Signal 2", created_at: ts2 },
-        { id: "sig-count-003", beat_slug: "bitcoin-macro", btc_address: ADDR_SIG, headline: "Signal 3", created_at: ts3 },
+        { id: "sig-count-001", beat_slug: "agent-economy", btc_address: ADDR_SIG, headline: "Signal 1", created_at: ts1 },
+        { id: "sig-count-002", beat_slug: "agent-economy", btc_address: ADDR_SIG, headline: "Signal 2", created_at: ts2 },
+        { id: "sig-count-003", beat_slug: "agent-economy", btc_address: ADDR_SIG, headline: "Signal 3", created_at: ts3 },
       ],
     });
 
@@ -245,7 +257,7 @@ describe("current_streak: weight x" + SCORING_WEIGHTS.current_streak, () => {
 
     await seed({
       signals: [
-        { id: "streak-signal-001", beat_slug: "bitcoin-macro", btc_address: ADDR_STREAK, headline: "Streak signal", created_at: ts },
+        { id: "streak-signal-001", beat_slug: "agent-economy", btc_address: ADDR_STREAK, headline: "Streak signal", created_at: ts },
       ],
       streaks: [
         {
@@ -280,9 +292,9 @@ describe("days_active: weight x" + SCORING_WEIGHTS.days_active, () => {
 
     await seed({
       signals: [
-        { id: "days-signal-001", beat_slug: "bitcoin-macro", btc_address: ADDR_DAYS, headline: "Day 1 signal", created_at: ts1 },
-        { id: "days-signal-002", beat_slug: "bitcoin-macro", btc_address: ADDR_DAYS, headline: "Day 2 signal", created_at: ts2 },
-        { id: "days-signal-003", beat_slug: "bitcoin-macro", btc_address: ADDR_DAYS, headline: "Day 3 signal", created_at: ts3 },
+        { id: "days-signal-001", beat_slug: "agent-economy", btc_address: ADDR_DAYS, headline: "Day 1 signal", created_at: ts1 },
+        { id: "days-signal-002", beat_slug: "agent-economy", btc_address: ADDR_DAYS, headline: "Day 2 signal", created_at: ts2 },
+        { id: "days-signal-003", beat_slug: "agent-economy", btc_address: ADDR_DAYS, headline: "Day 3 signal", created_at: ts3 },
       ],
     });
 
@@ -308,9 +320,9 @@ describe("approved_corrections: weight x" + SCORING_WEIGHTS.approved_corrections
     await seed({
       signals: [
         // Signal owned by ADDR_CORR_SIG — referenced by the corrections
-        { id: "corrsig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_CORR_SIG, headline: "Signal to correct", created_at: ts },
+        { id: "corrsig-001", beat_slug: "agent-economy", btc_address: ADDR_CORR_SIG, headline: "Signal to correct", created_at: ts },
         // Base signal for ADDR_CORR so it appears in the FROM subquery
-        { id: "corr-base-001", beat_slug: "bitcoin-macro", btc_address: ADDR_CORR, headline: "CORR base signal", created_at: ts },
+        { id: "corr-base-001", beat_slug: "agent-economy", btc_address: ADDR_CORR, headline: "CORR base signal", created_at: ts },
       ],
       // ADDR_CORR files corrections against ADDR_CORR_SIG's signal
       corrections: [
@@ -338,7 +350,7 @@ describe("referral_credits: weight x" + SCORING_WEIGHTS.referral_credits, () => 
 
     await seed({
       signals: [
-        { id: "ref-base-001", beat_slug: "bitcoin-macro", btc_address: ADDR_REF, headline: "Ref base signal", created_at: ts },
+        { id: "ref-base-001", beat_slug: "agent-economy", btc_address: ADDR_REF, headline: "Ref base signal", created_at: ts },
       ],
       referral_credits: [
         { id: "ref-cred-001", scout_address: ADDR_REF, recruit_address: ADDR_REF_REC + "1", credited_at: ts, created_at: ts },
@@ -370,9 +382,9 @@ describe("edge case: same-day multi-signals count as 1 days_active", () => {
 
     await seed({
       signals: [
-        { id: "sameday-001", beat_slug: "bitcoin-macro", btc_address: ADDR_SAMEDAY, headline: "Morning signal", created_at: ts1 },
-        { id: "sameday-002", beat_slug: "bitcoin-macro", btc_address: ADDR_SAMEDAY, headline: "Noon signal", created_at: ts2 },
-        { id: "sameday-003", beat_slug: "bitcoin-macro", btc_address: ADDR_SAMEDAY, headline: "Evening signal", created_at: ts3 },
+        { id: "sameday-001", beat_slug: "agent-economy", btc_address: ADDR_SAMEDAY, headline: "Morning signal", created_at: ts1 },
+        { id: "sameday-002", beat_slug: "agent-economy", btc_address: ADDR_SAMEDAY, headline: "Noon signal", created_at: ts2 },
+        { id: "sameday-003", beat_slug: "agent-economy", btc_address: ADDR_SAMEDAY, headline: "Evening signal", created_at: ts3 },
       ],
     });
 
@@ -391,10 +403,10 @@ describe("edge case: correction signals excluded from signal_count", () => {
     await seed({
       signals: [
         // One regular signal (correction_of: null) → counts in signal_count
-        { id: "excl-normal-001", beat_slug: "bitcoin-macro", btc_address: ADDR_EXCL, headline: "Normal signal", created_at: ts, correction_of: null },
+        { id: "excl-normal-001", beat_slug: "agent-economy", btc_address: ADDR_EXCL, headline: "Normal signal", created_at: ts, correction_of: null },
         // Two correction signals (correction_of set) → excluded from signal_count AND from FROM clause
-        { id: "excl-corr-001", beat_slug: "bitcoin-macro", btc_address: ADDR_EXCL, headline: "Correction 1", created_at: recentTs(3), correction_of: "some-original-id" },
-        { id: "excl-corr-002", beat_slug: "bitcoin-macro", btc_address: ADDR_EXCL, headline: "Correction 2", created_at: recentTs(6), correction_of: "some-original-id" },
+        { id: "excl-corr-001", beat_slug: "agent-economy", btc_address: ADDR_EXCL, headline: "Correction 1", created_at: recentTs(3), correction_of: "some-original-id" },
+        { id: "excl-corr-002", beat_slug: "agent-economy", btc_address: ADDR_EXCL, headline: "Correction 2", created_at: recentTs(6), correction_of: "some-original-id" },
       ],
     });
 
@@ -415,7 +427,7 @@ describe("edge case: referral credited_at outside 30-day window not counted", ()
 
     await seed({
       signals: [
-        { id: "refout-base-001", beat_slug: "bitcoin-macro", btc_address: ADDR_REFOUT, headline: "Refout base signal", created_at: ts },
+        { id: "refout-base-001", beat_slug: "agent-economy", btc_address: ADDR_REFOUT, headline: "Refout base signal", created_at: ts },
       ],
       referral_credits: [
         // Inside window — counts
@@ -438,7 +450,7 @@ describe("edge case: 30-day boundary — signal just inside window counts", () =
 
     await seed({
       signals: [
-        { id: "bndin-signal-001", beat_slug: "bitcoin-macro", btc_address: ADDR_BND_IN, headline: "Boundary inside signal", created_at: ts },
+        { id: "bndin-signal-001", beat_slug: "agent-economy", btc_address: ADDR_BND_IN, headline: "Boundary inside signal", created_at: ts },
       ],
     });
 
@@ -455,7 +467,7 @@ describe("edge case: 30-day boundary — signal just outside window not counted"
 
     await seed({
       signals: [
-        { id: "bndout-signal-001", beat_slug: "bitcoin-macro", btc_address: ADDR_BND_OUT, headline: "Boundary outside signal", created_at: ts },
+        { id: "bndout-signal-001", beat_slug: "agent-economy", btc_address: ADDR_BND_OUT, headline: "Boundary outside signal", created_at: ts },
       ],
     });
 
@@ -476,8 +488,8 @@ describe("edge case: two scouts with identical raw values produce identical scor
 
     await seed({
       signals: [
-        { id: "twin-sig-a-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TWIN_A, headline: "Twin A signal", created_at: ts },
-        { id: "twin-sig-b-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TWIN_B, headline: "Twin B signal", created_at: ts },
+        { id: "twin-sig-a-001", beat_slug: "agent-economy", btc_address: ADDR_TWIN_A, headline: "Twin A signal", created_at: ts },
+        { id: "twin-sig-b-001", beat_slug: "agent-economy", btc_address: ADDR_TWIN_B, headline: "Twin B signal", created_at: ts },
       ],
       referral_credits: [
         { id: "twin-ref-a-001", scout_address: ADDR_TWIN_A, recruit_address: ADDR_TWIN_RA, credited_at: ts, created_at: ts },
@@ -512,10 +524,10 @@ describe("tiebreak: same score, higher current_streak ranks first", () => {
 
     await seed({
       signals: [
-        { id: "tb-stk-winner-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_STK_WINNER, headline: "STK winner signal", created_at: ts },
-        { id: "tb-stk-loser-sig-001",  beat_slug: "bitcoin-macro", btc_address: ADDR_TB_STK_LOSER,  headline: "STK loser base signal", created_at: ts },
+        { id: "tb-stk-winner-sig-001", beat_slug: "agent-economy", btc_address: ADDR_TB_STK_WINNER, headline: "STK winner signal", created_at: ts },
+        { id: "tb-stk-loser-sig-001",  beat_slug: "agent-economy", btc_address: ADDR_TB_STK_LOSER,  headline: "STK loser base signal", created_at: ts },
         // STK_LOSER files a correction against this signal
-        { id: "tb-stk-corrsig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_CORR_SIG, headline: "Correctable signal", created_at: ts },
+        { id: "tb-stk-corrsig-001", beat_slug: "agent-economy", btc_address: ADDR_TB_CORR_SIG, headline: "Correctable signal", created_at: ts },
       ],
       streaks: [
         { btc_address: ADDR_TB_STK_WINNER, current_streak: 5, longest_streak: 5, last_signal_date: ts.slice(0, 10), total_signals: 1 },
@@ -558,8 +570,8 @@ describe("tiebreak: same score + streak, earlier first signal ranks first", () =
 
     await seed({
       signals: [
-        { id: "tb-ten-winner-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_TEN_WINNER, headline: "TEN winner signal (older)", created_at: tsOld },
-        { id: "tb-ten-loser-sig-001",  beat_slug: "bitcoin-macro", btc_address: ADDR_TB_TEN_LOSER,  headline: "TEN loser signal (newer)", created_at: tsNew },
+        { id: "tb-ten-winner-sig-001", beat_slug: "agent-economy", btc_address: ADDR_TB_TEN_WINNER, headline: "TEN winner signal (older)", created_at: tsOld },
+        { id: "tb-ten-loser-sig-001",  beat_slug: "agent-economy", btc_address: ADDR_TB_TEN_LOSER,  headline: "TEN loser signal (newer)", created_at: tsNew },
       ],
     });
 
@@ -590,8 +602,8 @@ describe("tiebreak: same score + streak + tenure → alphabetical btc_address", 
 
     await seed({
       signals: [
-        { id: "tb-alp-a-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_ALP_A, headline: "Alpha A signal", created_at: ts },
-        { id: "tb-alp-b-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_TB_ALP_B, headline: "Alpha B signal", created_at: ts },
+        { id: "tb-alp-a-sig-001", beat_slug: "agent-economy", btc_address: ADDR_TB_ALP_A, headline: "Alpha A signal", created_at: ts },
+        { id: "tb-alp-b-sig-001", beat_slug: "agent-economy", btc_address: ADDR_TB_ALP_B, headline: "Alpha B signal", created_at: ts },
       ],
     });
 
@@ -634,17 +646,22 @@ describe("combined: all scoring components sum to the correct total", () => {
 
     await seed({
       signals: [
-        { id: signalId1, beat_slug: "bitcoin-macro", btc_address: ADDR_ALL, headline: "All component signal 1", created_at: ts },
-        { id: signalId2, beat_slug: "bitcoin-macro", btc_address: ADDR_ALL, headline: "All component signal 2", created_at: ts2 },
-        { id: signalId3, beat_slug: "bitcoin-macro", btc_address: ADDR_ALL, headline: "All component signal 3", created_at: ts3 },
-        { id: signalId4, beat_slug: "bitcoin-macro", btc_address: ADDR_ALL, headline: "All component signal 4", created_at: recentTs(2) },
+        { id: signalId1, beat_slug: "agent-economy", btc_address: ADDR_ALL, headline: "All component signal 1", created_at: ts },
+        { id: signalId2, beat_slug: "agent-economy", btc_address: ADDR_ALL, headline: "All component signal 2", created_at: ts2 },
+        { id: signalId3, beat_slug: "agent-economy", btc_address: ADDR_ALL, headline: "All component signal 3", created_at: ts3 },
+        { id: signalId4, beat_slug: "agent-economy", btc_address: ADDR_ALL, headline: "All component signal 4", created_at: recentTs(2) },
         // Signal owned by ADDR_ALL_SIG for corrections to reference
-        { id: "all-corrsig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_ALL_SIG, headline: "Signal for correction", created_at: ts },
+        { id: "all-corrsig-001", beat_slug: "agent-economy", btc_address: ADDR_ALL_SIG, headline: "Signal for correction", created_at: ts },
       ],
       brief_signals: [
         { brief_date: "2026-03-10", signal_id: signalId1, btc_address: ADDR_ALL, created_at: ts },
         { brief_date: "2026-03-11", signal_id: signalId2, btc_address: ADDR_ALL, created_at: ts2 },
         { brief_date: "2026-03-12", signal_id: signalId3, btc_address: ADDR_ALL, created_at: ts3 },
+      ],
+      briefs: [
+        { date: "2026-03-10", compiled_at: ts, inscription_id: "all-brief-inscription-001", inscribed_txid: "all-brief-txid-001" },
+        { date: "2026-03-11", compiled_at: ts2, inscription_id: "all-brief-inscription-002", inscribed_txid: "all-brief-txid-002" },
+        { date: "2026-03-12", compiled_at: ts3, inscription_id: "all-brief-inscription-003", inscribed_txid: "all-brief-txid-003" },
       ],
       corrections: [
         { id: "all-corr-001", signal_id: "all-corrsig-001", btc_address: ADDR_ALL, status: "approved", created_at: ts },
@@ -705,9 +722,9 @@ describe("reset epoch: signals before reset are excluded from scoring", () => {
     await seed({
       signals: [
         // Pre-reset signal — should be excluded from scoring
-        { id: "reset-pre-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_RESET_PRE, headline: "Pre-reset signal", created_at: preResetTs },
+        { id: "reset-pre-sig-001", beat_slug: "agent-economy", btc_address: ADDR_RESET_PRE, headline: "Pre-reset signal", created_at: preResetTs },
         // Post-reset signal — should be counted
-        { id: "reset-post-sig-001", beat_slug: "bitcoin-macro", btc_address: ADDR_RESET_POST, headline: "Post-reset signal", created_at: postResetTs },
+        { id: "reset-post-sig-001", beat_slug: "agent-economy", btc_address: ADDR_RESET_POST, headline: "Post-reset signal", created_at: postResetTs },
       ],
       leaderboard_snapshots: [
         { id: "reset-snapshot-001", snapshot_type: "launch_reset", snapshot_data: "[]", created_at: resetTs },

@@ -8,11 +8,11 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, SignalStatus } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { reviewSignal, listSignals, listFrontPagePage, listFrontPage } from "../lib/do-client";
+import { reviewSignal, listFrontPagePage, listFrontPage } from "../lib/do-client";
 import { validateDateFormat } from "../lib/validators";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
-import { REVIEW_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
+import { REVIEW_RATE_LIMIT, REVIEWABLE_SIGNAL_STATUSES } from "../lib/constants";
 
 const signalReviewRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -45,9 +45,9 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     return c.json({ error: "Invalid BTC address format" }, 400);
   }
 
-  if (!(SIGNAL_STATUSES as readonly string[]).includes(status as string)) {
+  if (!(REVIEWABLE_SIGNAL_STATUSES as readonly string[]).includes(status as string)) {
     return c.json({
-      error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}`,
+      error: `Invalid status. Must be one of: ${REVIEWABLE_SIGNAL_STATUSES.join(", ")}. "brief_included" is compile-owned.`,
     }, 400);
   }
 
@@ -112,8 +112,8 @@ signalReviewRouter.get("/api/front-page", async (c) => {
       return c.json({ error: "Invalid 'before' param (YYYY-MM-DD required)" }, 400);
     }
     // Validate it parses to a real date (rejects e.g. 2026-99-99)
-    const parsed = new Date(before + "T12:00:00Z");
-    if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== before) {
+    const parsed = new Date(`${before}T12:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== before) {
       return c.json({ error: "Invalid 'before' param (not a real date)" }, 400);
     }
 

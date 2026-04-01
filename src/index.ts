@@ -164,6 +164,17 @@ app.post("/api/test-seed", async (c) => {
   return c.json(data, res.status as 200 | 400 | 404);
 });
 
+app.get("/api/test/brief-signals/:date", async (c) => {
+  if (c.env.ENVIRONMENT !== "test" && c.env.ENVIRONMENT !== "development") {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const id = c.env.NEWS_DO.idFromName("news-singleton");
+  const stub = c.env.NEWS_DO.get(id);
+  const res = await stub.fetch(`https://do/brief-signals/${encodeURIComponent(c.req.param("date"))}`);
+  const data = await res.json();
+  return c.json(data, res.status as 200 | 400 | 404);
+});
+
 // Health endpoint (available at both /health and /api/health)
 function healthHandler(c: AppContext) {
   return c.json({

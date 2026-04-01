@@ -1,10 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL } from "./schema";
 
 // ── State machine transition maps ──
@@ -14,9 +14,10 @@ import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEA
 export const SIGNAL_VALID_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
   submitted: ["in_review", "approved", "rejected"],
   in_review: ["approved", "rejected"],
-  approved: ["brief_included", "rejected"],
+  approved: ["replaced", "rejected", "brief_included"],
+  replaced: ["approved", "rejected"],
   rejected: ["approved"],
-  brief_included: ["rejected"],
+  brief_included: ["replaced", "rejected"],
 };
 
 /** Valid editorial transitions for classifieds: pending_review → approved/rejected */
@@ -49,6 +50,11 @@ interface RawSignalRow {
   disclosure: string;
 }
 
+interface RawCompiledSignalRow extends CompiledSignalRow {
+  reviewed_at: string | null;
+  position?: number | null;
+}
+
 /**
  * Convert a raw SQL row (with tags_csv from GROUP_CONCAT) into a Signal object.
  * Casting via RawSignalRow gives TypeScript visibility into the row shape and
@@ -73,6 +79,38 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     reviewed_at: raw.reviewed_at ?? null,
     disclosure: raw.disclosure ?? "",
   };
+}
+
+function rowToCompiledSignal(row: Record<string, unknown>): RawCompiledSignalRow {
+  const raw = row as unknown as RawCompiledSignalRow;
+  return {
+    id: raw.id,
+    beat_slug: raw.beat_slug,
+    btc_address: raw.btc_address,
+    headline: raw.headline,
+    body: raw.body ?? null,
+    sources: raw.sources ?? "[]",
+    created_at: raw.created_at,
+    correction_of: raw.correction_of ?? null,
+    beat_name: raw.beat_name,
+    beat_color: raw.beat_color ?? null,
+    current_streak: raw.current_streak ?? null,
+    longest_streak: raw.longest_streak ?? null,
+    total_signals: raw.total_signals ?? null,
+    reviewed_at: raw.reviewed_at ?? null,
+    position: raw.position ?? null,
+  };
+}
+
+function buildIncludedSignalMetadata(signals: CompiledSignalRow[]): IncludedSignalMetadata[] {
+  return signals.map((signal, position) => ({
+    signal_id: signal.id,
+    position,
+    btc_address: signal.btc_address,
+    beat_slug: signal.beat_slug,
+    headline: signal.headline ?? null,
+    created_at: signal.created_at,
+  }));
 }
 
 /**
@@ -378,11 +416,15 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Only the designated Publisher can perform this action" } satisfies DOResult<Signal>, 403);
       }
 
-      // Validate status
-      if (!status || !(SIGNAL_STATUSES as readonly string[]).includes(status as string)) {
+      // Validate status. brief_included is backend-owned and cannot be set manually.
+      if (
+        !status ||
+        !(SIGNAL_STATUSES as readonly string[]).includes(status as string) ||
+        status === "brief_included"
+      ) {
         return c.json({
           ok: false,
-          error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}`,
+          error: 'Invalid status. Must be one of: submitted, in_review, approved, replaced, rejected. "brief_included" is compile-owned.',
         } satisfies DOResult<Signal>, 400);
       }
 
@@ -410,10 +452,14 @@ export class NewsDO extends DurableObject<Env> {
         } satisfies DOResult<Signal>, 400);
       }
 
-      // Pre-inscription retraction gate: brief_included → rejected is only allowed
+      // Pre-inscription subtraction gate: brief_included may only be demoted to
+      // replaced/rejected before the associated brief is inscribed.
       // if the brief containing this signal has NOT been inscribed yet.
       // Post-inscription, the on-chain record is final — use additive corrections instead.
-      if (currentStatus === "brief_included" && newStatus === "rejected") {
+      if (
+        currentStatus === "brief_included" &&
+        (newStatus === "replaced" || newStatus === "rejected")
+      ) {
         const inscriptionRows = this.ctx.storage.sql
           .exec(
             `SELECT b.inscription_id
@@ -443,9 +489,13 @@ export class NewsDO extends DurableObject<Env> {
         id
       );
 
-      // Soft-archive brief_signals and void unpaid earnings when retracting a brief_included signal.
+      // Soft-archive brief_signals and void unpaid earnings when removing a
+      // brief_included signal from the active roster before inscription.
       // Records are preserved for audit — retracted_at/voided_at timestamps mark them inactive.
-      if (currentStatus === "brief_included" && newStatus === "rejected") {
+      if (
+        currentStatus === "brief_included" &&
+        (newStatus === "replaced" || newStatus === "rejected")
+      ) {
         this.ctx.storage.sql.exec(
           "UPDATE brief_signals SET retracted_at = ? WHERE signal_id = ? AND retracted_at IS NULL",
           now, id
@@ -1153,6 +1203,7 @@ export class NewsDO extends DurableObject<Env> {
         submitted: 0,
         in_review: 0,
         approved: 0,
+        replaced: 0,
         rejected: 0,
         brief_included: 0,
       };
@@ -1562,27 +1613,74 @@ export class NewsDO extends DurableObject<Env> {
       const dayStart = getPacificDayStartUTC(date);
       const dayEnd = getPacificDayStartUTC(getNextDate(date));
 
-      const rows = this.ctx.storage.sql
+      const existingIncludedRows = this.ctx.storage.sql
         .exec(
           `SELECT s.id, s.beat_slug, s.btc_address, s.headline, s.body, s.sources,
-                  s.created_at, s.correction_of,
+                  s.created_at, s.correction_of, s.reviewed_at,
+                  b.name as beat_name, b.color as beat_color,
+                  st.current_streak, st.longest_streak, st.total_signals,
+                  bs.position
+           FROM brief_signals bs
+           JOIN signals s ON bs.signal_id = s.id
+           JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN streaks st ON s.btc_address = st.btc_address
+           WHERE bs.brief_date = ?1
+             AND bs.retracted_at IS NULL
+             AND s.created_at >= ?2
+             AND s.created_at < ?3
+             AND s.status IN ('approved', 'brief_included')
+           ORDER BY bs.position ASC, s.id ASC`,
+          date,
+          dayStart,
+          dayEnd
+        )
+        .toArray()
+        .map((row) => rowToCompiledSignal(row as Record<string, unknown>));
+
+      const approvedRows = this.ctx.storage.sql
+        .exec(
+          `SELECT s.id, s.beat_slug, s.btc_address, s.headline, s.body, s.sources,
+                  s.created_at, s.correction_of, s.reviewed_at,
                   b.name as beat_name, b.color as beat_color,
                   st.current_streak, st.longest_streak, st.total_signals
            FROM signals s
            JOIN beats b ON s.beat_slug = b.slug
            LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE s.created_at >= ? AND s.created_at < ? AND s.status IN ('approved', 'brief_included')
-           ORDER BY s.beat_slug, s.created_at DESC`,
+           WHERE s.created_at >= ?1
+             AND s.created_at < ?2
+             AND s.status = 'approved'
+           ORDER BY s.reviewed_at DESC, s.created_at DESC, s.id ASC`,
           dayStart,
           dayEnd
         )
-        .toArray();
+        .toArray()
+        .map((row) => rowToCompiledSignal(row as Record<string, unknown>));
+
+      const candidateRows: CompiledSignalRow[] = [];
+      const seen = new Set<string>();
+      for (const row of existingIncludedRows) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        candidateRows.push(row);
+      }
+      for (const row of approvedRows) {
+        if (seen.has(row.id)) continue;
+        seen.add(row.id);
+        candidateRows.push(row);
+      }
+
+      const selectedSignals = candidateRows.slice(0, MAX_INCLUDED_SIGNALS_PER_BRIEF);
+      const includedSignals = buildIncludedSignalMetadata(selectedSignals);
 
       const compiledAt = now.toISOString();
       const data: CompiledBriefData = {
         date,
         compiled_at: compiledAt,
-        signals: rows as unknown as CompiledBriefData["signals"],
+        signals: selectedSignals,
+        included_signal_ids: includedSignals.map((signal) => signal.signal_id),
+        included_signals: includedSignals,
+        candidate_count: candidateRows.length,
+        overflow_count: Math.max(0, candidateRows.length - selectedSignals.length),
       };
 
       return c.json({ ok: true, data } satisfies DOResult<CompiledBriefData>);
@@ -2451,7 +2549,7 @@ export class NewsDO extends DurableObject<Env> {
     // -------------------------------------------------------------------------
 
     // POST /payouts/brief-inclusion — record a payout for each signal in a brief
-    // Idempotent: INSERT OR IGNORE skips duplicate (reason, reference_id) pairs.
+    // Reconciles unpaid brief_inclusion earnings to the selected roster.
     this.router.post("/payouts/brief-inclusion", async (c) => {
       const body = await parseRequiredJson(c);
       if (!body) {
@@ -2480,35 +2578,120 @@ export class NewsDO extends DurableObject<Env> {
           400
         );
       }
+      if (validIds.length > MAX_INCLUDED_SIGNALS_PER_BRIEF) {
+        return c.json(
+          { ok: false, error: `signal_ids may contain at most ${MAX_INCLUDED_SIGNALS_PER_BRIEF} selected signals` } satisfies DOResult<unknown>,
+          400
+        );
+      }
 
       const now = new Date().toISOString();
       let paid = 0;
       let skipped = 0;
+      let revived = 0;
+      let voided = 0;
 
-      for (const signalId of validIds) {
-        // Look up correspondent for this signal
-        const sigRows = this.ctx.storage.sql
-          .exec("SELECT btc_address FROM signals WHERE id = ?", signalId)
-          .toArray();
-        if (sigRows.length === 0) continue;
+      const dayStart = getPacificDayStartUTC(brief_date as string);
+      const dayEnd = getPacificDayStartUTC(getNextDate(brief_date as string));
 
-        const btcAddress = (sigRows[0] as Record<string, unknown>).btc_address as string;
+      this.ctx.storage.transactionSync(() => {
+        const selectedSet = new Set(validIds);
 
-        // Single INSERT OR IGNORE — the UNIQUE index handles dedup, rowsWritten tells us the outcome
-        const cursor = this.ctx.storage.sql.exec(
-          `INSERT OR IGNORE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, ?, 'brief_inclusion', ?, ?)`,
-          generateId(),
-          btcAddress,
-          BRIEF_INCLUSION_PAYOUT_SATS,
-          signalId,
-          now
+        const voidCursor = this.ctx.storage.sql.exec(
+          `UPDATE earnings
+           SET voided_at = ?1
+           WHERE reason = 'brief_inclusion'
+             AND payout_txid IS NULL
+             AND voided_at IS NULL
+             AND reference_id IN (
+               SELECT id FROM signals
+               WHERE created_at >= ?2 AND created_at < ?3
+             )
+             AND reference_id NOT IN (
+               SELECT signal_id
+               FROM brief_signals
+               WHERE brief_date = ?4 AND retracted_at IS NULL
+             )`,
+          now,
+          dayStart,
+          dayEnd,
+          brief_date as string
         );
-        if (cursor.rowsWritten > 0) paid++; else skipped++;
-      }
+        voided = voidCursor.rowsWritten;
+
+        for (const signalId of validIds) {
+          const sigRows = this.ctx.storage.sql
+            .exec(
+              `SELECT btc_address
+               FROM signals
+               WHERE id = ?1
+                 AND created_at >= ?2
+                 AND created_at < ?3`,
+              signalId,
+              dayStart,
+              dayEnd
+            )
+            .toArray();
+          if (sigRows.length === 0) {
+            skipped++;
+            continue;
+          }
+
+          const btcAddress = (sigRows[0] as Record<string, unknown>).btc_address as string;
+
+          const revivedCursor = this.ctx.storage.sql.exec(
+            `UPDATE earnings
+             SET voided_at = NULL
+             WHERE reason = 'brief_inclusion'
+               AND reference_id = ?1
+               AND payout_txid IS NULL
+               AND voided_at IS NOT NULL`,
+            signalId
+          );
+          if (revivedCursor.rowsWritten > 0) {
+            revived += revivedCursor.rowsWritten;
+            continue;
+          }
+
+          const cursor = this.ctx.storage.sql.exec(
+            `INSERT OR IGNORE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
+             VALUES (?, ?, ?, 'brief_inclusion', ?, ?)`,
+            generateId(),
+            btcAddress,
+            BRIEF_INCLUSION_PAYOUT_SATS,
+            signalId,
+            now
+          );
+          if (cursor.rowsWritten > 0) paid++;
+          else skipped++;
+        }
+
+        // Defensive cleanup if the caller passed ids that are no longer active after
+        // dedupe/order reconciliation. This keeps active earnings aligned to roster rows.
+        if (selectedSet.size > 0) {
+          const placeholders = Array.from(selectedSet).map(() => "?").join(", ");
+          const params: unknown[] = [now, brief_date as string, ...selectedSet];
+          const extraVoidCursor = this.ctx.storage.sql.exec(
+            `UPDATE earnings
+             SET voided_at = ?1
+             WHERE reason = 'brief_inclusion'
+               AND payout_txid IS NULL
+               AND voided_at IS NULL
+               AND reference_id IN (
+                 SELECT signal_id
+                 FROM brief_signals
+                 WHERE brief_date = ?2
+                   AND retracted_at IS NULL
+                   AND signal_id NOT IN (${placeholders})
+               )`,
+            ...params
+          );
+          voided += extraVoidCursor.rowsWritten;
+        }
+      });
 
       return c.json(
-        { ok: true, data: { brief_date: brief_date as string, paid, skipped } } satisfies DOResult<unknown>,
+        { ok: true, data: { brief_date: brief_date as string, paid, skipped, revived, voided } } satisfies DOResult<unknown>,
         201
       );
     });
@@ -2615,7 +2798,7 @@ export class NewsDO extends DurableObject<Env> {
     // Brief Signals — track which signals are included in each brief
     // -------------------------------------------------------------------------
 
-    // POST /brief-signals — record signals included in a brief
+    // POST /brief-signals — reconcile signals included in a brief
     this.router.post("/brief-signals", async (c) => {
       const body = await parseRequiredJson(c);
       if (!body) {
@@ -2626,48 +2809,160 @@ export class NewsDO extends DurableObject<Env> {
       if (!brief_date || !Array.isArray(signal_ids) || signal_ids.length === 0) {
         return c.json({ ok: false, error: "Missing required fields: brief_date, signal_ids (non-empty array)" } satisfies DOResult<unknown>, 400);
       }
+      if (!validateDateFormat(brief_date as string)) {
+        return c.json({ ok: false, error: "Missing or invalid field: brief_date (expected YYYY-MM-DD format)" } satisfies DOResult<unknown>, 400);
+      }
+
+      const selectedIds = [...new Set((signal_ids as unknown[]).filter((id): id is string => typeof id === "string" && id.length > 0))];
+      if (selectedIds.length === 0) {
+        return c.json({ ok: false, error: "signal_ids must contain at least one non-empty string" } satisfies DOResult<unknown>, 400);
+      }
+      if (selectedIds.length > MAX_INCLUDED_SIGNALS_PER_BRIEF) {
+        return c.json(
+          { ok: false, error: `signal_ids may contain at most ${MAX_INCLUDED_SIGNALS_PER_BRIEF} selected signals` } satisfies DOResult<unknown>,
+          400
+        );
+      }
 
       const now = new Date().toISOString();
-      const inserted: BriefSignal[] = [];
+      const dayStart = getPacificDayStartUTC(brief_date as string);
+      const dayEnd = getPacificDayStartUTC(getNextDate(brief_date as string));
 
-      for (let i = 0; i < signal_ids.length; i++) {
-        const signalId = signal_ids[i] as string;
-        // Look up the signal's btc_address
+      const selectedSignals: BriefSignal[] = [];
+      for (let i = 0; i < selectedIds.length; i++) {
+        const signalId = selectedIds[i];
         const sigRows = this.ctx.storage.sql
-          .exec("SELECT btc_address FROM signals WHERE id = ?", signalId)
+          .exec(
+            `SELECT id, btc_address, status, created_at
+             FROM signals
+             WHERE id = ?1
+               AND created_at >= ?2
+               AND created_at < ?3`,
+            signalId,
+            dayStart,
+            dayEnd
+          )
           .toArray();
-        if (sigRows.length === 0) continue;
-
-        const btcAddress = (sigRows[0] as Record<string, unknown>).btc_address as string;
-
-        // Insert (idempotent — ON CONFLICT ignore)
-        this.ctx.storage.sql.exec(
-          `INSERT OR IGNORE INTO brief_signals (brief_date, signal_id, btc_address, position, created_at)
-           VALUES (?, ?, ?, ?, ?)`,
-          brief_date as string,
-          signalId,
-          btcAddress,
-          i,
-          now
-        );
-
-        // Update signal status to brief_included (only if currently approved)
-        this.ctx.storage.sql.exec(
-          "UPDATE signals SET status = 'brief_included', updated_at = ? WHERE id = ? AND status = 'approved'",
-          now,
-          signalId
-        );
-
-        inserted.push({
+        if (sigRows.length === 0) {
+          return c.json(
+            { ok: false, error: `Signal "${signalId}" is not part of Pacific brief date ${brief_date as string}` } satisfies DOResult<unknown>,
+            400
+          );
+        }
+        const signalRow = sigRows[0] as { id: string; btc_address: string; status: SignalStatus; created_at: string };
+        if (signalRow.status !== "approved" && signalRow.status !== "brief_included") {
+          return c.json(
+            { ok: false, error: `Signal "${signalId}" is not compile-eligible from status "${signalRow.status}"` } satisfies DOResult<unknown>,
+            400
+          );
+        }
+        selectedSignals.push({
           brief_date: brief_date as string,
           signal_id: signalId,
-          btc_address: btcAddress,
+          btc_address: signalRow.btc_address,
           position: i,
           created_at: now,
         });
       }
 
-      return c.json({ ok: true, data: { brief_date, count: inserted.length, signals: inserted } } satisfies DOResult<unknown>, 201);
+      const activeRows = this.ctx.storage.sql
+        .exec(
+          `SELECT signal_id
+           FROM brief_signals
+           WHERE brief_date = ? AND retracted_at IS NULL
+           ORDER BY position ASC, signal_id ASC`,
+          brief_date as string
+        )
+        .toArray();
+      const activeIds = activeRows.map((row) => (row as { signal_id: string }).signal_id);
+      const activeSet = new Set(activeIds);
+      const selectedSet = new Set(selectedIds);
+      const removedIds = activeIds.filter((id) => !selectedSet.has(id));
+
+      const briefRows = this.ctx.storage.sql
+        .exec("SELECT inscription_id FROM briefs WHERE date = ?", brief_date as string)
+        .toArray();
+      const inscriptionId = (briefRows[0] as { inscription_id?: string | null } | undefined)?.inscription_id ?? null;
+      if (inscriptionId && removedIds.length > 0) {
+        return c.json(
+          { ok: false, error: "Cannot remove included signals after the brief has been inscribed." } satisfies DOResult<unknown>,
+          409
+        );
+      }
+
+      const sameDayRows = this.ctx.storage.sql
+        .exec(
+          `SELECT id, status
+           FROM signals
+           WHERE created_at >= ?1
+             AND created_at < ?2
+             AND status IN ('approved', 'brief_included')`,
+          dayStart,
+          dayEnd
+        )
+        .toArray() as Array<{ id: string; status: SignalStatus }>;
+
+      this.ctx.storage.transactionSync(() => {
+        for (const signal of selectedSignals) {
+          this.ctx.storage.sql.exec(
+            `INSERT INTO brief_signals (brief_date, signal_id, btc_address, position, created_at, retracted_at)
+             VALUES (?, ?, ?, ?, ?, NULL)
+             ON CONFLICT(brief_date, signal_id) DO UPDATE SET
+               btc_address = excluded.btc_address,
+               position = excluded.position,
+               retracted_at = NULL`,
+            signal.brief_date,
+            signal.signal_id,
+            signal.btc_address,
+            signal.position,
+            now
+          );
+          this.ctx.storage.sql.exec(
+            "UPDATE signals SET status = 'brief_included', updated_at = ? WHERE id = ?",
+            now,
+            signal.signal_id
+          );
+        }
+
+        if (removedIds.length > 0) {
+          for (const signalId of removedIds) {
+            this.ctx.storage.sql.exec(
+              `UPDATE brief_signals
+               SET retracted_at = ?
+               WHERE brief_date = ? AND signal_id = ? AND retracted_at IS NULL`,
+              now,
+              brief_date as string,
+              signalId
+            );
+          }
+        }
+
+        for (const row of sameDayRows) {
+          if (selectedSet.has(row.id)) continue;
+          this.ctx.storage.sql.exec(
+            `UPDATE signals
+             SET status = 'replaced', updated_at = ?
+             WHERE id = ? AND status IN ('approved', 'brief_included')`,
+            now,
+            row.id
+          );
+        }
+
+        // If a previously active roster entry is selected again, ensure it is no
+        // longer treated as removed after conflict reactivation.
+        for (const signalId of selectedSet) {
+          if (!activeSet.has(signalId)) continue;
+          this.ctx.storage.sql.exec(
+            `UPDATE brief_signals
+             SET retracted_at = NULL
+             WHERE brief_date = ? AND signal_id = ?`,
+            brief_date as string,
+            signalId
+          );
+        }
+      });
+
+      return c.json({ ok: true, data: { brief_date, count: selectedSignals.length, signals: selectedSignals } } satisfies DOResult<unknown>, 201);
     });
 
     // GET /brief-signals/counts — brief inclusion counts per address (30-day rolling)
@@ -3370,8 +3665,8 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(
               `INSERT OR IGNORE INTO signals
                (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at,
-                correction_of, status, disclosure)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                correction_of, status, reviewed_at, publisher_feedback, disclosure)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               row.id as string,
               row.beat_slug as string,
               row.btc_address as string,
@@ -3382,6 +3677,8 @@ export class NewsDO extends DurableObject<Env> {
               row.created_at as string,
               (row.correction_of as string | null) ?? null,
               (row.status as string) ?? "submitted",
+              (row.reviewed_at as string | null) ?? null,
+              (row.publisher_feedback as string | null) ?? null,
               (row.disclosure as string) ?? ""
             );
             inserted.signals++;

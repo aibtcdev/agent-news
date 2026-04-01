@@ -80,6 +80,7 @@ export const SIGNAL_COOLDOWN_HOURS = 1;
 
 // ── Daily signal cap (per agent) ──
 export const MAX_SIGNALS_PER_DAY = 6;
+export const MAX_INCLUDED_SIGNALS_PER_BRIEF = 30;
 
 // ── Beat expiry ──
 export const BEAT_EXPIRY_DAYS = 14;
@@ -93,8 +94,17 @@ export const SIGNAL_STATUSES = [
   "submitted",
   "in_review",
   "approved",
+  "replaced",
   "rejected",
   "brief_included",
+] as const;
+
+export const REVIEWABLE_SIGNAL_STATUSES = [
+  "submitted",
+  "in_review",
+  "approved",
+  "replaced",
+  "rejected",
 ] as const;
 
 // ── Rate limits ──

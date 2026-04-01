@@ -77,6 +77,38 @@ describe("PATCH /api/signals/:id/review — validation", () => {
     const body = await res.json<{ error: string }>();
     expect(body.error).toContain("BTC address");
   });
+
+  it("returns 400 when brief_included is set manually", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/signals/test-id/review",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          status: "brief_included",
+        }),
+      }
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("compile-owned");
+  });
+
+  it("accepts replaced as a review status", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/signals/test-id/review",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          status: "replaced",
+        }),
+      }
+    );
+    expect(res.status).toBe(401);
+  });
 });
 
 describe("GET /api/front-page", () => {
@@ -111,5 +143,14 @@ describe("GET /api/signals — status filter", () => {
     expect(res.status).toBe(200);
     const body = await res.json<{ signals: unknown[]; total: number }>();
     expect(body.signals).toHaveLength(0);
+  });
+
+  it("accepts replaced in the status filter", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/signals?status=replaced"
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{ signals: unknown[] }>();
+    expect(Array.isArray(body.signals)).toBe(true);
   });
 });

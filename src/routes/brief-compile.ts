@@ -1,8 +1,9 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import type { Env, AppVariables, Source } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig, getClassifiedsRotation } from "../lib/do-client";
-import { CONFIG_PUBLISHER_ADDRESS, BRIEF_COMPILE_RATE_LIMIT } from "../lib/constants";
+import { CONFIG_PUBLISHER_ADDRESS, BRIEF_COMPILE_RATE_LIMIT, MAX_INCLUDED_SIGNALS_PER_BRIEF } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
 import { getPacificDate, formatPacificShort } from "../lib/helpers";
 import { validateBtcAddress, validateDateFormat } from "../lib/validators";
@@ -17,9 +18,10 @@ const compileRateLimit = createRateLimitMiddleware({
 
 const MIN_SIGNALS = 3;
 
-// POST /api/brief/compile — compile the daily brief via SQL JOIN, resolve agent names, save
-// BIP-322 auth required: btc_address in body is the compiler's identity
-briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
+async function handleBriefCompile(
+  c: Context<{ Bindings: Env; Variables: AppVariables }>,
+  options: { skipAuth?: boolean; authPath?: string } = {}
+) {
   let body: Record<string, unknown> = {};
   try {
     body = await c.req.json<Record<string, unknown>>();
@@ -40,27 +42,29 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     );
   }
 
-  const authResult = verifyAuth(
-    c.req.raw.headers,
-    btc_address as string,
-    "POST",
-    "/api/brief/compile"
-  );
-  if (!authResult.valid) {
-    return c.json({ error: authResult.error, code: authResult.code }, 401);
-  }
+  if (!options.skipAuth) {
+    const authResult = verifyAuth(
+      c.req.raw.headers,
+      btc_address as string,
+      "POST",
+      options.authPath ?? "/api/brief/compile"
+    );
+    if (!authResult.valid) {
+      return c.json({ error: authResult.error, code: authResult.code }, 401);
+    }
 
-  // Publisher gate: if a publisher is designated, only they may compile the brief
-  // Fail closed: if config lookup errors, deny the request rather than skipping the gate
-  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
-  try {
-    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
-  } catch {
-    return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
-  }
-  if (publisherConfig && publisherConfig.value) {
-    if ((btc_address as string).toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
-      return c.json({ error: "Only the designated Publisher can compile the daily brief" }, 403);
+    // Publisher gate: if a publisher is designated, only they may compile the brief
+    // Fail closed: if config lookup errors, deny the request rather than skipping the gate
+    let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
+    try {
+      publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+    } catch {
+      return c.json({ error: "Unable to verify publisher designation — try again later" }, 503);
+    }
+    if (publisherConfig?.value) {
+      if ((btc_address as string).toLowerCase().trim() !== publisherConfig.value.toLowerCase().trim()) {
+        return c.json({ error: "Only the designated Publisher can compile the daily brief" }, 403);
+      }
     }
   }
 
@@ -78,7 +82,7 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     return c.json({ error: compileResult.error ?? "Failed to compile brief data" }, 500);
   }
 
-  const { signals, compiled_at } = compileResult.data;
+  const { signals, compiled_at, included_signal_ids, included_signals, candidate_count, overflow_count } = compileResult.data;
 
   if (signals.length < MIN_SIGNALS) {
     return c.json(
@@ -120,9 +124,17 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     correction_of: string | null;
   }
 
-  // Group signals by beat slug (signals are already ordered by beat_slug, created_at DESC)
+  // Rendering order is separate from roster selection. Selection is determined
+  // in the DO, while brief display keeps a stable beat/time sort.
+  const renderSignals = [...signals].sort((a, b) => {
+    if (a.beat_slug !== b.beat_slug) return a.beat_slug.localeCompare(b.beat_slug);
+    if (a.created_at !== b.created_at) return b.created_at.localeCompare(a.created_at);
+    return a.id.localeCompare(b.id);
+  });
+
+  // Group selected signals by beat slug for rendering.
   const sectionsByBeat = new Map<string, BriefSection[]>();
-  for (const sig of signals) {
+  for (const sig of renderSignals) {
     const shortAddr = shortAddress(sig.btc_address);
     const displayName = nameMap.get(sig.btc_address)?.name ?? shortAddr;
     let sources: Source[] | null = null;
@@ -172,6 +184,14 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     date,
     compiled_at,
     summary,
+    included_signal_ids,
+    included_signals,
+    roster: {
+      max_signals: MAX_INCLUDED_SIGNALS_PER_BRIEF,
+      candidate_count,
+      selected_count: included_signal_ids.length,
+      overflow_count,
+    },
     sections: allSections,
   };
 
@@ -227,7 +247,24 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
   text += `https://aibtc.news\n`;
   text += `${divider}\n`;
 
-  // Save brief to the Durable Object
+  // Reconcile roster state before persisting the brief so backend-owned inclusion
+  // remains the source of truth for the saved artifact.
+  const signalIds = included_signal_ids;
+  let briefSignalsWarning: string | undefined;
+  if (signalIds.length > 0) {
+    const briefSignalsResult = await recordBriefSignals(c.env, date, signalIds);
+    if (!briefSignalsResult.ok) {
+      if (briefSignalsResult.status === 409) {
+        return c.json({ error: briefSignalsResult.error ?? "Brief roster is locked after inscription" }, 409);
+      }
+      const logger = c.get("logger");
+      logger.error("Failed to record brief signals", { date, error: briefSignalsResult.error });
+      briefSignalsWarning = `Failed to record brief_signals: ${briefSignalsResult.error ?? "unknown error"}. Signals remain in 'approved' state — retry compile to fix.`;
+    }
+  }
+
+  // Save the brief before payout side effects so a persistence failure does not
+  // leave new earnings behind without a matching saved artifact.
   const saveResult = await saveBrief(c.env, {
     date,
     text,
@@ -239,28 +276,23 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     return c.json({ error: saveResult.error ?? "Failed to save brief" }, 500);
   }
 
-  // Record which signals were included in this brief and transition them to brief_included
-  const signalIds = signals.map((s) => s.id);
-  let briefSignalsWarning: string | undefined;
-  if (signalIds.length > 0) {
-    const briefSignalsResult = await recordBriefSignals(c.env, date, signalIds);
-    if (!briefSignalsResult.ok) {
-      const logger = c.get("logger");
-      logger.error("Failed to record brief signals", { date, error: briefSignalsResult.error });
-      briefSignalsWarning = `Failed to record brief_signals: ${briefSignalsResult.error ?? "unknown error"}. Signals remain in 'approved' state — retry compile to fix.`;
-    }
-  }
-
   // Record brief-inclusion earnings for all included signals.
   // Best-effort: awaited but non-fatal — a failure here does not fail the compile request.
   // Double-pay prevention is enforced by the UNIQUE index on earnings(reason, reference_id).
   // Guard: skip payouts if brief_signals recording failed — signals haven't transitioned to
   // brief_included yet, so paying out would be premature. Retry the compile to fix both.
-  let payoutSummary: { paid: number; skipped: number } | undefined;
+  let payoutSummary:
+    | { paid: number; skipped: number; revived: number; voided: number }
+    | undefined;
   if (signalIds.length > 0 && !briefSignalsWarning) {
     const payoutResult = await recordBriefInclusionPayouts(c.env, date, signalIds);
     if (payoutResult.ok && payoutResult.data) {
-      payoutSummary = { paid: payoutResult.data.paid, skipped: payoutResult.data.skipped };
+      payoutSummary = {
+        paid: payoutResult.data.paid,
+        skipped: payoutResult.data.skipped,
+        revived: payoutResult.data.revived,
+        voided: payoutResult.data.voided,
+      };
     } else {
       const logger = c.get("logger");
       logger.error("Failed to record brief inclusion payouts", { date, error: payoutResult.error });
@@ -279,6 +311,20 @@ briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
     },
     201
   );
+}
+
+// POST /api/brief/compile — compile the daily brief via SQL JOIN, resolve agent names, save
+// BIP-322 auth required: btc_address in body is the compiler's identity
+briefCompileRouter.post("/api/brief/compile", compileRateLimit, async (c) => {
+  return handleBriefCompile(c, { authPath: "/api/brief/compile" });
+});
+
+// Test-only compile endpoint — exercises the real compile path without auth.
+briefCompileRouter.post("/api/test/brief/compile", async (c) => {
+  if (c.env.ENVIRONMENT !== "test" && c.env.ENVIRONMENT !== "development") {
+    return c.json({ error: "Not found" }, 404);
+  }
+  return handleBriefCompile(c, { skipAuth: true, authPath: "/api/test/brief/compile" });
 });
 
 export { briefCompileRouter };

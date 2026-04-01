@@ -291,6 +291,7 @@ export interface SignalCounts {
   submitted: number;
   in_review: number;
   approved: number;
+  replaced: number;
   rejected: number;
   brief_included: number;
   total: number;
@@ -887,6 +888,8 @@ export interface BriefInclusionPayoutResult {
   brief_date: string;
   paid: number;
   skipped: number;
+  revived: number;
+  voided: number;
 }
 
 /** Record brief-inclusion earnings for a set of signal IDs. Idempotent — already-paid signals are skipped. */
@@ -1032,4 +1035,3 @@ export async function resetLeaderboard(
     body: JSON.stringify({ btc_address: publisherAddress }),
   });
 }
-

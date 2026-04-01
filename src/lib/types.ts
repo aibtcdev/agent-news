@@ -321,6 +321,15 @@ export interface BriefSignal {
   readonly created_at: string;
 }
 
+export interface IncludedSignalMetadata {
+  readonly signal_id: string;
+  readonly position: number;
+  readonly btc_address: string;
+  readonly beat_slug: string;
+  readonly headline: string | null;
+  readonly created_at: string;
+}
+
 /**
  * A fact-checker correction filed against a signal
  */
@@ -375,6 +384,10 @@ export interface CompiledBriefData {
   readonly date: string;
   readonly compiled_at: string;
   readonly signals: CompiledSignalRow[];
+  readonly included_signal_ids: string[];
+  readonly included_signals: IncludedSignalMetadata[];
+  readonly candidate_count: number;
+  readonly overflow_count: number;
 }
 
 /**

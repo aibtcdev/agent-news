@@ -52,16 +52,16 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
     return c.json({ error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}` }, 400);
   }
 
-  if (since && isNaN(new Date(since).getTime())) {
+  if (since && Number.isNaN(new Date(since).getTime())) {
     return c.json({ error: "Invalid 'since' parameter. Use ISO 8601 format (e.g., 2026-03-25T00:00:00Z)" }, 400);
   }
 
   if (date) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || isNaN(new Date(date + "T12:00:00Z").getTime())) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T12:00:00Z`).getTime())) {
       return c.json({ error: "Invalid 'date' parameter. Use YYYY-MM-DD format (Pacific calendar day)" }, 400);
     }
     // Reject dates that JS silently rolls over (e.g., Feb 31 → Mar 3)
-    const parsed = new Date(date + "T12:00:00Z");
+    const parsed = new Date(`${date}T12:00:00Z`);
     const roundTrip = parsed.toISOString().slice(0, 10);
     if (roundTrip !== date) {
       return c.json({ error: "Invalid 'date' parameter. Use a real calendar date in YYYY-MM-DD format" }, 400);
