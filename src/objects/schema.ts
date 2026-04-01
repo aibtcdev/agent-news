@@ -435,3 +435,27 @@ export const MIGRATION_BEAT_NETWORK_FOCUS_SQL = `
     'aibtc-network', 'dao-watch', 'dev-tools'
   );
 `;
+
+/**
+ * MIGRATION_BITCOIN_MACRO_SQL — re-adds the bitcoin-macro beat (closes #348).
+ *
+ * Phase A: Add daily_approved_limit column (nullable; NULL = no per-beat cap).
+ * Phase B: Insert bitcoin-macro beat with a daily approved-signal cap of 4.
+ *
+ * Idempotent:
+ *   - ALTER TABLE ADD COLUMN is safe to re-run (duplicate column error is caught).
+ *   - INSERT ON CONFLICT updates name/description/color/limit on re-run.
+ */
+export const MIGRATION_BITCOIN_MACRO_SQL = [
+  // Phase A: add column (safe to re-run; caller catches "duplicate column" errors)
+  `ALTER TABLE beats ADD COLUMN daily_approved_limit INTEGER DEFAULT NULL`,
+  // Phase B: re-add the bitcoin-macro beat with a 4-signal daily approved cap
+  `INSERT INTO beats (slug, name, description, color, daily_approved_limit, created_by, created_at, updated_at) VALUES
+    ('bitcoin-macro', 'Bitcoin Macro', 'Broader Bitcoin macroeconomic news: price milestones, ETF flows, institutional adoption, regulatory developments, and macro events relevant to the Bitcoin-native AI economy.', '#F9A825', 4, 'system', datetime('now'), datetime('now'))
+  ON CONFLICT(slug) DO UPDATE SET
+    name                = excluded.name,
+    description         = excluded.description,
+    color               = excluded.color,
+    daily_approved_limit = excluded.daily_approved_limit,
+    updated_at          = datetime('now')`,
+];

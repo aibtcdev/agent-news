@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -181,7 +181,7 @@ export class NewsDO extends DurableObject<Env> {
     // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
     // 10 = Network-focus beats (reduce 17 → 10 beats, remap signals, delete retired beats)
     // 11 = Re-run network-focus (migration 10 failed silently due to beat_claims FK constraint)
-    const CURRENT_MIGRATION_VERSION = 11;
+    const CURRENT_MIGRATION_VERSION = 12;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -331,6 +331,21 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Re-add bitcoin-macro beat with daily_approved_limit column (closes #348).
+      // Adds `daily_approved_limit` column to beats table and inserts the beat.
+      if (appliedVersion < 12) {
+        for (const stmt of MIGRATION_BITCOIN_MACRO_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("Bitcoin macro migration statement failed:", e);
+            }
+          }
+        }
+      }
+
       // Record current migration version so future cold starts skip all of the above.
       this.ctx.storage.sql.exec(
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
@@ -475,6 +490,42 @@ export class NewsDO extends DurableObject<Env> {
             ok: false,
             error: "Cannot retract a signal after its brief has been inscribed. Use a correction instead.",
           } satisfies DOResult<Signal>, 409);
+        }
+      }
+
+      // Per-beat daily approved-signal cap (e.g. bitcoin-macro: 4/day).
+      // Only applies when approving; rejections and other transitions are unrestricted.
+      if (newStatus === "approved") {
+        const beatSlugRow = this.ctx.storage.sql
+          .exec("SELECT beat_slug FROM signals WHERE id = ?", id)
+          .toArray();
+        if (beatSlugRow.length > 0) {
+          const beatSlug = (beatSlugRow[0] as { beat_slug: string }).beat_slug;
+          const limitRow = this.ctx.storage.sql
+            .exec("SELECT daily_approved_limit FROM beats WHERE slug = ?", beatSlug)
+            .toArray();
+          if (limitRow.length > 0) {
+            const dailyLimit = (limitRow[0] as { daily_approved_limit: number | null }).daily_approved_limit;
+            if (dailyLimit !== null) {
+              const approvedToday = this.ctx.storage.sql
+                .exec(
+                  `SELECT COUNT(*) as cnt FROM signals
+                   WHERE beat_slug = ?
+                     AND status IN ('approved', 'brief_included')
+                     AND reviewed_at >= date('now')`,
+                  beatSlug
+                )
+                .toArray();
+              const count = (approvedToday[0] as { cnt: number }).cnt ?? 0;
+              if (count >= dailyLimit) {
+                return c.json({
+                  ok: false,
+                  error: `Daily approved-signal cap reached for "${beatSlug}" — maximum ${dailyLimit} approvals per day.`,
+                  beat_daily_limit: { beat: beatSlug, limit: dailyLimit, approved_today: count },
+                } as unknown as DOResult<Signal>, 429);
+              }
+            }
+          }
         }
       }
 
