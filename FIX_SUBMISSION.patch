@@ -1,0 +1,87 @@
+```python
+# Editorial Review System
+import json
+import requests
+
+class EditorialReviewSystem:
+    def __init__(self, api_url, btc_address):
+        self.api_url = api_url
+        self.btc_address = btc_address
+
+    def read_signals(self, beat):
+        """Read signals for a specific beat"""
+        response = requests.get(f"{self.api_url}/api/signals?beat={beat}&status=submitted")
+        return response.json()
+
+    def submit_review(self, signal_id, review):
+        """Submit a review for a signal"""
+        review_data = {
+            "signal_id": signal_id,
+            "score": review["score"],
+            "factcheck": review["factcheck"],
+            "beat_relevance": review["beat_relevance"],
+            "recommendation": review["recommendation"],
+            "edit_suggestions": review["edit_suggestions"],
+            "feedback_for_correspondent": review["feedback_for_correspondent"]
+        }
+        response = requests.post(f"{self.api_url}/api/signals/{signal_id}/corrections", json=review_data)
+        return response.json()
+
+    def register_editor(self, beat):
+        """Register as an editor for a specific beat"""
+        response = requests.post(f"{self.api_url}/api/beats/{beat}/editors", json={"btc_address": self.btc_address})
+        return response.json()
+
+class Publisher:
+    def __init__(self, api_url):
+        self.api_url = api_url
+
+    def consume_editor_annotations(self):
+        """Consume editor annotations"""
+        response = requests.get(f"{self.api_url}/api/signals/reviews")
+        return response.json()
+
+    def spot_check(self, review_id):
+        """Spot check an editor's review"""
+        response = requests.get(f"{self.api_url}/api/reviews/{review_id}/spot_check")
+        return response.json()
+
+    def final_selection(self, reviews):
+        """Make final selection of top 30 signals"""
+        # Implement final selection logic here
+        pass
+
+    def compile_and_inscribe(self, selected_signals):
+        """Compile and inscribe selected signals"""
+        # Implement compilation and inscription logic here
+        pass
+
+    def pay_editors_and_correspondents(self, reviews):
+        """Pay editors and correspondents"""
+        # Implement payment logic here
+        pass
+
+# Example usage
+editorial_review_system = EditorialReviewSystem("https://example.com/api", "btc_address")
+signals = editorial_review_system.read_signals("beat")
+review = {
+    "score": 85,
+    "factcheck": {
+        "verified": ["claims confirmed"],
+        "flagged": ["claims that could not be verified"],
+        "sources_checked": ["sources verified against"]
+    },
+    "beat_relevance": "core",
+    "recommendation": "approve",
+    "edit_suggestions": "string or null",
+    "feedback_for_correspondent": "string or null"
+}
+editorial_review_system.submit_review(signals[0]["id"], review)
+
+publisher = Publisher("https://example.com/api")
+reviews = publisher.consume_editor_annotations()
+publisher.spot_check(reviews[0]["id"])
+selected_signals = publisher.final_selection(reviews)
+publisher.compile_and_inscribe(selected_signals)
+publisher.pay_editors_and_correspondents(reviews)
+```
