@@ -1843,6 +1843,13 @@
         grid-template-columns: 1fr;
       }
 
+      /* When promoted into main content on mobile */
+      .page > .marketplace-section {
+        margin: 0 calc(-1 * var(--page-padding, 0px));
+        padding: var(--space-4) var(--page-padding);
+        border-bottom: 2px solid var(--rule);
+      }
+
       .roster-grid {
         grid-template-columns: repeat(2, 1fr);
       }
@@ -2760,6 +2767,7 @@
         if (classifiedsData) {
           renderMarketplace(classifiedsData.classifieds || []);
         }
+        promoteSidebarOnMobile();
 
         if (correspondentsList.length > 0) {
           renderLeaderboard(correspondentsList);
@@ -2830,6 +2838,7 @@
           if (classifiedsData) {
             renderMarketplace(classifiedsData.classifieds || []);
           }
+          promoteSidebarOnMobile();
 
           if (correspondentsList.length > 0) {
             renderLeaderboard(correspondentsList);
@@ -3943,6 +3952,17 @@
         `;
       }).join('') + '</div>';
       hydrateAgentIdentities(content);
+    }
+
+    // ── Mobile: show classifieds above signals ──
+    function promoteSidebarOnMobile() {
+      if (window.innerWidth > 768) return;
+      const main = document.getElementById('main-content');
+      const section = document.getElementById('marketplace-section');
+      if (!main || !section) return;
+      // Already inside main — nothing to do
+      if (section.parentNode === main || main.contains(section)) return;
+      main.insertBefore(section, main.firstChild);
     }
 
     // ── Infinite scroll ──
