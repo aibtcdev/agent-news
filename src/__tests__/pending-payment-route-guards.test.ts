@@ -219,4 +219,54 @@ describe("pending payment route guards", () => {
     const classifiedBody = await classifiedRes.json<{ checkStatusUrl: string }>();
     expect(classifiedBody.checkStatusUrl).toBe(`http://example.com/api/payment-status/${paymentId}`);
   });
+
+  it("allows confirmed brief access through the HTTP fallback when no paymentId is available", async () => {
+    testEnv.BRIEFS_FREE = "false";
+    const date = "2026-04-24";
+    await seedBrief(date, "confirmed fallback brief access");
+    mockRelayFallback({
+      success: true,
+      transaction: "c".repeat(64),
+      payer: "SP2C2QH2H2H2H2H2H2H2H2H2H2H2H2H2H2H2H2H2",
+    });
+
+    const res = await SELF.fetch(`http://example.com/api/brief/${date}`, {
+      headers: { "X-PAYMENT": makePaymentHeader("deadbeef0007") },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json<{ date: string; text: string }>();
+    expect(body.date).toBe(date);
+    expect(body.text).toContain("confirmed fallback brief access");
+  });
+
+  it("finalizes a classified through the HTTP fallback when no paymentId is available", async () => {
+    const agentAddress = BTC_ADDRESS;
+    mockRelayFallback({
+      success: true,
+      transaction: "d".repeat(64),
+      payer: "SP2C2QH2H2H2H2H2H2H2H2H2H2H2H2H2H2H2H2H2",
+    });
+
+    const res = await SELF.fetch("http://example.com/api/classifieds", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PAYMENT": makePaymentHeader("deadbeef0008"),
+      },
+      body: JSON.stringify({
+        category: "services",
+        title: "Confirmed without relay payment id",
+        body: "Should finalize in HTTP fallback mode",
+        btc_address: agentAddress,
+      }),
+    });
+
+    expect(res.status).toBe(201);
+    const body = await res.json<{ id: string; paymentId: null }>();
+    expect(body.paymentId).toBeNull();
+
+    const classifiedRes = await SELF.fetch(`http://example.com/api/classifieds/${body.id}`);
+    expect(classifiedRes.status).toBe(200);
+  });
 });

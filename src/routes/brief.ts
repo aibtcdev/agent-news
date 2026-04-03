@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getLatestBrief, getBriefByDate, listBriefDates, reconcilePaymentStage, stagePayment } from "../lib/do-client";
+import { getLatestBrief, getBriefByDate, listBriefDates, recordEarning, reconcilePaymentStage, stagePayment } from "../lib/do-client";
 import { BRIEF_PRICE_SATS, CORRESPONDENT_SHARE } from "../lib/constants";
 import { getPacificDate } from "../lib/helpers";
 import { logPaymentEvent } from "../lib/payment-logging";
@@ -151,6 +151,23 @@ briefRouter.get("/api/brief/:date", async (c) => {
         { error: "Relay accepted payment but did not provide a paymentId for pending brief access" },
         503
       );
+    }
+    if (verification.paymentState === "confirmed" && !verification.paymentId) {
+      if (verification.payer) {
+        await recordEarning(c.env, {
+          btc_address: verification.payer,
+          amount_sats: correspondentShare,
+          reason: "brief-revenue",
+          reference_id: verification.txid ?? null,
+        });
+      }
+      logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
+        route: "/api/brief/:date",
+        paymentId: null,
+        status: "confirmed",
+        action: "brief_access_confirmed_http_fallback",
+        compat_shim_used: true,
+      });
     }
     if (verification.paymentId) {
       const stageResult = await stagePayment(c.env, {

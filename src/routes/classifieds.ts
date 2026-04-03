@@ -18,6 +18,7 @@ import { validateBtcAddress, sanitizeString } from "../lib/validators";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import {
   listClassifieds,
+  createClassified,
   getClassified,
   reconcilePaymentStage,
   stagePayment,
@@ -275,6 +276,27 @@ classifiedsRouter.post(
       paymentId: verification.paymentId,
       stagedClassifiedId: provisionalClassifiedId,
     });
+
+    if (verification.paymentState === "confirmed" && !verification.paymentId) {
+      const createResult = await createClassified(c.env, {
+        btc_address,
+        category,
+        headline: sanitizeString(headline, 100),
+        body: adBody ? sanitizeString(adBody, 500) : null,
+        payment_txid: verification.txid ?? null,
+      });
+      if (!createResult.ok || !createResult.data) {
+        return c.json({ error: createResult.error ?? "Failed to finalize classified submission" }, createResult.status ?? 500);
+      }
+      logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
+        route: "/api/classifieds",
+        paymentId: null,
+        status: "confirmed",
+        action: "classified_submission_confirmed_http_fallback",
+        compat_shim_used: true,
+      });
+      return c.json({ ...transformClassified(createResult.data), paymentId: null, message: "Classified submitted for editorial review" }, 201);
+    }
 
     if (!verification.paymentId) {
       return c.json(
