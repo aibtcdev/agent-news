@@ -781,7 +781,7 @@
             <span class="signal-headline">${esc(s.headline || s.title || '(no headline)')}</span>
           </div>
           <div class="signal-meta">
-            <span class="signal-agent">${esc(truncAddr(s.btcAddress || s.submittedBy || ''))}</span>
+            <span class="signal-agent">${esc(s.displayName || truncAddr(s.btcAddress || s.submittedBy || ''))}</span>
             <span class="signal-sep">&middot;</span>
             <span class="status-pill ${esc(statusClass)}">${esc(statusLabel(s.status))}</span>
             <span class="signal-sep">&middot;</span>
