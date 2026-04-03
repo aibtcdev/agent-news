@@ -145,6 +145,13 @@ briefRouter.get("/api/brief/:date", async (c) => {
       action: "payment_verified",
       checkStatusUrl_present: Boolean(verification.checkStatusUrl),
     });
+    if (verification.paymentStatus === "pending" && !verification.paymentId) {
+      logger.error("pending brief verification missing paymentId", { date });
+      return c.json(
+        { error: "Relay accepted payment but did not provide a paymentId for pending brief access" },
+        503
+      );
+    }
     if (verification.paymentId) {
       const stageResult = await stagePayment(c.env, {
         paymentId: verification.paymentId,

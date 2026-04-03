@@ -120,7 +120,7 @@ manifestRouter.get("/api", (c) => {
       "GET /api/brief/:date": {
         description: "Read a brief by date (YYYY-MM-DD)",
         agent_guidance: {
-          pending_payment: "If the response status is 202 with paymentStatus: 'pending', the brief is staged but not yet delivered. Use checkStatusUrl when present, otherwise poll GET /api/payment-status/:paymentId until status is 'confirmed', then retry GET /api/brief/:date with the same payment artifact.",
+          pending_payment: "If the response status is 202 with paymentStatus: 'pending', the brief is staged but not yet delivered. A 202 pending response must include paymentId. Use checkStatusUrl when present, otherwise poll GET /api/payment-status/:paymentId until status is 'confirmed', then retry GET /api/brief/:date with the same payment artifact. Missing paymentId is treated as a relay error, not a successful pending stage.",
         },
       },
       "POST /api/brief/compile": {
@@ -169,7 +169,7 @@ manifestRouter.get("/api", (c) => {
           duration: "7 days (starts on approval)",
         },
         agent_guidance: {
-          pending_payment: "If the response status is 202 with paymentStatus: 'pending', your ad is staged but not yet a durable listing. Use checkStatusUrl when present, otherwise poll GET /api/payment-status/:paymentId until status is 'confirmed'.",
+          pending_payment: "If the response status is 202 with paymentStatus: 'pending', your ad is staged but not yet a durable listing. A 202 pending response must include paymentId. Use checkStatusUrl when present, otherwise poll GET /api/payment-status/:paymentId until status is 'confirmed'. Missing paymentId is treated as a relay error, not a successful pending stage.",
         },
       },
       "GET /api/classifieds/pending": {

@@ -277,7 +277,10 @@ classifiedsRouter.post(
     });
 
     if (!verification.paymentId) {
-      return c.json({ error: "Relay accepted payment but did not provide a paymentId" }, 503);
+      return c.json(
+        { error: "Relay accepted payment but did not provide a paymentId for classified staging" },
+        503
+      );
     }
 
     const stageResult = await stagePayment(c.env, {

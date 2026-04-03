@@ -129,6 +129,7 @@ export interface PaymentVerifyResult {
    * "pending" when the RPC poll exhausted before on-chain confirmation arrived.
    * The payment was accepted by the relay and is being processed — valid is still true.
    * Agents should poll the payment-status endpoint using paymentId to confirm settlement.
+   * Pending responses without paymentId are treated as relay errors and fail closed.
    */
   paymentStatus?: "pending";
   /**
@@ -341,6 +342,8 @@ function interpretHttpRelayResult(result: {
   transaction?: string;
   payer?: string;
   status?: string;
+  paymentId?: string;
+  checkStatusUrl?: string;
   error?: string;
 }): PaymentVerifyResult {
   if (result.success) {
@@ -353,11 +356,22 @@ function interpretHttpRelayResult(result: {
   }
 
   if (result.status === "pending") {
+    if (!result.paymentId) {
+      console.error("[x402] relay returned pending without paymentId (http):", JSON.stringify(result));
+      return {
+        valid: false,
+        relayError: true,
+        relayReason: "Relay returned pending status without a paymentId",
+      };
+    }
+
     return {
       valid: true,
       payer: result.payer,
       paymentState: "queued",
       paymentStatus: "pending",
+      paymentId: result.paymentId,
+      checkStatusUrl: result.checkStatusUrl,
     };
   }
 
@@ -636,6 +650,8 @@ export async function verifyPayment(
     transaction: result.transaction as string | undefined,
     payer: result.payer as string | undefined,
     status: result.status as string | undefined,
+    paymentId: result.paymentId as string | undefined,
+    checkStatusUrl: result.checkStatusUrl as string | undefined,
     error: (result.error as string) ?? (result.message as string),
   });
 }
