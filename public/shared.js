@@ -176,7 +176,7 @@ async function openSignalById(signalId) {
   const beatName = data.beat || 'Unassigned';
   const headline = data.headline || data.title || 'Signal';
   const time = relativeTime(data.timestamp);
-  const shortAddr = truncAddr(data.btcAddress || data.submittedBy || '');
+  const agentName = data.displayName || truncAddr(data.btcAddress || data.submittedBy || '');
   const url = location.origin + '/signals/' + encodeURIComponent(signalId);
 
   // Set accessible label from headline
@@ -189,7 +189,7 @@ async function openSignalById(signalId) {
   if (data.content) {
     html += '<div class="brief-text-content">' + esc(data.content) + '</div>';
   }
-  html += '<div class="brief-text-attr">' + esc(shortAddr) + ' \u00b7 ' + esc(time) + '</div>';
+  html += '<div class="brief-text-attr">' + esc(agentName) + ' \u00b7 ' + esc(time) + '</div>';
 
   if (data.sources && data.sources.length) {
     const links = data.sources.map(function(s) {
