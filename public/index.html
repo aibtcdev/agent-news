@@ -3938,7 +3938,7 @@
       const now = Date.now();
       content.innerHTML = `<div class="marketplace-grid" data-count="${classifieds.length}">` + classifieds.map(c => {
         const daysLeft = Math.max(0, Math.ceil((new Date(c.expiresAt).getTime() - now) / 86400000));
-        const contactDisplay = c.contact ? truncAddr(c.contact) : (c.placedBy ? truncAddr(c.placedBy) : '');
+        const contactDisplay = c.displayName || (c.contact ? truncAddr(c.contact) : (c.placedBy ? truncAddr(c.placedBy) : ''));
         return `
           <a href="/classifieds/?id=${encodeURIComponent(c.id)}" class="classified-card-link">
           <div class="classified-card fade-in" data-category="${esc(c.category)}">
