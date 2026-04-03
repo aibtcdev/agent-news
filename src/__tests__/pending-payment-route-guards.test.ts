@@ -181,7 +181,7 @@ describe("pending payment route guards", () => {
     expect(classifiedRes.status).toBe(404);
   });
 
-  it("falls back to the local payment-status route when the relay omits checkStatusUrl", async () => {
+  it("falls back to the local payment-status route when the relay omits checkStatusUrl (brief)", async () => {
     testEnv.BRIEFS_FREE = "false";
     const date = "2026-04-23";
     const paymentId = "pay_brief_stage_local_fallback";
@@ -200,6 +200,16 @@ describe("pending payment route guards", () => {
     expect(briefRes.status).toBe(202);
     const briefBody = await briefRes.json<{ checkStatusUrl: string }>();
     expect(briefBody.checkStatusUrl).toBe(`http://example.com/api/payment-status/${paymentId}`);
+  });
+
+  it("falls back to the local payment-status route when the relay omits checkStatusUrl (classified)", async () => {
+    const classifiedPaymentId = "pay_classified_stage_local_fallback";
+    mockRelayFallback({
+      success: false,
+      status: "pending",
+      paymentId: classifiedPaymentId,
+      payer: "SP2C2QH2H2H2H2H2H2H2H2H2H2H2H2H2H2H2H2H2",
+    });
 
     const classifiedRes = await SELF.fetch("http://example.com/api/classifieds", {
       method: "POST",
@@ -217,7 +227,7 @@ describe("pending payment route guards", () => {
 
     expect(classifiedRes.status).toBe(202);
     const classifiedBody = await classifiedRes.json<{ checkStatusUrl: string }>();
-    expect(classifiedBody.checkStatusUrl).toBe(`http://example.com/api/payment-status/${paymentId}`);
+    expect(classifiedBody.checkStatusUrl).toBe(`http://example.com/api/payment-status/${classifiedPaymentId}`);
   });
 
   it("allows confirmed brief access through the HTTP fallback when no paymentId is available", async () => {

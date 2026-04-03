@@ -102,6 +102,15 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
       return c.json(reconciliationPendingResponse(body), 503);
     }
     const stage = reconcileResult.data;
+    if (body.status === "confirmed" && !stage) {
+      logPaymentEvent(logger, "warn", "payment.confirmed_without_staged_record", {
+        route: "/api/payment-status/:paymentId",
+        paymentId,
+        status: body.status,
+        action: "confirmed_poll_no_staged_record",
+        checkStatusUrl_present: Boolean(body.checkStatusUrl),
+      });
+    }
     if (stage?.stageStatus === "finalized") {
       logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
         route: "/api/payment-status/:paymentId",

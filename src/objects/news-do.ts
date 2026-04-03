@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL } from "./schema";
 
 // ── State machine transition maps ──
@@ -143,6 +143,21 @@ function getPaymentStageRow(
 }
 
 /**
+ * Delete staged payment records that have been in the "staged" state longer
+ * than PAYMENT_STAGE_TTL_MS. Returns the number of rows deleted.
+ */
+function purgeExpiredStagedRecords(
+  sql: DurableObjectState["storage"]["sql"]
+): number {
+  const cutoff = new Date(Date.now() - PAYMENT_STAGE_TTL_MS).toISOString();
+  const deleted = sql.exec(
+    "DELETE FROM payment_staging WHERE stage_status = 'staged' AND created_at < ?",
+    cutoff
+  );
+  return deleted.rowsWritten;
+}
+
+/**
  * Parse a required JSON body from a Hono context.
  * Returns the parsed object, or null if the body is missing or malformed.
  * Callers should return a 400 response when null is returned.
@@ -210,15 +225,11 @@ export class NewsDO extends DurableObject<Env> {
     // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
     // 10 = Network-focus beats (reduce 17 → 10 beats, remap signals, delete retired beats)
     // 11 = Re-run network-focus (migration 10 failed silently due to beat_claims FK constraint)
-<<<<<<< HEAD
     // 12 = Re-add bitcoin-macro beat
     // 13 = Add quantum beat
     // 14 = Re-run beat inserts (idempotent fix — v12/v13 may have failed silently on staging)
-    const CURRENT_MIGRATION_VERSION = 14;
-=======
-    // 12 = Payment staging (confirmed-only x402 finalization keyed by paymentId)
-    const CURRENT_MIGRATION_VERSION = 12;
->>>>>>> a48fe02 (fix: align relay payment polling contract with tx-schemas)
+    // 15 = Payment staging (confirmed-only x402 finalization keyed by paymentId)
+    const CURRENT_MIGRATION_VERSION = 15;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -368,7 +379,6 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-<<<<<<< HEAD
       // Re-add bitcoin-macro beat (closes #348).
       if (appliedVersion < 12) {
         for (const stmt of MIGRATION_BITCOIN_MACRO_SQL) {
@@ -379,19 +389,10 @@ export class NewsDO extends DurableObject<Env> {
             if (!msg.includes("duplicate column")) {
               console.error("Bitcoin macro migration statement failed:", e);
             }
-=======
-      if (appliedVersion < 12) {
-        for (const stmt of MIGRATION_PAYMENT_STAGING_SQL) {
-          try {
-            this.ctx.storage.sql.exec(stmt);
-          } catch (e) {
-            console.error("Payment staging migration statement failed:", e);
->>>>>>> a48fe02 (fix: align relay payment polling contract with tx-schemas)
           }
         }
       }
 
-<<<<<<< HEAD
       // Add quantum beat (Part 2 of #348).
       if (appliedVersion < 13) {
         try {
@@ -424,8 +425,17 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-=======
->>>>>>> a48fe02 (fix: align relay payment polling contract with tx-schemas)
+      // Payment staging (confirmed-only x402 finalization keyed by paymentId).
+      if (appliedVersion < 15) {
+        for (const stmt of MIGRATION_PAYMENT_STAGING_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Payment staging migration statement failed:", e);
+          }
+        }
+      }
+
       // Record current migration version so future cold starts skip all of the above.
       this.ctx.storage.sql.exec(
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
@@ -497,12 +507,16 @@ export class NewsDO extends DurableObject<Env> {
           400
         );
       }
-      if (body.payload.kind !== "brief_access" && body.payload.kind !== "classified_submission") {
+      const stageKind = body.payload.kind;
+      if (stageKind !== "brief_access" && stageKind !== "classified_submission") {
         return c.json(
-          { ok: false, error: `Unsupported payment stage kind: ${body.payload.kind}` } satisfies DOResult<PaymentStageMaterialized>,
+          { ok: false, error: `Unsupported payment stage kind: ${stageKind as string}` } satisfies DOResult<PaymentStageMaterialized>,
           400
         );
       }
+
+      // Purge stale staged records that never reached terminal state (24h TTL)
+      purgeExpiredStagedRecords(this.ctx.storage.sql);
 
       const existing = getPaymentStageRow(this.ctx.storage.sql, body.paymentId);
       if (existing) {
