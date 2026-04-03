@@ -55,7 +55,7 @@ describe("DO constructor: schema initialization", () => {
     // MIGRATION_QUANTUM_BEAT_SQL (migration 13) adds quantum → 12.
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
-    const body = await res.json<{ slug: string; name: string; dailyApprovedLimit?: number | null }[]>();
+    const body = await res.json<{ slug: string; name: string }[]>();
     expect(body.length).toBe(12);
     const slugs = body.map((b) => b.slug);
     // Network-focused beats (migration 11)
@@ -73,14 +73,6 @@ describe("DO constructor: schema initialization", () => {
     expect(slugs).toContain("bitcoin-macro");
     // New beat (migration 13)
     expect(slugs).toContain("quantum");
-    // Capped beats have dailyApprovedLimit set
-    const macrobeat = body.find((b) => b.slug === "bitcoin-macro");
-    expect(macrobeat?.dailyApprovedLimit).toBe(4);
-    const quantumBeat = body.find((b) => b.slug === "quantum");
-    expect(quantumBeat?.dailyApprovedLimit).toBe(4);
-    // Network-focused beats have no cap
-    const agentEconomy = body.find((b) => b.slug === "agent-economy");
-    expect(agentEconomy?.dailyApprovedLimit).toBeNull();
     // Other previously-removed beats should not be present
     expect(slugs).not.toContain("bitcoin-culture");
     expect(slugs).not.toContain("bitcoin-yield");

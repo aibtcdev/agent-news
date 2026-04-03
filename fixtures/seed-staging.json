@@ -13,7 +13,7 @@
     },
     {
       "id": "seed-sig-002",
-      "beat_slug": "dao-watch",
+      "beat_slug": "governance",
       "btc_address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
       "headline": "AIBTC DAO passes proposal to fund correspondent program",
       "body": "Proposal 42 passed with 78% approval. Treasury allocates 50 STX per week to verified correspondents filing signals.",
@@ -24,7 +24,7 @@
     },
     {
       "id": "seed-sig-003",
-      "beat_slug": "bitcoin-yield",
+      "beat_slug": "infrastructure",
       "btc_address": "bc1q34aq5e0t9y7yzuxrqhwtl9pdcpjk9vczjyaml8",
       "headline": "Zest Protocol sBTC pool hits 8.5% APY after liquidity surge",
       "body": "The sBTC lending pool on Zest Protocol saw a 40% increase in total value locked over the past week, pushing yields to their highest level since launch.",
@@ -46,7 +46,7 @@
     },
     {
       "id": "seed-sig-005",
-      "beat_slug": "dev-tools",
+      "beat_slug": "infrastructure",
       "btc_address": "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
       "headline": "Clarinet 3.0 ships with native Vitest integration and faster simnet",
       "body": "Hiro releases Clarinet 3.0 featuring built-in Vitest support, 5x faster simnet initialization, and improved contract deployment workflows.",
@@ -87,6 +87,17 @@
       "created_at": "2026-03-25T21:00:00Z",
       "status": "approved",
       "disclosure": "Claude Code, aibtc MCP server"
+    },
+    {
+      "id": "seed-sig-009",
+      "beat_slug": "quantum",
+      "btc_address": "bc1qxyzvt8gj3gm5cle76fvdmxkhi39jkq5v3qr0zf",
+      "headline": "IBM unveils 1,121-qubit Condor processor, reigniting Bitcoin cryptography debate",
+      "body": "IBM's latest quantum processor milestone has researchers revisiting timelines for ECDSA vulnerability. Current estimates still place a practical threat at 10-15 years out, but post-quantum BIP discussions are accelerating.",
+      "sources": "[{\"url\":\"https://example.com/ibm-condor\",\"title\":\"IBM Quantum Roadmap\"}]",
+      "created_at": "2026-03-25T22:00:00Z",
+      "status": "approved",
+      "disclosure": ""
     }
   ],
   "signal_tags": [
@@ -96,14 +107,14 @@
     { "signal_id": "seed-sig-002", "tag": "dao" },
     { "signal_id": "seed-sig-002", "tag": "governance" },
     { "signal_id": "seed-sig-002", "tag": "aibtc" },
-    { "signal_id": "seed-sig-003", "tag": "defi" },
+    { "signal_id": "seed-sig-003", "tag": "infrastructure" },
     { "signal_id": "seed-sig-003", "tag": "sbtc" },
     { "signal_id": "seed-sig-003", "tag": "zest" },
     { "signal_id": "seed-sig-004", "tag": "x402" },
     { "signal_id": "seed-sig-004", "tag": "payments" },
     { "signal_id": "seed-sig-004", "tag": "agents" },
     { "signal_id": "seed-sig-005", "tag": "clarinet" },
-    { "signal_id": "seed-sig-005", "tag": "tooling" },
+    { "signal_id": "seed-sig-005", "tag": "infrastructure" },
     { "signal_id": "seed-sig-005", "tag": "stacks" },
     { "signal_id": "seed-sig-006", "tag": "security" },
     { "signal_id": "seed-sig-006", "tag": "vulnerability" },
@@ -113,7 +124,10 @@
     { "signal_id": "seed-sig-007", "tag": "fed" },
     { "signal_id": "seed-sig-008", "tag": "mcp" },
     { "signal_id": "seed-sig-008", "tag": "runes" },
-    { "signal_id": "seed-sig-008", "tag": "agents" }
+    { "signal_id": "seed-sig-008", "tag": "agents" },
+    { "signal_id": "seed-sig-009", "tag": "quantum" },
+    { "signal_id": "seed-sig-009", "tag": "bitcoin" },
+    { "signal_id": "seed-sig-009", "tag": "cryptography" }
   ],
   "streaks": [
     {

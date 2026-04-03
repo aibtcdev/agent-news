@@ -181,7 +181,7 @@ export class NewsDO extends DurableObject<Env> {
     // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
     // 10 = Network-focus beats (reduce 17 → 10 beats, remap signals, delete retired beats)
     // 11 = Re-run network-focus (migration 10 failed silently due to beat_claims FK constraint)
-    // 12 = Re-add bitcoin-macro beat with daily_approved_limit column
+    // 12 = Re-add bitcoin-macro beat
     // 13 = Add quantum beat
     const CURRENT_MIGRATION_VERSION = 13;
     const versionRows = this.ctx.storage.sql
@@ -333,8 +333,7 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      // Re-add bitcoin-macro beat with daily_approved_limit column (closes #348).
-      // Adds `daily_approved_limit` column to beats table and inserts the beat.
+      // Re-add bitcoin-macro beat (closes #348).
       if (appliedVersion < 12) {
         for (const stmt of MIGRATION_BITCOIN_MACRO_SQL) {
           try {
@@ -505,43 +504,6 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      // Per-beat daily approved-signal cap (e.g. bitcoin-macro: 4/day).
-      // Only applies when approving; rejections and other transitions are unrestricted.
-      if (newStatus === "approved") {
-        const beatSlug = signalRow.beat_slug;
-        const limitRow = this.ctx.storage.sql
-          .exec("SELECT daily_approved_limit FROM beats WHERE slug = ?", beatSlug)
-          .toArray();
-        const dailyLimit = limitRow.length > 0
-          ? (limitRow[0] as { daily_approved_limit: number | null }).daily_approved_limit
-          : null;
-
-        if (dailyLimit !== null) {
-          const pacificToday = getPacificDate();
-          const dayStart = getPacificDayStartUTC(pacificToday);
-          const dayEnd = getPacificDayEndUTC(pacificToday);
-          const approvedToday = this.ctx.storage.sql
-            .exec(
-              `SELECT COUNT(*) as cnt FROM signals
-               WHERE beat_slug = ?
-                 AND status IN ('approved', 'brief_included')
-                 AND reviewed_at >= ?
-                 AND reviewed_at < ?`,
-              beatSlug,
-              dayStart,
-              dayEnd
-            )
-            .toArray();
-          const count = (approvedToday[0] as { cnt: number }).cnt ?? 0;
-          if (count >= dailyLimit) {
-            return c.json({
-              ok: false,
-              error: `Daily approved-signal cap reached for "${beatSlug}" — maximum ${dailyLimit} approvals per day.`,
-            } satisfies DOResult<Signal>, 429);
-          }
-        }
-      }
-
       const now = new Date().toISOString();
       this.ctx.storage.sql.exec(
         `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
@@ -640,7 +602,6 @@ export class NewsDO extends DurableObject<Env> {
           name: row.name,
           description: row.description,
           color: row.color,
-          daily_approved_limit: row.daily_approved_limit as number | null ?? null,
           created_by: row.created_by,
           created_at: row.created_at,
           updated_at: row.updated_at,
@@ -739,7 +700,6 @@ export class NewsDO extends DurableObject<Env> {
         name: row.name as string,
         description: row.description as string | null,
         color: row.color as string | null,
-        daily_approved_limit: row.daily_approved_limit as number | null ?? null,
         created_by: row.created_by as string,
         created_at: row.created_at as string,
         updated_at: row.updated_at as string,
@@ -1378,7 +1338,7 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date();
       const nowIso = now.toISOString();
 
-      // Pacific-timezone date helpers (used for daily cap and streak)
+      // Pacific-timezone date helpers (used for daily signal limit and streak)
       const today = getPacificDate(now);
       const yesterday = getPacificYesterday(now);
       const todayStart = getPacificDayStartUTC(today);
