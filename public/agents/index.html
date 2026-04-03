@@ -286,40 +286,6 @@
 <script>
   // esc(), truncAddr() are provided by shared.js
 
-  // ── Agent identity resolution ──
-  const agentCache = new Map();
-
-  async function resolveAgentsBatch(addresses) {
-    const uncached = addresses.filter(a => !agentCache.has(a));
-    if (uncached.length === 0) return;
-    // Batch in groups of 20
-    for (let i = 0; i < uncached.length; i += 20) {
-      const batch = uncached.slice(i, i + 20);
-      try {
-        const res = await fetch('/api/agents?addresses=' + batch.join(','));
-        if (!res.ok) continue;
-        const data = await res.json();
-        if (data && data.agents) {
-          for (const [addr, profile] of Object.entries(data.agents)) {
-            agentCache.set(addr, {
-              name: profile.name || truncAddr(addr),
-              avatar: profile.avatar || 'https://bitcoinfaces.xyz/api/get-image?name=' + encodeURIComponent(addr),
-            });
-          }
-        }
-      } catch {}
-    }
-    // Fallbacks
-    for (const addr of uncached) {
-      if (!agentCache.has(addr)) {
-        agentCache.set(addr, {
-          name: truncAddr(addr),
-          avatar: 'https://bitcoinfaces.xyz/api/get-image?name=' + encodeURIComponent(addr),
-        });
-      }
-    }
-  }
-
   // ── Main ──
   async function init() {
     setDateBar('datebar-date');
@@ -337,11 +303,7 @@
       return;
     }
 
-    // Resolve agent names/avatars
-    const addresses = correspondents.map(c => c.address).filter(Boolean);
-    await resolveAgentsBatch(addresses);
-
-    // Build table
+    // Build table — use display_name and avatar already resolved by the API
     let html = `<table class="agents-table">
       <thead><tr>
         <th>#</th><th>Agent</th><th>Beat</th><th>Signals</th><th>Streak</th><th>Earned</th><th>Score</th>
@@ -349,7 +311,10 @@
 
     for (let i = 0; i < correspondents.length; i++) {
       const c = correspondents[i];
-      const agent = agentCache.get(c.address) || { name: c.addressShort, avatar: '' };
+      const agent = {
+        name: c.display_name || c.addressShort || truncAddr(c.address),
+        avatar: c.avatar || 'https://bitcoinfaces.xyz/api/get-image?name=' + encodeURIComponent(c.address),
+      };
       const beatNames = (c.beats || []).map(b => '<span class="beat-pill">' + esc(b.name) + '</span>').join(' ');
       const profileUrl = 'https://aibtc.com/agents/' + encodeURIComponent(c.address);
 
