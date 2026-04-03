@@ -497,6 +497,12 @@ export class NewsDO extends DurableObject<Env> {
           400
         );
       }
+      if (body.payload.kind !== "brief_access" && body.payload.kind !== "classified_submission") {
+        return c.json(
+          { ok: false, error: `Unsupported payment stage kind: ${body.payload.kind}` } satisfies DOResult<PaymentStageMaterialized>,
+          400
+        );
+      }
 
       const existing = getPaymentStageRow(this.ctx.storage.sql, body.paymentId);
       if (existing) {

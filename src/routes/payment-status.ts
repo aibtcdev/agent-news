@@ -40,10 +40,9 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
     );
   }
 
-  let result: CheckPaymentResult;
-  let body: ReturnType<typeof buildPaymentStatusResponse>;
+  let relayResult: CheckPaymentResult;
   try {
-    result = await c.env.X402_RELAY.checkPayment(paymentId);
+    relayResult = await c.env.X402_RELAY.checkPayment(paymentId);
   } catch (err) {
     console.error("[payment-status] checkPayment transport failure:", err);
     return c.json(
@@ -51,8 +50,10 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
       503
     );
   }
+
+  let body: ReturnType<typeof buildPaymentStatusResponse>;
   try {
-    body = buildPaymentStatusResponse(result);
+    body = buildPaymentStatusResponse(relayResult);
   } catch (err) {
     console.error("[payment-status] invalid checkPayment response:", err);
     return c.json(

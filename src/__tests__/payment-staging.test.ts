@@ -170,4 +170,21 @@ describe("payment staging", () => {
     expect(duplicateBody.data.payload.classified_id).toBe("cl-dup-001");
     expect(duplicateBody.data.payload.headline).toBe("Original headline");
   });
+
+  it("rejects unsupported staged payload kinds", async () => {
+    const res = await SELF.fetch("http://example.com/api/test/payment-stage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paymentId: "pay_invalid_stage_kind",
+        payload: {
+          kind: "unknown_kind",
+        },
+      }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("Unsupported payment stage kind");
+  });
 });
