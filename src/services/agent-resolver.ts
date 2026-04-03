@@ -102,7 +102,7 @@ async function fetchBulkAgents(): Promise<BulkFetchResult> {
         `${AGENT_API_BASE}?limit=${BULK_PAGE_SIZE}&offset=${offset}`,
         {
           headers: { Accept: "application/json" },
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(15000),
         },
       );
 
@@ -174,17 +174,9 @@ export async function resolveAgentNames(
 
     if (cached !== null) {
       if (cached.startsWith("{")) {
-        const parsed = JSON.parse(cached) as AgentInfo;
-        // Treat null-name cache entries as misses so they get re-resolved
-        if (parsed.name) {
-          infoMap.set(addr, parsed);
-        } else {
-          uncached.push(addr);
-        }
-      } else if (cached) {
-        infoMap.set(addr, { name: cached, btcAddress: null });
+        infoMap.set(addr, JSON.parse(cached) as AgentInfo);
       } else {
-        uncached.push(addr);
+        infoMap.set(addr, { name: cached || null, btcAddress: null });
       }
     } else {
       uncached.push(addr);

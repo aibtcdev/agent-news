@@ -186,7 +186,7 @@ export async function resolveNamesWithTimeout(
   kv: KVNamespace,
   addresses: string[],
   waitUntil: (p: Promise<unknown>) => void,
-  timeoutMs = 3000
+  timeoutMs = 12000
 ): Promise<Map<string, AgentInfo>> {
   const nameResolution = resolveAgentNames(kv, addresses);
   const timeout = new Promise<Map<string, AgentInfo>>((resolve) =>
