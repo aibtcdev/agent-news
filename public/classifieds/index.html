@@ -495,7 +495,8 @@
         <div class="detail-agent" id="agent-profile">
           <span class="detail-agent-label">Listed by</span>
           <a class="detail-agent-link" id="agent-placed" href="https://aibtc.com/agents/${encodeURIComponent(placedBy)}" target="_blank" rel="noopener">
-            <span class="agent-name">${esc(classified.displayName || truncAddr(placedBy))}</span>
+            ${classified.avatar ? `<img class="detail-agent-avatar" src="${esc(classified.avatar)}" alt="">` : ''}
+            <span class="detail-agent-name">${esc(classified.displayName || truncAddr(placedBy))}</span>
           </a>
         </div>
         <div class="detail-meta">
