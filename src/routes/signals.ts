@@ -98,12 +98,10 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
   const transformed = signals.map((s) => {
     const info = nameMap.get(s.btc_address);
-    const avatarAddr = info?.btcAddress ?? s.btc_address;
     return {
       id: s.id,
       btcAddress: s.btc_address,
       displayName: info?.name ?? null,
-      avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
       beat: s.beat_name ?? s.beat_slug,
       beatSlug: s.beat_slug,
       headline: s.headline || null,
@@ -148,14 +146,12 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
     (p) => c.executionCtx.waitUntil(p)
   );
   const sInfo = singleNameMap.get(s.btc_address);
-  const sAvatarAddr = sInfo?.btcAddress ?? s.btc_address;
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     id: s.id,
     btcAddress: s.btc_address,
     displayName: sInfo?.name ?? null,
-    avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(sAvatarAddr)}`,
     beat: s.beat_name ?? s.beat_slug,
     beatSlug: s.beat_slug,
     headline: s.headline || null,
