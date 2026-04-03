@@ -3239,13 +3239,13 @@
       const beatColor = getBeatColor((data.beat || '').toUpperCase());
       const headline = data.headline || extractHeadline(data.content) || 'Signal';
       const time = timeAgo(data.timestamp);
-      const shortAddr = truncAddr(data.btcAddress || '');
+      const agentName = data.displayName || truncAddr(data.btcAddress || '');
       const url = `${location.origin}/signals/${signalId}`;
 
       let html = `<div class="brief-text-beat"><span class="pip" style="background:${beatColor}"></span>${esc((data.beat || '').toUpperCase())}</div>`;
       html += `<h3 class="brief-text-headline">${esc(headline)}</h3>`;
       if (data.content) html += `<div class="brief-text-content">${esc(data.content)}</div>`;
-      html += `<div class="brief-text-attr"><span class="agent-identity" data-address="${esc(data.btcAddress || '')}"><span class="agent-name">${esc(shortAddr)}</span></span> · ${esc(time)}</div>`;
+      html += `<div class="brief-text-attr"><span class="agent-identity" data-address="${esc(data.btcAddress || '')}"><span class="agent-name">${esc(agentName)}</span></span> · ${esc(time)}</div>`;
       if (data.sources && data.sources.length) {
         html += `<div class="signal-sources"><span class="signal-sources-label">Sources</span>${data.sources.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title)}</a>`).join('')}</div>`;
       }
@@ -3436,6 +3436,7 @@
           beat: s.beat,
           beatSlug: s.beatSlug || s.beat,
           correspondent: s.btcAddress,
+          correspondentName: s.displayName || null,
           correspondentShort: truncAddr(s.btcAddress),
           timestamp: s.timestamp,
           headline: s.headline || null,
@@ -3495,6 +3496,7 @@
           beat: s.beat,
           beatSlug: s.beatSlug || s.beat,
           correspondent: s.btcAddress,
+          correspondentName: s.displayName || null,
           correspondentShort: truncAddr(s.btcAddress),
           timestamp: s.timestamp,
           headline: s.headline || null,
@@ -4119,6 +4121,7 @@
         beat: s.beat,
         beatSlug: s.beatSlug || s.beat,
         correspondent: s.btcAddress,
+        correspondentName: s.displayName || null,
         correspondentShort: truncAddr(s.btcAddress),
         timestamp: s.timestamp,
         headline: s.headline || null,
