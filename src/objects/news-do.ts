@@ -518,14 +518,18 @@ export class NewsDO extends DurableObject<Env> {
 
         if (dailyLimit !== null) {
           const pacificToday = getPacificDate();
+          const dayStart = getPacificDayStartUTC(pacificToday);
+          const dayEnd = getPacificDayEndUTC(pacificToday);
           const approvedToday = this.ctx.storage.sql
             .exec(
               `SELECT COUNT(*) as cnt FROM signals
                WHERE beat_slug = ?
                  AND status IN ('approved', 'brief_included')
-                 AND reviewed_at >= ?`,
+                 AND reviewed_at >= ?
+                 AND reviewed_at < ?`,
               beatSlug,
-              pacificToday
+              dayStart,
+              dayEnd
             )
             .toArray();
           const count = (approvedToday[0] as { cnt: number }).cnt ?? 0;
