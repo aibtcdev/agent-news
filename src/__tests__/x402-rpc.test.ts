@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { verifyPayment } from "../services/x402";
+import { resetRelayCircuitBreakerForTests, verifyPayment } from "../services/x402";
 import type { Env, SubmitPaymentResult, CheckPaymentResult } from "../lib/types";
 
 /**
@@ -35,6 +35,7 @@ function makeEnv(
 
 afterEach(() => {
   vi.useRealTimers();
+  resetRelayCircuitBreakerForTests();
 });
 
 // =============================================================================
@@ -49,12 +50,14 @@ describe("verifyPayment — RPC path — happy path", () => {
       accepted: true,
       paymentId: "pay_001",
       status: "queued",
+      checkStatusUrl: "https://relay.example.com/api/payment-status/pay_001",
     });
 
     const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
       paymentId: "pay_001",
       status: "confirmed",
-      txid: "tx_abc123",
+      txid: "a".repeat(64),
+      checkStatusUrl: "https://relay.example.com/api/payment-status/pay_001",
     });
 
     const env = makeEnv(submitPayment, checkPayment);
@@ -65,7 +68,9 @@ describe("verifyPayment — RPC path — happy path", () => {
     const result = await resultPromise;
 
     expect(result.valid).toBe(true);
-    expect(result.txid).toBe("tx_abc123");
+    expect(result.txid).toBe("a".repeat(64));
+    expect(result.paymentState).toBe("confirmed");
+    expect(result.checkStatusUrl).toBe("https://relay.example.com/api/payment-status/pay_001");
     expect(submitPayment).toHaveBeenCalledOnce();
     expect(checkPayment).toHaveBeenCalledWith("pay_001");
   });
@@ -91,6 +96,7 @@ describe("verifyPayment — RPC path — nonce errors", () => {
 
     expect(result.valid).toBe(false);
     expect(result.errorCode).toBe("SENDER_NONCE_STALE");
+    expect(result.terminalReason).toBe("sender_nonce_stale");
     expect(result.retryable).toBe(true);
     // Relay error flag should NOT be set — this is a payment-level rejection, not a relay fault
     expect(result.relayError).toBeUndefined();
@@ -112,6 +118,7 @@ describe("verifyPayment — RPC path — nonce errors", () => {
 
     expect(result.valid).toBe(false);
     expect(result.errorCode).toBe("SENDER_NONCE_DUPLICATE");
+    expect(result.terminalReason).toBe("sender_nonce_duplicate");
     expect(result.retryable).toBe(true);
   });
 });
@@ -140,7 +147,7 @@ describe("verifyPayment — RPC path — nonce gap warning", () => {
     const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
       paymentId: "pay_gap",
       status: "confirmed",
-      txid: "tx_gap_confirmed",
+      txid: "b".repeat(64),
     });
 
     const env = makeEnv(submitPayment, checkPayment);
@@ -151,7 +158,7 @@ describe("verifyPayment — RPC path — nonce gap warning", () => {
 
     // Payment proceeds despite the gap warning
     expect(result.valid).toBe(true);
-    expect(result.txid).toBe("tx_gap_confirmed");
+    expect(result.txid).toBe("b".repeat(64));
     expect(submitPayment).toHaveBeenCalledOnce();
     expect(checkPayment).toHaveBeenCalledWith("pay_gap");
   });
@@ -162,6 +169,32 @@ describe("verifyPayment — RPC path — nonce gap warning", () => {
 // =============================================================================
 
 describe("verifyPayment — RPC path — polling timeout", () => {
+  it("keeps mempool pending instead of treating it as success", async () => {
+    vi.useFakeTimers();
+
+    const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
+      accepted: true,
+      paymentId: "pay_mempool",
+      status: "queued",
+    });
+
+    const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
+      paymentId: "pay_mempool",
+      status: "mempool",
+      txid: "c".repeat(64),
+    });
+
+    const env = makeEnv(submitPayment, checkPayment);
+    const resultPromise = verifyPayment(makePaymentHeader(), 100, env);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.valid).toBe(true);
+    expect(result.paymentStatus).toBe("pending");
+    expect(result.paymentState).toBe("mempool");
+    expect(result.txid).toBeUndefined();
+  });
+
   it("returns valid:true with paymentStatus pending when poll exhausts with known pending status", async () => {
     vi.useFakeTimers();
 
@@ -169,12 +202,14 @@ describe("verifyPayment — RPC path — polling timeout", () => {
       accepted: true,
       paymentId: "pay_002",
       status: "queued",
+      checkStatusUrl: "https://relay.example.com/api/payment-status/pay_002",
     });
 
     // Always return "queued" — never confirms
     const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
       paymentId: "pay_002",
       status: "queued",
+      checkStatusUrl: "https://relay.example.com/api/payment-status/pay_002",
     });
 
     const env = makeEnv(submitPayment, checkPayment);
@@ -187,6 +222,8 @@ describe("verifyPayment — RPC path — polling timeout", () => {
     expect(result.valid).toBe(true);
     expect(result.paymentStatus).toBe("pending");
     expect(result.paymentId).toBe("pay_002");
+    expect(result.paymentState).toBe("queued");
+    expect(result.checkStatusUrl).toBe("https://relay.example.com/api/payment-status/pay_002");
     // checkPayment should have been called RPC_POLL_MAX_ATTEMPTS (2) times
     expect(checkPayment).toHaveBeenCalledTimes(2);
   });
@@ -214,8 +251,8 @@ describe("verifyPayment — RPC path — polling timeout", () => {
 
     expect(result.valid).toBe(false);
     expect(result.relayError).toBe(true);
-    expect(result.relayReason).toMatch(/unexpected status/i);
-    expect(checkPayment).toHaveBeenCalledTimes(2);
+    expect(result.relayReason).toMatch(/invalid payment status payload/i);
+    expect(checkPayment).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -239,6 +276,7 @@ describe("verifyPayment — RPC path — immediate rejection", () => {
 
     expect(result.valid).toBe(false);
     expect(result.errorCode).toBe("NOT_SPONSORED");
+    expect(result.terminalReason).toBe("not_sponsored");
     expect(result.retryable).toBe(false);
     expect(result.relayError).toBeUndefined();
     expect(checkPayment).not.toHaveBeenCalled();
@@ -286,5 +324,33 @@ describe("verifyPayment — RPC path — relay errors", () => {
 
     expect(result.valid).toBe(false);
     expect(result.relayError).toBe(true);
+  });
+
+  it("preserves relay-owned paymentId for duplicate in-flight flows", async () => {
+    vi.useFakeTimers();
+
+    const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
+      accepted: true,
+      paymentId: "pay_duplicate",
+      status: "queued",
+    });
+
+    const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
+      paymentId: "pay_duplicate",
+      status: "broadcasting",
+    });
+
+    const env = makeEnv(submitPayment, checkPayment);
+    const [firstPromise, secondPromise] = [
+      verifyPayment(makePaymentHeader("deadbeef01"), 100, env),
+      verifyPayment(makePaymentHeader("deadbeef01"), 100, env),
+    ];
+    await vi.runAllTimersAsync();
+    const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+    expect(first.paymentId).toBe("pay_duplicate");
+    expect(second.paymentId).toBe("pay_duplicate");
+    expect(first.paymentStatus).toBe("pending");
+    expect(second.paymentStatus).toBe("pending");
   });
 });

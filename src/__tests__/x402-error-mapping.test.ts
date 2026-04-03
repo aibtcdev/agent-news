@@ -12,6 +12,7 @@ describe("mapVerificationError", () => {
       const result = mapVerificationError({
         valid: false,
         errorCode: "SENDER_NONCE_STALE",
+        terminalReason: "sender_nonce_stale",
       });
 
       expect(result.status).toBe(409);
@@ -26,6 +27,7 @@ describe("mapVerificationError", () => {
       const result = mapVerificationError({
         valid: false,
         errorCode: "SENDER_NONCE_DUPLICATE",
+        terminalReason: "sender_nonce_duplicate",
       });
 
       expect(result.status).toBe(409);
@@ -38,6 +40,7 @@ describe("mapVerificationError", () => {
       const result = mapVerificationError({
         valid: false,
         errorCode: "SENDER_NONCE_GAP",
+        terminalReason: "sender_nonce_gap",
       });
 
       expect(result.status).toBe(409);
@@ -95,6 +98,16 @@ describe("mapVerificationError", () => {
   // =========================================================================
 
   describe("payment invalid → 402", () => {
+    it("surfaces canonical terminalReason when present", () => {
+      const result = mapVerificationError({
+        valid: false,
+        terminalReason: "not_sponsored",
+      });
+
+      expect(result.status).toBe(402);
+      expect(result.body.code).toBe("not_sponsored");
+    });
+
     it("returns 402 with relay reason when present", () => {
       const result = mapVerificationError({
         valid: false,

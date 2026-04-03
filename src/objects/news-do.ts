@@ -1,11 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -113,6 +113,35 @@ function buildIncludedSignalMetadata(signals: CompiledSignalRow[]): IncludedSign
   }));
 }
 
+function rowToPaymentStage(row: Record<string, unknown>): PaymentStageMaterialized {
+  const raw = row as unknown as PaymentStageRecord;
+  return {
+    paymentId: raw.payment_id,
+    kind: raw.kind,
+    stageStatus: raw.stage_status,
+    payload: JSON.parse(raw.payload_json) as PaymentStagePayload,
+    terminalStatus: raw.terminal_status,
+    terminalReason: raw.terminal_reason,
+    createdAt: raw.created_at,
+    updatedAt: raw.updated_at,
+    finalizedAt: raw.finalized_at,
+    discardedAt: raw.discarded_at,
+  };
+}
+
+function getPaymentStageRow(
+  sql: DurableObjectState["storage"]["sql"],
+  paymentId: string
+): PaymentStageMaterialized | null {
+  const rows = sql
+    .exec("SELECT * FROM payment_staging WHERE payment_id = ?", paymentId)
+    .toArray();
+  if (rows.length === 0) {
+    return null;
+  }
+  return rowToPaymentStage(rows[0] as Record<string, unknown>);
+}
+
 /**
  * Parse a required JSON body from a Hono context.
  * Returns the parsed object, or null if the body is missing or malformed.
@@ -181,10 +210,15 @@ export class NewsDO extends DurableObject<Env> {
     // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
     // 10 = Network-focus beats (reduce 17 → 10 beats, remap signals, delete retired beats)
     // 11 = Re-run network-focus (migration 10 failed silently due to beat_claims FK constraint)
+<<<<<<< HEAD
     // 12 = Re-add bitcoin-macro beat
     // 13 = Add quantum beat
     // 14 = Re-run beat inserts (idempotent fix — v12/v13 may have failed silently on staging)
     const CURRENT_MIGRATION_VERSION = 14;
+=======
+    // 12 = Payment staging (confirmed-only x402 finalization keyed by paymentId)
+    const CURRENT_MIGRATION_VERSION = 12;
+>>>>>>> a48fe02 (fix: align relay payment polling contract with tx-schemas)
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -334,6 +368,7 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+<<<<<<< HEAD
       // Re-add bitcoin-macro beat (closes #348).
       if (appliedVersion < 12) {
         for (const stmt of MIGRATION_BITCOIN_MACRO_SQL) {
@@ -344,10 +379,19 @@ export class NewsDO extends DurableObject<Env> {
             if (!msg.includes("duplicate column")) {
               console.error("Bitcoin macro migration statement failed:", e);
             }
+=======
+      if (appliedVersion < 12) {
+        for (const stmt of MIGRATION_PAYMENT_STAGING_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Payment staging migration statement failed:", e);
+>>>>>>> a48fe02 (fix: align relay payment polling contract with tx-schemas)
           }
         }
       }
 
+<<<<<<< HEAD
       // Add quantum beat (Part 2 of #348).
       if (appliedVersion < 13) {
         try {
@@ -380,6 +424,8 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+=======
+>>>>>>> a48fe02 (fix: align relay payment polling contract with tx-schemas)
       // Record current migration version so future cold starts skip all of the above.
       this.ctx.storage.sql.exec(
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
@@ -437,6 +483,138 @@ export class NewsDO extends DurableObject<Env> {
         now
       );
       return c.json({ ok: true, data: { key, value: body.value, updated_at: now } } satisfies DOResult<unknown>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Payment staging (confirmed-only x402 finalization)
+    // -------------------------------------------------------------------------
+
+    this.router.post("/payment-staging", async (c) => {
+      const body = await parseRequiredJson<{ paymentId?: string; payload?: PaymentStagePayload }>(c);
+      if (!body?.paymentId || !body.payload?.kind) {
+        return c.json(
+          { ok: false, error: "Missing required fields: paymentId, payload.kind" } satisfies DOResult<PaymentStageMaterialized>,
+          400
+        );
+      }
+
+      const existing = getPaymentStageRow(this.ctx.storage.sql, body.paymentId);
+      if (existing) {
+        return c.json({ ok: true, data: existing } satisfies DOResult<PaymentStageMaterialized>);
+      }
+
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        `INSERT INTO payment_staging
+           (payment_id, kind, stage_status, payload_json, terminal_status, terminal_reason, created_at, updated_at, finalized_at, discarded_at)
+         VALUES (?, ?, 'staged', ?, NULL, NULL, ?, ?, NULL, NULL)`,
+        body.paymentId,
+        body.payload.kind,
+        JSON.stringify(body.payload),
+        now,
+        now
+      );
+
+      const staged = getPaymentStageRow(this.ctx.storage.sql, body.paymentId);
+      return c.json({ ok: true, data: staged ?? null } satisfies DOResult<PaymentStageMaterialized | null>, 201);
+    });
+
+    this.router.get("/payment-staging/:paymentId", (c) => {
+      const staged = getPaymentStageRow(this.ctx.storage.sql, c.req.param("paymentId"));
+      if (!staged) {
+        return c.json({ ok: false, error: "Payment stage not found" } satisfies DOResult<PaymentStageMaterialized>, 404);
+      }
+      return c.json({ ok: true, data: staged } satisfies DOResult<PaymentStageMaterialized>);
+    });
+
+    this.router.post("/payment-staging/:paymentId/reconcile", async (c) => {
+      const paymentId = c.req.param("paymentId");
+      const body = await parseRequiredJson<{
+        status?: PaymentTrackedState;
+        txid?: string;
+        terminalReason?: PaymentTerminalReason;
+      }>(c);
+      if (!body?.status) {
+        return c.json(
+          { ok: false, error: "Missing required field: status" } satisfies DOResult<PaymentStageMaterialized | null>,
+          400
+        );
+      }
+
+      const staged = getPaymentStageRow(this.ctx.storage.sql, paymentId);
+      if (!staged) {
+        return c.json({ ok: true, data: null } satisfies DOResult<PaymentStageMaterialized | null>);
+      }
+
+      if (staged.stageStatus !== "staged") {
+        return c.json({ ok: true, data: staged } satisfies DOResult<PaymentStageMaterialized>);
+      }
+
+      const now = new Date().toISOString();
+
+      if (body.status === "confirmed") {
+        if (staged.kind === "classified_submission") {
+          const payload = staged.payload as Extract<PaymentStagePayload, { kind: "classified_submission" }>;
+          this.ctx.storage.sql.exec(
+            `INSERT OR IGNORE INTO classifieds
+               (id, btc_address, category, headline, body, payment_txid, status, created_at, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
+            payload.classified_id,
+            payload.btc_address,
+            payload.category,
+            payload.headline,
+            payload.body,
+            body.txid ?? payload.payment_txid,
+            now,
+            now
+          );
+        } else if (staged.kind === "brief_access") {
+          const payload = staged.payload as Extract<PaymentStagePayload, { kind: "brief_access" }>;
+          if (payload.payer) {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO earnings
+                 (id, btc_address, amount_sats, reason, reference_id, created_at)
+               VALUES (?, ?, ?, 'brief-revenue', ?, ?)`,
+              generateId(),
+              payload.payer,
+              payload.amount_sats,
+              paymentId,
+              now
+            );
+          }
+        }
+
+        this.ctx.storage.sql.exec(
+          `UPDATE payment_staging
+              SET stage_status = 'finalized',
+                  terminal_status = 'confirmed',
+                  terminal_reason = NULL,
+                  updated_at = ?,
+                  finalized_at = ?
+            WHERE payment_id = ?`,
+          now,
+          now,
+          paymentId
+        );
+      } else if (body.status === "failed" || body.status === "replaced" || body.status === "not_found") {
+        this.ctx.storage.sql.exec(
+          `UPDATE payment_staging
+              SET stage_status = 'discarded',
+                  terminal_status = ?,
+                  terminal_reason = ?,
+                  updated_at = ?,
+                  discarded_at = ?
+            WHERE payment_id = ?`,
+          body.status,
+          body.terminalReason ?? null,
+          now,
+          now,
+          paymentId
+        );
+      }
+
+      const reconciled = getPaymentStageRow(this.ctx.storage.sql, paymentId);
+      return c.json({ ok: true, data: reconciled ?? null } satisfies DOResult<PaymentStageMaterialized | null>);
     });
 
     // -------------------------------------------------------------------------

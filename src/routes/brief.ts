@@ -1,8 +1,9 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getLatestBrief, getBriefByDate, listBriefDates, recordEarning } from "../lib/do-client";
+import { getLatestBrief, getBriefByDate, listBriefDates, reconcilePaymentStage, stagePayment } from "../lib/do-client";
 import { BRIEF_PRICE_SATS, CORRESPONDENT_SHARE } from "../lib/constants";
 import { getPacificDate } from "../lib/helpers";
+import { logPaymentEvent } from "../lib/payment-logging";
 import { validateDateFormat } from "../lib/validators";
 import { buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 
@@ -94,19 +95,40 @@ briefRouter.get("/api/brief/:date", async (c) => {
   // x402 paywall for past briefs (when not free)
   const briefsFree = c.env.BRIEFS_FREE !== "false";
   if (!briefsFree) {
+    const logger = c.get("logger");
     const paymentHeader =
       c.req.header("X-PAYMENT") ?? c.req.header("payment-signature");
 
     if (!paymentHeader) {
+      logPaymentEvent(logger, "info", "payment.required", {
+        route: "/api/brief/:date",
+        action: "return_402_payment_required",
+      });
       return buildPaymentRequired({
         amount: BRIEF_PRICE_SATS,
         description: `Access to aibtc.news daily brief for ${date}`,
       });
     }
 
-    const verification = await verifyPayment(paymentHeader, BRIEF_PRICE_SATS, c.env);
+    const verification = await verifyPayment(paymentHeader, BRIEF_PRICE_SATS, c.env, {
+      logger,
+      route: "/api/brief/:date",
+    });
     if (!verification.valid) {
       const { body, status, headers } = mapVerificationError(verification);
+      logPaymentEvent(logger, status === 503 ? "error" : "warn", "payment.retry_decision", {
+        route: "/api/brief/:date",
+        paymentId: verification.paymentId,
+        status: verification.paymentState ?? null,
+        terminalReason: verification.terminalReason ?? null,
+        action: status === 409
+          ? "retry_after_nonce_recovery"
+          : status === 503
+            ? "retry_after_relay_recovery"
+            : body.retryable
+              ? "repay_or_resubmit"
+              : "stop_retry",
+      });
       if (headers) {
         for (const [key, value] of Object.entries(headers)) {
           c.header(key, value);
@@ -115,22 +137,65 @@ briefRouter.get("/api/brief/:date", async (c) => {
       return c.json(body, status);
     }
 
-    // Record earnings split: correspondent share + treasury remainder
     const correspondentShare = Math.floor(BRIEF_PRICE_SATS * CORRESPONDENT_SHARE);
-    if (verification.payer) {
-      await recordEarning(c.env, {
-        btc_address: verification.payer,
-        amount_sats: correspondentShare,
-        reason: "brief-revenue",
-        reference_id: verification.txid ?? null,
+    logPaymentEvent(logger, "info", "payment.accepted", {
+      route: "/api/brief/:date",
+      paymentId: verification.paymentId,
+      status: verification.paymentState ?? "confirmed",
+      action: "payment_verified",
+      checkStatusUrl_present: Boolean(verification.checkStatusUrl),
+    });
+    if (verification.paymentId) {
+      const stageResult = await stagePayment(c.env, {
+        paymentId: verification.paymentId,
+        payload: {
+          kind: "brief_access",
+          date,
+          payer: verification.payer ?? null,
+          amount_sats: correspondentShare,
+        },
+      });
+      if (!stageResult.ok) {
+        return c.json({ error: stageResult.error ?? "Failed to stage brief access" }, stageResult.status ?? 500);
+      }
+      logPaymentEvent(logger, "info", "payment.delivery_staged", {
+        route: "/api/brief/:date",
+        paymentId: verification.paymentId,
+        status: verification.paymentState ?? "queued",
+        action: verification.paymentStatus === "pending"
+          ? "return_202_pending_with_legacy_headers"
+          : "stage_brief_access",
+        checkStatusUrl_present: Boolean(verification.checkStatusUrl),
+        compat_shim_used: verification.paymentStatus === "pending",
       });
     }
 
-    // If the payment is still pending on-chain, include the paymentId so the
-    // agent can verify settlement via /api/payment-status/:paymentId later.
+    if (verification.paymentState === "confirmed" && verification.paymentId) {
+      await reconcilePaymentStage(c.env, verification.paymentId, {
+        status: "confirmed",
+        txid: verification.txid,
+      });
+      logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
+        route: "/api/brief/:date",
+        paymentId: verification.paymentId,
+        status: "confirmed",
+        action: "brief_access_finalized",
+      });
+    }
+
     if (verification.paymentStatus === "pending" && verification.paymentId) {
       c.header("X-Payment-Status", "pending");
       c.header("X-Payment-Id", verification.paymentId);
+      return c.json(
+        {
+          paymentId: verification.paymentId,
+          paymentStatus: "pending",
+          status: verification.paymentState ?? "queued",
+          checkStatusUrl: verification.checkStatusUrl,
+          message: "Brief access is staged until the payment is confirmed.",
+        },
+        202
+      );
     }
   }
 

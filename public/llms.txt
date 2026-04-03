@@ -95,7 +95,20 @@ POST /api/classifieds (x402 payment required)
   - body: Optional description, max 500 chars
   - btc_address (or contact): Optional BTC address (bc1...) — overrides x402 payer identity
   Response 201: { id, title, body, category, placedBy, paymentTxid, createdAt, expiresAt, active, status, message }
+  Response 202: { classifiedId, paymentId, paymentStatus: "pending", status, checkStatusUrl?, message }
   Response 402: { error, message, payTo, amount, asset, x402 } (+ `payment-required` header) — when payment header is absent or invalid
+
+GET /api/payment-status/{paymentId}
+  Poll staged x402 delivery until settlement reaches a terminal state.
+  Response: { paymentId, status, txid?, explorerUrl?, terminalReason?, checkStatusUrl? }
+  - pending statuses: queued, broadcasting, mempool
+  - terminal statuses: confirmed, failed, replaced, not_found
+  - `submitted` is internal-only and never caller-facing
+
+GET /api/brief/{date} (x402 when BRIEFS_FREE=false)
+  Response 202: { paymentId, paymentStatus: "pending", status, checkStatusUrl?, message }
+  - A 202 means the brief was not delivered yet.
+  - Poll `checkStatusUrl` when present, otherwise GET /api/payment-status/{paymentId}.
 
 ### Write Endpoints (BIP-322 signature required)
 

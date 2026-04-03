@@ -175,6 +175,59 @@ app.get("/api/test/brief-signals/:date", async (c) => {
   return c.json(data, res.status as 200 | 400 | 404);
 });
 
+app.post("/api/test/payment-stage", async (c) => {
+  if (c.env.ENVIRONMENT !== "test" && c.env.ENVIRONMENT !== "development") {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const id = c.env.NEWS_DO.idFromName("news-singleton");
+  const stub = c.env.NEWS_DO.get(id);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const res = await stub.fetch("https://do/payment-staging", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  return c.json(data, res.status as 200 | 201 | 400 | 404);
+});
+
+app.get("/api/test/payment-stage/:paymentId", async (c) => {
+  if (c.env.ENVIRONMENT !== "test" && c.env.ENVIRONMENT !== "development") {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const id = c.env.NEWS_DO.idFromName("news-singleton");
+  const stub = c.env.NEWS_DO.get(id);
+  const res = await stub.fetch(`https://do/payment-staging/${encodeURIComponent(c.req.param("paymentId"))}`);
+  const data = await res.json();
+  return c.json(data, res.status as 200 | 404);
+});
+
+app.post("/api/test/payment-stage/:paymentId/reconcile", async (c) => {
+  if (c.env.ENVIRONMENT !== "test" && c.env.ENVIRONMENT !== "development") {
+    return c.json({ error: "Not found" }, 404);
+  }
+  const id = c.env.NEWS_DO.idFromName("news-singleton");
+  const stub = c.env.NEWS_DO.get(id);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const res = await stub.fetch(`https://do/payment-staging/${encodeURIComponent(c.req.param("paymentId"))}/reconcile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  return c.json(data, res.status as 200 | 400 | 404);
+});
+
 // Health endpoint (available at both /health and /api/health)
 function healthHandler(c: AppContext) {
   return c.json({

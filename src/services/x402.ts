@@ -9,6 +9,14 @@
  */
 
 import {
+  CheckPaymentRpcResponseSchema,
+  SubmitPaymentRpcResponseSchema,
+} from "@aibtc/tx-schemas/rpc";
+import {
+  PaymentStatusHttpResponseSchema,
+} from "@aibtc/tx-schemas/http";
+import type { PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
+import {
   TREASURY_STX_ADDRESS,
   SBTC_CONTRACT_MAINNET,
   X402_RELAY_URL,
@@ -17,7 +25,8 @@ import {
   CIRCUIT_BREAKER_THRESHOLD,
   CIRCUIT_BREAKER_RESET_MS,
 } from "../lib/constants";
-import type { Env, RelayRPC, SettleOptions, SubmitPaymentResult, CheckPaymentResult } from "../lib/types";
+import type { Env, RelayRPC, SettleOptions, SubmitPaymentResult, CheckPaymentResult, PaymentStatusResponse, Logger } from "../lib/types";
+import { logPaymentEvent } from "../lib/payment-logging";
 
 // ── In-memory circuit breaker for relay calls ──
 // Prevents cascading failures when the relay is down by fast-failing after
@@ -25,6 +34,26 @@ import type { Env, RelayRPC, SettleOptions, SubmitPaymentResult, CheckPaymentRes
 const circuitBreaker = {
   failures: 0,
   openUntil: 0,
+};
+
+const PENDING_STATES = new Set<PaymentTrackedState>(["queued", "broadcasting", "mempool"]);
+const TERMINAL_STATES = new Set<PaymentTrackedState>(["confirmed", "failed", "replaced", "not_found"]);
+const NONCE_TERMINAL_REASONS = new Set<PaymentTerminalReason>([
+  "sender_nonce_stale",
+  "sender_nonce_gap",
+  "sender_nonce_duplicate",
+]);
+
+const RPC_ERROR_TO_TERMINAL_REASON: Partial<Record<string, PaymentTerminalReason>> = {
+  INVALID_TRANSACTION: "invalid_transaction",
+  NOT_SPONSORED: "not_sponsored",
+  SENDER_NONCE_STALE: "sender_nonce_stale",
+  SENDER_NONCE_DUPLICATE: "sender_nonce_duplicate",
+  SENDER_NONCE_GAP: "sender_nonce_gap",
+  BROADCAST_FAILED: "broadcast_failure",
+  TX_BROADCAST_ERROR: "broadcast_failure",
+  SETTLEMENT_FAILED: "chain_abort",
+  INTERNAL_ERROR: "internal_error",
 };
 
 function shouldFastFail(): boolean {
@@ -57,6 +86,11 @@ function recordRelaySuccess(): void {
   circuitBreaker.openUntil = 0;
 }
 
+export function resetRelayCircuitBreakerForTests(): void {
+  circuitBreaker.failures = 0;
+  circuitBreaker.openUntil = 0;
+}
+
 export interface PaymentRequiredOpts {
   amount: number;
   description: string;
@@ -68,6 +102,9 @@ export interface PaymentVerifyResult {
   valid: boolean;
   txid?: string;
   payer?: string;
+  checkStatusUrl?: string;
+  paymentState?: PaymentTrackedState;
+  terminalReason?: PaymentTerminalReason;
   /**
    * True when the failure is a transient relay error (network timeout, 5xx,
    * parse failure) rather than the payment itself being invalid.
@@ -119,6 +156,41 @@ function isSenderNonceCode(code: string): boolean {
   return code.startsWith("SENDER_NONCE_");
 }
 
+function isSenderTerminalReason(reason?: PaymentTerminalReason): boolean {
+  return reason !== undefined && NONCE_TERMINAL_REASONS.has(reason);
+}
+
+function mapRpcErrorCodeToTerminalReason(code?: string): PaymentTerminalReason | undefined {
+  if (!code) {
+    return undefined;
+  }
+  return RPC_ERROR_TO_TERMINAL_REASON[code];
+}
+
+function parseSubmitPaymentResult(result: SubmitPaymentResult): SubmitPaymentResult {
+  return SubmitPaymentRpcResponseSchema.parse(result);
+}
+
+function parseCheckPaymentResult(result: CheckPaymentResult): CheckPaymentResult {
+  return CheckPaymentRpcResponseSchema.parse(result);
+}
+
+export function buildPaymentStatusResponse(result: CheckPaymentResult): PaymentStatusResponse {
+  return PaymentStatusHttpResponseSchema.parse({
+    paymentId: result.paymentId,
+    status: result.status,
+    txid: result.txid,
+    blockHeight: result.blockHeight,
+    confirmedAt: result.confirmedAt,
+    explorerUrl: result.explorerUrl,
+    terminalReason: result.terminalReason,
+    error: result.error,
+    errorCode: result.errorCode,
+    retryable: result.retryable,
+    checkStatusUrl: result.checkStatusUrl,
+  });
+}
+
 export interface VerificationErrorBody {
   error: string;
   code?: string;
@@ -142,19 +214,20 @@ export function mapVerificationError(
   verification: PaymentVerifyResult
 ): VerificationErrorResult {
   const code = verification.errorCode;
+  const terminalReason = verification.terminalReason ?? mapRpcErrorCodeToTerminalReason(code);
 
-  if (code && NONCE_CONFLICT_CODES.has(code)) {
-    const side = isSenderNonceCode(code) ? "sender" : "sponsor";
+  if ((code && NONCE_CONFLICT_CODES.has(code)) || isSenderTerminalReason(terminalReason)) {
+    const side = isSenderTerminalReason(terminalReason) || (code && isSenderNonceCode(code)) ? "sender" : "sponsor";
     const hint = side === "sender"
       ? "Re-fetch your sender nonce and re-sign the transaction before retrying."
       : "Use the recover-nonce tool or check your relay nonce before retrying.";
 
-    const retryAfter = NONCE_GAP_CODES.has(code) ? "30" : "5";
+    const retryAfter = code && NONCE_GAP_CODES.has(code) ? "30" : terminalReason === "sender_nonce_gap" ? "30" : "5";
 
     return {
       body: {
         error: `Payment nonce conflict (${side}).`,
-        code,
+        code: code ?? terminalReason,
         retryable: true,
         hint,
       },
@@ -182,8 +255,8 @@ export function mapVerificationError(
     error: `Payment verification failed.${reason}`,
     retryable: verification.retryable ?? true,
   };
-  if (verification.errorCode) {
-    body.code = verification.errorCode;
+  if (verification.errorCode ?? terminalReason) {
+    body.code = verification.errorCode ?? terminalReason;
   }
   return { body, status: 402 as const };
 }
@@ -270,11 +343,21 @@ function interpretHttpRelayResult(result: {
   status?: string;
   error?: string;
 }): PaymentVerifyResult {
-  if (result.success || result.status === "pending") {
+  if (result.success) {
     return {
       valid: true,
       txid: result.transaction,
       payer: result.payer,
+      paymentState: "confirmed",
+    };
+  }
+
+  if (result.status === "pending") {
+    return {
+      valid: true,
+      payer: result.payer,
+      paymentState: "queued",
+      paymentStatus: "pending",
     };
   }
 
@@ -301,7 +384,8 @@ function interpretHttpRelayResult(result: {
 export async function verifyPayment(
   paymentHeader: string,
   amount: number,
-  env?: Env
+  env?: Env,
+  logContext?: { logger?: Logger; route?: string }
 ): Promise<PaymentVerifyResult> {
   let paymentPayload: Record<string, unknown>;
   try {
@@ -328,11 +412,8 @@ export async function verifyPayment(
     maxTimeoutSeconds: 60,
   };
 
-  /** Statuses that indicate the relay is still processing the payment (not terminal). */
-  const PENDING_STATUSES = new Set(["queued", "submitted", "broadcasting", "mempool"]);
-
   // --- RPC path (service binding available and valid) ---
-  if (env?.X402_RELAY && isRelayRPC(env.X402_RELAY)) {
+  if (env?.ENVIRONMENT !== "test" && env?.X402_RELAY && isRelayRPC(env.X402_RELAY)) {
     // Extract the signed transaction hex from the payment payload.
     // The x402 v2 payment payload shape is: { payload: { transaction: "<hex>" }, ... }
     const innerPayload = paymentPayload.payload as Record<string, unknown> | undefined;
@@ -353,7 +434,7 @@ export async function verifyPayment(
     let submitResult: SubmitPaymentResult;
     try {
       console.log("[x402] using RPC path via X402_RELAY service binding");
-      submitResult = await env.X402_RELAY.submitPayment(txHex, settle);
+      submitResult = parseSubmitPaymentResult(await env.X402_RELAY.submitPayment(txHex, settle));
     } catch (err) {
       // RPC call failure is a relay error — do not penalise the payer
       console.error("[x402] RPC submitPayment threw:", err);
@@ -367,11 +448,13 @@ export async function verifyPayment(
         valid: false,
         relayReason: submitResult.error ?? submitResult.code ?? "Payment rejected by relay",
         errorCode: submitResult.code,
+        terminalReason: mapRpcErrorCodeToTerminalReason(submitResult.code),
         retryable: submitResult.retryable,
       };
     }
 
     const paymentId = submitResult.paymentId;
+    const checkStatusUrl = submitResult.checkStatusUrl;
     if (!paymentId) {
       console.error("[x402] RPC submitPayment accepted but did not return a paymentId");
       return {
@@ -391,12 +474,16 @@ export async function verifyPayment(
 
       let checkResult: CheckPaymentResult;
       try {
-        checkResult = await env.X402_RELAY.checkPayment(paymentId);
+        checkResult = parseCheckPaymentResult(await env.X402_RELAY.checkPayment(paymentId));
       } catch (err) {
         console.error("[x402] RPC checkPayment threw:", err);
         // Treat as transient relay error — payer should not be penalised
         recordRelayFailure();
-        return { valid: false, relayError: true };
+        return {
+          valid: false,
+          relayError: true,
+          relayReason: "Relay returned an invalid payment status payload",
+        };
       }
 
       lastCheckResult = checkResult;
@@ -404,18 +491,16 @@ export async function verifyPayment(
 
       if (checkResult.status === "confirmed") {
         recordRelaySuccess();
-        return { valid: true, txid: checkResult.txid };
+        return {
+          valid: true,
+          txid: checkResult.txid,
+          paymentId,
+          checkStatusUrl: checkResult.checkStatusUrl ?? checkStatusUrl,
+          paymentState: "confirmed",
+        };
       }
 
-      if (checkResult.status === "mempool") {
-        // Relay has broadcast the transaction — treat as success.
-        // On-chain confirmation is guaranteed barring a chain reorg.
-        console.log("[x402] RPC payment in mempool — treating as confirmed");
-        recordRelaySuccess();
-        return { valid: true, txid: checkResult.txid };
-      }
-
-      if (checkResult.status === "failed" || checkResult.status === "replaced") {
+      if (checkResult.status === "failed" || checkResult.status === "replaced" || checkResult.status === "not_found") {
         // Payment-level failure, not a relay error — relay responded correctly.
         // Do NOT record as relay failure; the circuit breaker should not trip
         // on legitimate payment rejections (insufficient fee, RBF replaced, etc.).
@@ -423,33 +508,30 @@ export async function verifyPayment(
           valid: false,
           relayReason: checkResult.error ?? `Payment ${checkResult.status}`,
           errorCode: checkResult.errorCode,
+          paymentId,
+          checkStatusUrl: checkResult.checkStatusUrl ?? checkStatusUrl,
+          paymentState: checkResult.status,
+          terminalReason: checkResult.terminalReason,
           retryable: checkResult.retryable,
         };
       }
 
-      if (checkResult.status === "not_found") {
-        return {
-          valid: false,
-          relayReason: "Payment not found in relay — it may have expired",
-          retryable: true,
-        };
-      }
-
-      // status is "queued", "submitted", "broadcasting" — keep polling
+      // status is "queued", "broadcasting", "mempool" — keep polling
     }
 
     // Poll exhausted — decide based on last known status.
-    if (lastCheckResult && PENDING_STATUSES.has(lastCheckResult.status)) {
+    if (lastCheckResult && PENDING_STATES.has(lastCheckResult.status)) {
       // Payment was accepted by relay and is still processing a known pending status.
-      // Return valid=true with paymentStatus="pending" so the HTTP request succeeds
-      // and the agent receives the resource. The circuit breaker should NOT trip here
-      // because the relay is healthy — it is just waiting for on-chain confirmation.
+      // Return valid=true with paymentStatus="pending" so the caller can stage
+      // work locally and poll by paymentId until the relay reaches a terminal state.
       console.warn("[x402] RPC poll exhausted — payment still pending, paymentId:", paymentId);
       recordRelaySuccess();
       return {
         valid: true,
+        paymentState: lastCheckResult.status,
         paymentStatus: "pending",
         paymentId,
+        checkStatusUrl: lastCheckResult.checkStatusUrl ?? checkStatusUrl,
       };
     }
 
@@ -461,8 +543,24 @@ export async function verifyPayment(
       recordRelaySuccess();
       return {
         valid: true,
+        paymentState: "queued",
         paymentStatus: "pending",
         paymentId,
+        checkStatusUrl,
+      };
+    }
+
+    if (lastCheckResult && TERMINAL_STATES.has(lastCheckResult.status)) {
+      return {
+        valid: lastCheckResult.status === "confirmed",
+        txid: lastCheckResult.txid,
+        paymentId,
+        checkStatusUrl: lastCheckResult.checkStatusUrl ?? checkStatusUrl,
+        paymentState: lastCheckResult.status,
+        terminalReason: lastCheckResult.terminalReason,
+        relayReason: lastCheckResult.error ?? `Payment ${lastCheckResult.status}`,
+        errorCode: lastCheckResult.errorCode,
+        retryable: lastCheckResult.retryable,
       };
     }
 
@@ -479,6 +577,12 @@ export async function verifyPayment(
 
   // --- HTTP fallback (local dev / binding not configured) ---
   console.log("[x402] X402_RELAY not bound, falling back to HTTP");
+  if (logContext?.logger && logContext.route) {
+    logPaymentEvent(logContext.logger, "warn", "payment.fallback_used", {
+      route: logContext.route,
+      action: "http_settle_fallback",
+    });
+  }
 
   let settleRes: Response;
 

@@ -110,6 +110,19 @@ CREATE TABLE IF NOT EXISTS referral_credits (
   created_at       TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS payment_staging (
+  payment_id      TEXT PRIMARY KEY,
+  kind            TEXT NOT NULL,
+  stage_status    TEXT NOT NULL DEFAULT 'staged',
+  payload_json    TEXT NOT NULL,
+  terminal_status TEXT,
+  terminal_reason TEXT,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL,
+  finalized_at    TEXT,
+  discarded_at    TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_signal_tags_tag          ON signal_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_signals_beat_slug        ON signals(beat_slug);
 CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
@@ -125,6 +138,7 @@ CREATE INDEX IF NOT EXISTS idx_corrections_signal       ON corrections(signal_id
 CREATE INDEX IF NOT EXISTS idx_corrections_address      ON corrections(btc_address);
 CREATE INDEX IF NOT EXISTS idx_referral_scout           ON referral_credits(scout_address);
 CREATE INDEX IF NOT EXISTS idx_referral_recruit         ON referral_credits(recruit_address);
+CREATE INDEX IF NOT EXISTS idx_payment_staging_status   ON payment_staging(stage_status);
 `;
 
 /**
@@ -202,6 +216,22 @@ export const MIGRATION_CLASSIFIEDS_REVIEW_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_classifieds_status ON classifieds(status)",
   // Backfill: all existing classifieds were created before editorial review existed — mark approved
   "UPDATE classifieds SET status = 'approved' WHERE status = 'pending_review'",
+] as const;
+
+export const MIGRATION_PAYMENT_STAGING_SQL = [
+  `CREATE TABLE IF NOT EXISTS payment_staging (
+    payment_id      TEXT PRIMARY KEY,
+    kind            TEXT NOT NULL,
+    stage_status    TEXT NOT NULL DEFAULT 'staged',
+    payload_json    TEXT NOT NULL,
+    terminal_status TEXT,
+    terminal_reason TEXT,
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    finalized_at    TEXT,
+    discarded_at    TEXT
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_payment_staging_status ON payment_staging(stage_status)",
 ] as const;
 
 /**

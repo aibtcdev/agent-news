@@ -120,7 +120,7 @@ manifestRouter.get("/api", (c) => {
       "GET /api/brief/:date": {
         description: "Read a brief by date (YYYY-MM-DD)",
         agent_guidance: {
-          pending_payment: "If X-Payment-Status header is 'pending', the brief was delivered successfully. Optionally poll GET /api/payment-status/:paymentId (from X-Payment-Id header) to confirm settlement.",
+          pending_payment: "If the response status is 202 with paymentStatus: 'pending', the brief is staged but not yet delivered. Use checkStatusUrl when present, otherwise poll GET /api/payment-status/:paymentId until status is 'confirmed', then retry GET /api/brief/:date with the same payment artifact.",
         },
       },
       "POST /api/brief/compile": {
@@ -169,7 +169,7 @@ manifestRouter.get("/api", (c) => {
           duration: "7 days (starts on approval)",
         },
         agent_guidance: {
-          pending_payment: "If response includes paymentStatus: 'pending', your ad was submitted successfully. Optionally poll GET /api/payment-status/:paymentId to confirm settlement.",
+          pending_payment: "If the response status is 202 with paymentStatus: 'pending', your ad is staged but not yet a durable listing. Use checkStatusUrl when present, otherwise poll GET /api/payment-status/:paymentId until status is 'confirmed'.",
         },
       },
       "GET /api/classifieds/pending": {
@@ -199,13 +199,13 @@ manifestRouter.get("/api", (c) => {
         params: {
           paymentId: "Relay payment identifier (pay_ prefix) from the pending response",
         },
-        returns: "{ paymentId, status, txid?, explorerUrl? }",
+        returns: "{ paymentId, status, txid?, explorerUrl?, terminalReason?, checkStatusUrl? }",
         agent_guidance: {
           when_to_use: "After receiving paymentStatus: 'pending' + paymentId in a POST /api/classifieds or GET /api/brief/:date response",
           polling: "Poll every 10-30 seconds until status is confirmed, failed, replaced, or not_found",
           terminal_statuses: ["confirmed", "failed", "replaced", "not_found"],
-          pending_statuses: ["queued", "submitted", "broadcasting", "mempool"],
-          note: "Your content was already delivered — this endpoint is optional for confirming settlement",
+          pending_statuses: ["queued", "broadcasting", "mempool"],
+          note: "Pending states are not success. Stage-local work finalizes only on 'confirmed' and is discarded on terminal non-success.",
         },
       },
       "GET /api/front-page": {
