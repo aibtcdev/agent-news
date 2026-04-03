@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.18.0...agent-news-v1.18.1) (2026-04-03)
+
+
+### Bug Fixes
+
+* align relay payment polling contract with tx-schemas ([#370](https://github.com/aibtcdev/agent-news/issues/370)) ([f2f3410](https://github.com/aibtcdev/agent-news/commit/f2f3410b530ce7b144a3096f7e2e6db9e3a81460))
+
 ## [1.18.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.17.2...agent-news-v1.18.0) (2026-04-03)
 
 
