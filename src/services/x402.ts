@@ -176,6 +176,10 @@ function parseCheckPaymentResult(result: CheckPaymentResult): CheckPaymentResult
   return CheckPaymentRpcResponseSchema.parse(result);
 }
 
+export function buildLocalPaymentStatusUrl(origin: string, paymentId: string): string {
+  return `${origin}/api/payment-status/${encodeURIComponent(paymentId)}`;
+}
+
 export function buildPaymentStatusResponse(result: CheckPaymentResult): PaymentStatusResponse {
   return PaymentStatusHttpResponseSchema.parse({
     paymentId: result.paymentId,
@@ -216,14 +220,17 @@ export function mapVerificationError(
 ): VerificationErrorResult {
   const code = verification.errorCode;
   const terminalReason = verification.terminalReason ?? mapRpcErrorCodeToTerminalReason(code);
+  const isNonceConflict = Boolean((code && NONCE_CONFLICT_CODES.has(code)) || isSenderTerminalReason(terminalReason));
+  const isSenderConflict = Boolean(isSenderTerminalReason(terminalReason) || (code && isSenderNonceCode(code)));
 
-  if ((code && NONCE_CONFLICT_CODES.has(code)) || isSenderTerminalReason(terminalReason)) {
-    const side = isSenderTerminalReason(terminalReason) || (code && isSenderNonceCode(code)) ? "sender" : "sponsor";
+  if (isNonceConflict) {
+    const side = isSenderConflict ? "sender" : "sponsor";
     const hint = side === "sender"
       ? "Re-fetch your sender nonce and re-sign the transaction before retrying."
       : "Use the recover-nonce tool or check your relay nonce before retrying.";
-
-    const retryAfter = code && NONCE_GAP_CODES.has(code) ? "30" : terminalReason === "sender_nonce_gap" ? "30" : "5";
+    const retryAfter = (code && NONCE_GAP_CODES.has(code)) || terminalReason === "sender_nonce_gap"
+      ? "30"
+      : "5";
 
     return {
       body: {
@@ -487,11 +494,24 @@ export async function verifyPayment(
       }
 
       let checkResult: CheckPaymentResult;
+      let rawCheckResult: CheckPaymentResult;
       try {
-        checkResult = parseCheckPaymentResult(await env.X402_RELAY.checkPayment(paymentId));
+        rawCheckResult = await env.X402_RELAY.checkPayment(paymentId);
       } catch (err) {
-        console.error("[x402] RPC checkPayment threw:", err);
+        console.error("[x402] RPC checkPayment transport failure:", err);
         // Treat as transient relay error — payer should not be penalised
+        recordRelayFailure();
+        return {
+          valid: false,
+          relayError: true,
+          relayReason: "Failed to reach payment relay during payment status poll",
+        };
+      }
+
+      try {
+        checkResult = parseCheckPaymentResult(rawCheckResult);
+      } catch (err) {
+        console.error("[x402] RPC checkPayment returned invalid payload:", err);
         recordRelayFailure();
         return {
           valid: false,

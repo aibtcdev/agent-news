@@ -127,9 +127,10 @@ describe("pending payment route guards", () => {
     expect(res.headers.get("X-Payment-Status")).toBe("pending");
     expect(res.headers.get("X-Payment-Id")).toBe(paymentId);
 
-    const body = await res.json<{ paymentId: string; paymentStatus: string }>();
+    const body = await res.json<{ paymentId: string; paymentStatus: string; checkStatusUrl: string }>();
     expect(body.paymentId).toBe(paymentId);
     expect(body.paymentStatus).toBe("pending");
+    expect(body.checkStatusUrl).toBe(`https://relay.example.com/api/payment-status/${paymentId}`);
 
     const stageRes = await SELF.fetch(`http://example.com/api/test/payment-stage/${paymentId}`);
     expect(stageRes.status).toBe(200);
@@ -165,9 +166,10 @@ describe("pending payment route guards", () => {
     });
 
     expect(res.status).toBe(202);
-    const body = await res.json<{ classifiedId: string; paymentId: string; paymentStatus: string }>();
+    const body = await res.json<{ classifiedId: string; paymentId: string; paymentStatus: string; checkStatusUrl: string }>();
     expect(body.paymentId).toBe(paymentId);
     expect(body.paymentStatus).toBe("pending");
+    expect(body.checkStatusUrl).toBe(`https://relay.example.com/api/payment-status/${paymentId}`);
 
     const stageRes = await SELF.fetch(`http://example.com/api/test/payment-stage/${paymentId}`);
     expect(stageRes.status).toBe(200);
@@ -177,5 +179,44 @@ describe("pending payment route guards", () => {
 
     const classifiedRes = await SELF.fetch(`http://example.com/api/classifieds/${stageBody.data.payload.classified_id}`);
     expect(classifiedRes.status).toBe(404);
+  });
+
+  it("falls back to the local payment-status route when the relay omits checkStatusUrl", async () => {
+    testEnv.BRIEFS_FREE = "false";
+    const date = "2026-04-23";
+    const paymentId = "pay_brief_stage_local_fallback";
+    await seedBrief(date, "brief remains staged with local polling fallback");
+    mockRelayFallback({
+      success: false,
+      status: "pending",
+      paymentId,
+      payer: "SP2C2QH2H2H2H2H2H2H2H2H2H2H2H2H2H2H2H2H2",
+    });
+
+    const briefRes = await SELF.fetch(`http://example.com/api/brief/${date}`, {
+      headers: { "X-PAYMENT": makePaymentHeader("deadbeef0005") },
+    });
+
+    expect(briefRes.status).toBe(202);
+    const briefBody = await briefRes.json<{ checkStatusUrl: string }>();
+    expect(briefBody.checkStatusUrl).toBe(`http://example.com/api/payment-status/${paymentId}`);
+
+    const classifiedRes = await SELF.fetch("http://example.com/api/classifieds", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PAYMENT": makePaymentHeader("deadbeef0006"),
+      },
+      body: JSON.stringify({
+        category: "services",
+        title: "Pending with local polling fallback",
+        body: "Still staged",
+        btc_address: BTC_ADDRESS,
+      }),
+    });
+
+    expect(classifiedRes.status).toBe(202);
+    const classifiedBody = await classifiedRes.json<{ checkStatusUrl: string }>();
+    expect(classifiedBody.checkStatusUrl).toBe(`http://example.com/api/payment-status/${paymentId}`);
   });
 });

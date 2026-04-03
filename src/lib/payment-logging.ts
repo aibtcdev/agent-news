@@ -8,6 +8,7 @@ export type PaymentLogEvent =
   | "payment.delivery_staged"
   | "payment.delivery_confirmed"
   | "payment.delivery_discarded"
+  | "payment.reconciliation_pending"
   | "payment.retry_decision"
   | "payment.fallback_used";
 

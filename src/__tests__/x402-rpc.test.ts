@@ -324,6 +324,32 @@ describe("verifyPayment — RPC path — relay errors", () => {
 
     expect(result.valid).toBe(false);
     expect(result.relayError).toBe(true);
+    expect(result.relayReason).toContain("Failed to reach payment relay");
+  });
+
+  it("returns relayError:true when checkPayment returns an invalid internal-only status", async () => {
+    vi.useFakeTimers();
+
+    const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
+      accepted: true,
+      paymentId: "pay_submitted_invalid",
+      status: "queued",
+    });
+
+    const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
+      paymentId: "pay_submitted_invalid",
+      status: "submitted" as CheckPaymentResult["status"],
+    });
+
+    const env = makeEnv(submitPayment, checkPayment);
+
+    const resultPromise = verifyPayment(makePaymentHeader(), 100, env);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.valid).toBe(false);
+    expect(result.relayError).toBe(true);
+    expect(result.relayReason).toContain("invalid payment status payload");
   });
 
   it("preserves relay-owned paymentId for duplicate in-flight flows", async () => {

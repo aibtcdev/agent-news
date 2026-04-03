@@ -24,7 +24,7 @@ import {
   getClassifiedsRotation,
 } from "../lib/do-client";
 import { logPaymentEvent } from "../lib/payment-logging";
-import { buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
+import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 import { resolveNamesWithTimeout, generateId } from "../lib/helpers";
 
 /** Transform a Classified row to the camelCase API response shape. */
@@ -337,13 +337,15 @@ classifiedsRouter.post(
       return c.json({ ...transformClassified(finalized), paymentId: verification.paymentId, message: "Classified submitted for editorial review" }, 201);
     }
 
+    const checkStatusUrl = verification.checkStatusUrl ?? buildLocalPaymentStatusUrl(new URL(c.req.url).origin, verification.paymentId);
+
     return c.json(
       {
         classifiedId: stagedClassifiedId,
         paymentId: verification.paymentId,
         paymentStatus: "pending",
         status: verification.paymentState ?? "queued",
-        checkStatusUrl: verification.checkStatusUrl,
+        checkStatusUrl,
         message: "Classified submission is staged until the payment is confirmed.",
       },
       202

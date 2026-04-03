@@ -5,7 +5,7 @@ import { BRIEF_PRICE_SATS, CORRESPONDENT_SHARE } from "../lib/constants";
 import { getPacificDate } from "../lib/helpers";
 import { logPaymentEvent } from "../lib/payment-logging";
 import { validateDateFormat } from "../lib/validators";
-import { buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
+import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 
 const briefRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -191,6 +191,7 @@ briefRouter.get("/api/brief/:date", async (c) => {
     }
 
     if (verification.paymentStatus === "pending" && verification.paymentId) {
+      const checkStatusUrl = verification.checkStatusUrl ?? buildLocalPaymentStatusUrl(new URL(c.req.url).origin, verification.paymentId);
       c.header("X-Payment-Status", "pending");
       c.header("X-Payment-Id", verification.paymentId);
       return c.json(
@@ -198,7 +199,7 @@ briefRouter.get("/api/brief/:date", async (c) => {
           paymentId: verification.paymentId,
           paymentStatus: "pending",
           status: verification.paymentState ?? "queued",
-          checkStatusUrl: verification.checkStatusUrl,
+          checkStatusUrl,
           message: "Brief access is staged until the payment is confirmed.",
         },
         202

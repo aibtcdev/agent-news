@@ -11,6 +11,16 @@ import { buildPaymentStatusResponse, isRelayRPC } from "../services/x402";
 
 const paymentStatusRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+function reconciliationPendingResponse(
+  body: ReturnType<typeof buildPaymentStatusResponse>
+) {
+  return {
+    ...body,
+    error: "Payment reached a terminal state, but delivery reconciliation is still pending. Keep polling this endpoint.",
+    warning: "Payment delivery has not been finalized yet",
+  };
+}
+
 // GET /api/payment-status/:paymentId — check settlement status of an x402 payment
 paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
   const paymentId = c.req.param("paymentId");
@@ -34,11 +44,19 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
   let body: ReturnType<typeof buildPaymentStatusResponse>;
   try {
     result = await c.env.X402_RELAY.checkPayment(paymentId);
+  } catch (err) {
+    console.error("[payment-status] checkPayment transport failure:", err);
+    return c.json(
+      { error: "Failed to reach payment relay — please retry shortly" },
+      503
+    );
+  }
+  try {
     body = buildPaymentStatusResponse(result);
   } catch (err) {
     console.error("[payment-status] invalid checkPayment response:", err);
     return c.json(
-      { error: "Failed to reach payment relay — please retry shortly" },
+      { error: "Payment relay returned an invalid status payload — please retry shortly" },
       503
     );
   }
@@ -52,11 +70,36 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
   });
 
   if (body.status === "confirmed" || body.status === "failed" || body.status === "replaced" || body.status === "not_found") {
-    const reconcileResult = await reconcilePaymentStage(c.env, paymentId, {
-      status: body.status,
-      txid: body.txid,
-      terminalReason: body.terminalReason,
-    });
+    let reconcileResult: Awaited<ReturnType<typeof reconcilePaymentStage>>;
+    try {
+      reconcileResult = await reconcilePaymentStage(c.env, paymentId, {
+        status: body.status,
+        txid: body.txid,
+        terminalReason: body.terminalReason,
+      });
+    } catch (err) {
+      console.error("[payment-status] reconcilePaymentStage transport failure:", err);
+      logPaymentEvent(logger, "warn", "payment.reconciliation_pending", {
+        route: "/api/payment-status/:paymentId",
+        paymentId,
+        status: body.status,
+        terminalReason: body.terminalReason ?? null,
+        action: "retry_reconciliation_poll",
+        checkStatusUrl_present: Boolean(body.checkStatusUrl),
+      });
+      return c.json(reconciliationPendingResponse(body), 503);
+    }
+    if (!reconcileResult.ok) {
+      logPaymentEvent(logger, "warn", "payment.reconciliation_pending", {
+        route: "/api/payment-status/:paymentId",
+        paymentId,
+        status: body.status,
+        terminalReason: body.terminalReason ?? null,
+        action: "retry_reconciliation_poll",
+        checkStatusUrl_present: Boolean(body.checkStatusUrl),
+      });
+      return c.json(reconciliationPendingResponse(body), 503);
+    }
     const stage = reconcileResult.data;
     if (stage?.stageStatus === "finalized") {
       logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
