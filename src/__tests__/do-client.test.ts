@@ -6,13 +6,13 @@ import { SELF } from "cloudflare:test";
  * These verify error propagation and not-found handling for DO-backed resources.
  */
 describe("do-client error propagation via HTTP", () => {
-  it("GET /api/beats returns 11 beats from migration", async () => {
+  it("GET /api/beats returns 12 beats from migration", async () => {
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
     const body = await res.json<unknown[]>();
-    // Fresh DO auto-populates 11 beats: 10 network-focused + re-added bitcoin-macro
+    // Fresh DO auto-populates 12 beats: 10 network-focused + bitcoin-macro + quantum
     expect(Array.isArray(body)).toBe(true);
-    expect(body.length).toBe(11);
+    expect(body.length).toBe(12);
   });
 
   it("GET /api/beats/:slug returns 404 for unknown beat", async () => {

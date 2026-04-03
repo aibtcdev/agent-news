@@ -175,6 +175,8 @@ export interface Beat {
   readonly name: string;
   readonly description: string | null;
   readonly color: string | null;
+  /** Per-beat daily approved-signal cap (NULL = no cap) */
+  readonly daily_approved_limit: number | null;
   readonly created_by: string;
   readonly created_at: string;
   readonly updated_at: string;

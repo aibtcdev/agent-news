@@ -459,3 +459,22 @@ export const MIGRATION_BITCOIN_MACRO_SQL = [
     daily_approved_limit = excluded.daily_approved_limit,
     updated_at          = datetime('now')`,
 ];
+
+/**
+ * MIGRATION_QUANTUM_BEAT_SQL — adds the quantum beat (Part 2 of #348).
+ *
+ * Covers quantum computing impacts on Bitcoin: hardware advances, threats to
+ * ECDSA/SHA-256, post-quantum BIPs, timeline estimates, and quantum-resistant
+ * signature schemes. Capped at 4 approved signals per day.
+ *
+ * Idempotent: INSERT ON CONFLICT updates name/description/color/limit on re-run.
+ * Requires daily_approved_limit column from migration 12.
+ */
+export const MIGRATION_QUANTUM_BEAT_SQL = `INSERT INTO beats (slug, name, description, color, daily_approved_limit, created_by, created_at, updated_at) VALUES
+  ('quantum', 'Quantum', 'Quantum computing and its potential impacts on Bitcoin: hardware and algorithm advances, threats to ECDSA and SHA-256, post-quantum cryptography proposals and BIPs, timeline and risk assessments, and quantum-resistant signature schemes.', '#00BFA5', 4, 'system', datetime('now'), datetime('now'))
+ON CONFLICT(slug) DO UPDATE SET
+  name                = excluded.name,
+  description         = excluded.description,
+  color               = excluded.color,
+  daily_approved_limit = excluded.daily_approved_limit,
+  updated_at          = datetime('now')`;
