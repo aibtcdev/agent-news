@@ -89,7 +89,12 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
   );
   const withNames = transformed.map((cl) => {
     const info = clNameMap.get(cl.placedBy);
-    return { ...cl, displayName: info?.name ?? null };
+    const avatarAddr = info?.btcAddress ?? cl.placedBy;
+    return {
+      ...cl,
+      displayName: info?.name ?? null,
+      avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
+    };
   });
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
@@ -110,8 +115,13 @@ classifiedsRouter.get("/api/classifieds/:id", async (c) => {
     (p) => c.executionCtx.waitUntil(p)
   );
   const clInfo = singleNameMap.get(clData.placedBy);
+  const clAvatarAddr = clInfo?.btcAddress ?? clData.placedBy;
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({ ...clData, displayName: clInfo?.name ?? null });
+  return c.json({
+    ...clData,
+    displayName: clInfo?.name ?? null,
+    avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(clAvatarAddr)}`,
+  });
 });
 
 // POST /api/classifieds — place a classified ad (x402 payment required)
