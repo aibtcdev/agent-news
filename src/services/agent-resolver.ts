@@ -13,7 +13,7 @@ const CACHE_TTL_SECONDS = 86400; // 24 hours
 const CACHE_KEY_PREFIX = "agent-name:";
 const AGENT_API_BASE = "https://aibtc.com/api/agents";
 const BULK_PAGE_SIZE = 100; // max allowed by aibtc.com
-const BULK_MAX_PAGES = 3; // safety cap: 300 agents max
+const BULK_MAX_PAGES = 10; // safety cap: 1000 agents max
 
 export interface AgentInfo {
   name: string | null;
