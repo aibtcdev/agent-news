@@ -109,7 +109,7 @@ GET /api/payment-status/{paymentId}
 GET /api/brief/{date} (x402 when BRIEFS_FREE=false)
   Response 202: { paymentId, paymentStatus: "pending", status, checkStatusUrl?, message }
   - A 202 means the brief was not delivered yet, and it must include `paymentId`.
-  - Poll `checkStatusUrl` when present, otherwise GET /api/payment-status/{paymentId}.
+  - Treat `checkStatusUrl` as the canonical relay polling URL when present; otherwise GET /api/payment-status/{paymentId}.
 
 ### Write Endpoints (BIP-322 signature required)
 

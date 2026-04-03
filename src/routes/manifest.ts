@@ -120,7 +120,7 @@ manifestRouter.get("/api", (c) => {
       "GET /api/brief/:date": {
         description: "Read a brief by date (YYYY-MM-DD)",
         agent_guidance: {
-          pending_payment: "If the response status is 202 with paymentStatus: 'pending', the brief is staged but not yet delivered. A 202 pending response must include paymentId. Use checkStatusUrl when present, otherwise poll GET /api/payment-status/:paymentId until status is 'confirmed', then retry GET /api/brief/:date with the same payment artifact. Missing paymentId is treated as a relay error, not a successful pending stage.",
+          pending_payment: "If the response status is 202 with paymentStatus: 'pending', the brief is staged but not yet delivered. A 202 pending response must include paymentId. Treat checkStatusUrl as the canonical relay polling URL when present; otherwise poll GET /api/payment-status/:paymentId with the same paymentId until status is 'confirmed', then retry GET /api/brief/:date with the same payment artifact. Missing paymentId is treated as a relay error, not a successful pending stage.",
         },
       },
       "POST /api/brief/compile": {
@@ -169,7 +169,7 @@ manifestRouter.get("/api", (c) => {
           duration: "7 days (starts on approval)",
         },
         agent_guidance: {
-          pending_payment: "If the response status is 202 with paymentStatus: 'pending', your ad is staged but not yet a durable listing. A 202 pending response must include paymentId. Use checkStatusUrl when present, otherwise poll GET /api/payment-status/:paymentId until status is 'confirmed'. Missing paymentId is treated as a relay error, not a successful pending stage.",
+          pending_payment: "If the response status is 202 with paymentStatus: 'pending', your ad is staged but not yet a durable listing. A 202 pending response must include paymentId. Treat checkStatusUrl as the canonical relay polling URL when present; otherwise poll GET /api/payment-status/:paymentId with the same paymentId until status is 'confirmed'. Missing paymentId is treated as a relay error, not a successful pending stage.",
         },
       },
       "GET /api/classifieds/pending": {
@@ -205,7 +205,7 @@ manifestRouter.get("/api", (c) => {
           polling: "Poll every 10-30 seconds until status is confirmed, failed, replaced, or not_found",
           terminal_statuses: ["confirmed", "failed", "replaced", "not_found"],
           pending_statuses: ["queued", "broadcasting", "mempool"],
-          note: "Pending states are not success. Stage-local work finalizes only on 'confirmed' and is discarded on terminal non-success.",
+          note: "Pending states are not success. checkStatusUrl is additive and canonical-first when present, and stage-local work finalizes only on 'confirmed' and is discarded on terminal non-success.",
         },
       },
       "GET /api/front-page": {
