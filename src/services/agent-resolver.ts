@@ -10,6 +10,7 @@
  */
 
 const CACHE_TTL_SECONDS = 86400; // 24 hours
+const NEGATIVE_CACHE_TTL_SECONDS = 300; // 5 minutes for unresolved names
 const CACHE_KEY_PREFIX = "agent-name:";
 const AGENT_API_BASE = "https://aibtc.com/api/agents";
 const BULK_PAGE_SIZE = 100; // max allowed by aibtc.com
@@ -63,9 +64,10 @@ export async function resolveAgentName(
 
       const info: AgentInfo = { name: displayName, btcAddress: canonicalBtc };
 
-      // Cache result as JSON (empty name signals "no name" to avoid repeated fetches)
+      // Cache with short TTL for null names so they get retried quickly
+      const ttl = displayName ? CACHE_TTL_SECONDS : NEGATIVE_CACHE_TTL_SECONDS;
       await kv.put(cacheKey, JSON.stringify(info), {
-        expirationTtl: CACHE_TTL_SECONDS,
+        expirationTtl: ttl,
       });
 
       return info;
@@ -172,9 +174,17 @@ export async function resolveAgentNames(
 
     if (cached !== null) {
       if (cached.startsWith("{")) {
-        infoMap.set(addr, JSON.parse(cached) as AgentInfo);
+        const parsed = JSON.parse(cached) as AgentInfo;
+        // Treat null-name cache entries as misses so they get re-resolved
+        if (parsed.name) {
+          infoMap.set(addr, parsed);
+        } else {
+          uncached.push(addr);
+        }
+      } else if (cached) {
+        infoMap.set(addr, { name: cached, btcAddress: null });
       } else {
-        infoMap.set(addr, { name: cached || null, btcAddress: null });
+        uncached.push(addr);
       }
     } else {
       uncached.push(addr);
@@ -193,9 +203,10 @@ export async function resolveAgentNames(
 
   for (const [btcAddr, info] of bulkAgents) {
     const cacheKey = `${CACHE_KEY_PREFIX}${btcAddr}`;
+    const ttl = info.name ? CACHE_TTL_SECONDS : NEGATIVE_CACHE_TTL_SECONDS;
     kvWrites.push(
       kv.put(cacheKey, JSON.stringify(info), {
-        expirationTtl: CACHE_TTL_SECONDS,
+        expirationTtl: ttl,
       }),
     );
 
@@ -205,16 +216,15 @@ export async function resolveAgentNames(
     }
   }
 
-  // Only negative-cache addresses as "not found" when the bulk fetch completed fully.
-  // A partial fetch (network error, pagination cap) might have missed real agents,
-  // and we don't want to incorrectly cache them as absent for 24 hours.
+  // Negative-cache addresses as "not found" when the bulk fetch completed fully.
+  // Use short TTL so they get retried quickly if the agent registers later.
   if (complete) {
     for (const addr of uncachedSet) {
       const info: AgentInfo = { name: null, btcAddress: null };
       infoMap.set(addr, info);
       kvWrites.push(
         kv.put(`${CACHE_KEY_PREFIX}${addr}`, JSON.stringify(info), {
-          expirationTtl: CACHE_TTL_SECONDS,
+          expirationTtl: NEGATIVE_CACHE_TTL_SECONDS,
         }),
       );
     }
