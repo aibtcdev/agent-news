@@ -183,7 +183,8 @@ export class NewsDO extends DurableObject<Env> {
     // 11 = Re-run network-focus (migration 10 failed silently due to beat_claims FK constraint)
     // 12 = Re-add bitcoin-macro beat
     // 13 = Add quantum beat
-    const CURRENT_MIGRATION_VERSION = 13;
+    // 14 = Re-run beat inserts (idempotent fix — v12/v13 may have failed silently on staging)
+    const CURRENT_MIGRATION_VERSION = 14;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -353,6 +354,29 @@ export class NewsDO extends DurableObject<Env> {
           this.ctx.storage.sql.exec(MIGRATION_QUANTUM_BEAT_SQL);
         } catch (e) {
           console.error("Quantum beat migration failed:", e);
+        }
+      }
+
+      // Re-run beat inserts — v12/v13 may have failed silently on staging
+      // while migration_version was still bumped to 13. Safe to re-run
+      // because both use INSERT ON CONFLICT DO UPDATE.
+      if (appliedVersion < 14) {
+        try {
+          this.ctx.storage.sql.exec(
+            `ALTER TABLE beats ADD COLUMN daily_approved_limit INTEGER DEFAULT NULL`
+          );
+        } catch {
+          // Column already exists — expected
+        }
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_BITCOIN_MACRO_SQL[1]);
+        } catch (e) {
+          console.error("Bitcoin macro re-insert failed:", e);
+        }
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_QUANTUM_BEAT_SQL);
+        } catch (e) {
+          console.error("Quantum beat re-insert failed:", e);
         }
       }
 
@@ -3665,7 +3689,7 @@ export class NewsDO extends DurableObject<Env> {
     // -------------------------------------------------------------------------
     this.router.post("/test-seed", async (c) => {
       // Hard gate: refuse to serve this route in production
-      if (this.env.ENVIRONMENT !== "test" && this.env.ENVIRONMENT !== "development") {
+      if (this.env.ENVIRONMENT !== "test" && this.env.ENVIRONMENT !== "development" && this.env.ENVIRONMENT !== "staging") {
         return c.json({ ok: false, error: "Not found" }, 404);
       }
 
