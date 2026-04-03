@@ -18,7 +18,7 @@ import {
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
-import { toPacificDate } from "../lib/helpers";
+import { toPacificDate, resolveNamesWithTimeout } from "../lib/helpers";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -86,24 +86,38 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   // date takes precedence over since — pass since only when date is absent
   const signals = await listSignals(c.env, { beat, agent, tag, since: date ? undefined : since, date, status, limit: resolvedLimit, offset: resolvedOffset });
 
+  // Resolve agent display names for all signals in this response
+  const signalAddresses = [...new Set(signals.map((s) => s.btc_address).filter(Boolean))];
+  const nameMap = await resolveNamesWithTimeout(
+    c.env.NEWS_KV,
+    signalAddresses,
+    (p) => c.executionCtx.waitUntil(p)
+  );
+
   // Transform snake_case → camelCase to match frontend expectations
   // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
-  const transformed = signals.map((s) => ({
-    id: s.id,
-    btcAddress: s.btc_address,
-    beat: s.beat_name ?? s.beat_slug,
-    beatSlug: s.beat_slug,
-    headline: s.headline || null,
-    content: s.body,
-    sources: s.sources,
-    tags: s.tags,
-    timestamp: s.created_at,
-    pacificDate: toPacificDate(s.created_at),
-    correction_of: s.correction_of,
-    status: s.status,
-    publisherFeedback: s.publisher_feedback,
-    disclosure: s.disclosure,
-  }));
+  const transformed = signals.map((s) => {
+    const info = nameMap.get(s.btc_address);
+    const avatarAddr = info?.btcAddress ?? s.btc_address;
+    return {
+      id: s.id,
+      btcAddress: s.btc_address,
+      displayName: info?.name ?? null,
+      avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
+      beat: s.beat_name ?? s.beat_slug,
+      beatSlug: s.beat_slug,
+      headline: s.headline || null,
+      content: s.body,
+      sources: s.sources,
+      tags: s.tags,
+      timestamp: s.created_at,
+      pacificDate: toPacificDate(s.created_at),
+      correction_of: s.correction_of,
+      status: s.status,
+      publisherFeedback: s.publisher_feedback,
+      disclosure: s.disclosure,
+    };
+  });
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   c.header("X-Timezone", "America/Los_Angeles");
@@ -127,10 +141,21 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
     return c.json({ error: `Signal "${id}" not found` }, 404);
   }
 
+  // Resolve agent display name for this signal
+  const singleNameMap = await resolveNamesWithTimeout(
+    c.env.NEWS_KV,
+    [s.btc_address],
+    (p) => c.executionCtx.waitUntil(p)
+  );
+  const sInfo = singleNameMap.get(s.btc_address);
+  const sAvatarAddr = sInfo?.btcAddress ?? s.btc_address;
+
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     id: s.id,
     btcAddress: s.btc_address,
+    displayName: sInfo?.name ?? null,
+    avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(sAvatarAddr)}`,
     beat: s.beat_name ?? s.beat_slug,
     beatSlug: s.beat_slug,
     headline: s.headline || null,
