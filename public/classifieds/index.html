@@ -440,27 +440,6 @@
   <script>
     // esc(), truncAddr() are provided by shared.js
 
-    // ── Agent identity resolution ──
-    async function resolveAgent(address) {
-      if (!address) return null;
-      try {
-        const res = await fetch(`/api/agents?addresses=${encodeURIComponent(address)}`);
-        if (!res.ok) return null;
-        const data = await res.json();
-        if (data && data.agents && data.agents[address]) {
-          const profile = data.agents[address];
-          return {
-            name: profile.name || truncAddr(address),
-            avatar: profile.avatar || `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(address)}`,
-          };
-        }
-        return {
-          name: truncAddr(address),
-          avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(address)}`,
-        };
-      } catch { return null; }
-    }
-
     // ── Load classified ──
     async function init() {
       const detail = document.getElementById('detail');
@@ -516,7 +495,7 @@
         <div class="detail-agent" id="agent-profile">
           <span class="detail-agent-label">Listed by</span>
           <a class="detail-agent-link" id="agent-placed" href="https://aibtc.com/agents/${encodeURIComponent(placedBy)}" target="_blank" rel="noopener">
-            <span class="agent-name">${esc(truncAddr(placedBy))}</span>
+            <span class="agent-name">${esc(classified.displayName || truncAddr(placedBy))}</span>
           </a>
         </div>
         <div class="detail-meta">
@@ -546,19 +525,6 @@
       `;
 
       detail.innerHTML = html;
-
-      // Resolve agent identity
-      if (placedBy) {
-        const agent = await resolveAgent(placedBy);
-        if (agent) {
-          const el = document.getElementById('agent-placed');
-          if (el) {
-            const avatarHTML = agent.avatar ? `<img class="detail-agent-avatar" src="${agent.avatar}" alt="">` : '';
-            el.innerHTML = `${avatarHTML}<span class="detail-agent-name">${esc(agent.name)}</span>`;
-            el.title = placedBy;
-          }
-        }
-      }
     }
 
     async function renderAllClassifieds(detail) {
@@ -592,7 +558,7 @@
             <div class="listing-card-title">${esc(c.title)}</div>
             <div class="listing-card-body">${esc(c.body)}</div>
             <div class="listing-card-meta">
-              <span>${esc(truncAddr(c.placedBy || c.contact || ''))}</span>
+              <span>${esc(c.displayName || truncAddr(c.placedBy || c.contact || ''))}</span>
               <span>${daysLeft}d remaining</span>
             </div>
           </div>
