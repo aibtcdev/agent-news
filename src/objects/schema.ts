@@ -458,7 +458,7 @@ export const MIGRATION_BITCOIN_MACRO_SQL = [
     color               = excluded.color,
     daily_approved_limit = excluded.daily_approved_limit,
     updated_at          = datetime('now')`,
-];
+] as const;
 
 /**
  * MIGRATION_QUANTUM_BEAT_SQL — adds the quantum beat (Part 2 of #348).

@@ -461,14 +461,15 @@ export class NewsDO extends DurableObject<Env> {
 
       // Verify signal exists and enforce state transition rules
       const signalRows = this.ctx.storage.sql
-        .exec("SELECT id, status FROM signals WHERE id = ?", id)
+        .exec("SELECT id, status, beat_slug FROM signals WHERE id = ?", id)
         .toArray();
       if (signalRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
       }
 
       // State machine: prevent editorial regressions
-      const currentStatus = (signalRows[0] as { id: string; status: SignalStatus }).status;
+      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string };
+      const currentStatus = signalRow.status;
       const newStatus = status as SignalStatus; // validated above against SIGNAL_STATUSES
       const allowed = SIGNAL_VALID_TRANSITIONS[currentStatus] ?? [];
       if (!allowed.includes(newStatus)) {
@@ -507,37 +508,32 @@ export class NewsDO extends DurableObject<Env> {
       // Per-beat daily approved-signal cap (e.g. bitcoin-macro: 4/day).
       // Only applies when approving; rejections and other transitions are unrestricted.
       if (newStatus === "approved") {
-        const beatSlugRow = this.ctx.storage.sql
-          .exec("SELECT beat_slug FROM signals WHERE id = ?", id)
+        const beatSlug = signalRow.beat_slug;
+        const limitRow = this.ctx.storage.sql
+          .exec("SELECT daily_approved_limit FROM beats WHERE slug = ?", beatSlug)
           .toArray();
-        if (beatSlugRow.length > 0) {
-          const beatSlug = (beatSlugRow[0] as { beat_slug: string }).beat_slug;
-          const limitRow = this.ctx.storage.sql
-            .exec("SELECT daily_approved_limit FROM beats WHERE slug = ?", beatSlug)
+        const dailyLimit = limitRow.length > 0
+          ? (limitRow[0] as { daily_approved_limit: number | null }).daily_approved_limit
+          : null;
+
+        if (dailyLimit !== null) {
+          const pacificToday = getPacificDate();
+          const approvedToday = this.ctx.storage.sql
+            .exec(
+              `SELECT COUNT(*) as cnt FROM signals
+               WHERE beat_slug = ?
+                 AND status IN ('approved', 'brief_included')
+                 AND reviewed_at >= ?`,
+              beatSlug,
+              pacificToday
+            )
             .toArray();
-          if (limitRow.length > 0) {
-            const dailyLimit = (limitRow[0] as { daily_approved_limit: number | null }).daily_approved_limit;
-            if (dailyLimit !== null) {
-              const pacificToday = getPacificDate();
-              const approvedToday = this.ctx.storage.sql
-                .exec(
-                  `SELECT COUNT(*) as cnt FROM signals
-                   WHERE beat_slug = ?
-                     AND status IN ('approved', 'brief_included')
-                     AND reviewed_at >= ?`,
-                  beatSlug,
-                  pacificToday
-                )
-                .toArray();
-              const count = (approvedToday[0] as { cnt: number }).cnt ?? 0;
-              if (count >= dailyLimit) {
-                return c.json({
-                  ok: false,
-                  error: `Daily approved-signal cap reached for "${beatSlug}" — maximum ${dailyLimit} approvals per day.`,
-                  beat_daily_limit: { beat: beatSlug, limit: dailyLimit, approved_today: count },
-                } as unknown as DOResult<Signal>, 429);
-              }
-            }
+          const count = (approvedToday[0] as { cnt: number }).cnt ?? 0;
+          if (count >= dailyLimit) {
+            return c.json({
+              ok: false,
+              error: `Daily approved-signal cap reached for "${beatSlug}" — maximum ${dailyLimit} approvals per day.`,
+            } satisfies DOResult<Signal>, 429);
           }
         }
       }
