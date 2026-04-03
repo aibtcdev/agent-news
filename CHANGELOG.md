@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.18.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.17.2...agent-news-v1.18.0) (2026-04-03)
+
+
+### Features
+
+* **beats:** add quantum beat and daily cap API exposure (closes [#348](https://github.com/aibtcdev/agent-news/issues/348)) ([#376](https://github.com/aibtcdev/agent-news/issues/376)) ([5403612](https://github.com/aibtcdev/agent-news/commit/5403612a5554f83df17a60652bc930db6f45fd22))
+
+
+### Bug Fixes
+
+* align classifieds section on mobile ([#367](https://github.com/aibtcdev/agent-news/issues/367)) ([7631501](https://github.com/aibtcdev/agent-news/commit/76315017ae8ebd8c63f850d98e7424894b22def1))
+* increase bulk agent fetch page cap from 3 to 10 ([#373](https://github.com/aibtcdev/agent-news/issues/373)) ([d2eb180](https://github.com/aibtcdev/agent-news/commit/d2eb18069cbe0e80a43cacd1f8d3889fb26f0b2d))
+* resolve agent display names across all pages ([#372](https://github.com/aibtcdev/agent-news/issues/372)) ([4e66670](https://github.com/aibtcdev/agent-news/commit/4e666708f7fe29656e251fa3259760114e7f2c88))
+* revert null-name cache skip and increase resolution timeouts ([#375](https://github.com/aibtcdev/agent-news/issues/375)) ([dbdbaa5](https://github.com/aibtcdev/agent-news/commit/dbdbaa5ffc0a12c1809006a013d8b7d9413c4e2d))
+* show classifieds above signals on mobile ([#365](https://github.com/aibtcdev/agent-news/issues/365)) ([83cad27](https://github.com/aibtcdev/agent-news/commit/83cad274aaf8c17df34ef516d01c939b788e76da))
+* use short TTL for null-name cache entries and skip stale nulls ([#374](https://github.com/aibtcdev/agent-news/issues/374)) ([90f1979](https://github.com/aibtcdev/agent-news/commit/90f19792c7d449fc4cb5c284dcd733632c0ed003))
+
 ## [1.17.2](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.17.1...agent-news-v1.17.2) (2026-03-29)
 
 
