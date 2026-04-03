@@ -9,6 +9,7 @@
     "deploy:dry-run": "npm run wrangler -- deploy --dry-run",
     "dev:staging": "npm run wrangler -- dev --env staging",
     "deploy:dry-run:staging": "npm run wrangler -- deploy --dry-run --env staging",
+    "check": "npm run typecheck && npm run lint",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src/",
     "test": "vitest run",
@@ -27,6 +28,7 @@
     "wrangler": "^4.75.0"
   },
   "dependencies": {
+    "@aibtc/tx-schemas": "^0.3.0",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^2.1.0",

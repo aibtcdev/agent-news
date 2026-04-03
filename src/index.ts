@@ -141,38 +141,74 @@ app.post("/api/internal/seed", async (c) => {
   return c.json(data, res.status as 200 | 400 | 404);
 });
 
+// ---------------------------------------------------------------------------
+// Test-only DO proxy helpers
+// ---------------------------------------------------------------------------
+
+function isTestEnv(c: AppContext): boolean {
+  return c.env.ENVIRONMENT === "test" || c.env.ENVIRONMENT === "development";
+}
+
+function getDoStub(c: AppContext) {
+  return c.env.NEWS_DO.get(c.env.NEWS_DO.idFromName("news-singleton"));
+}
+
+async function parseJsonBody(c: AppContext): Promise<unknown | null> {
+  try {
+    return await c.req.json();
+  } catch {
+    return null;
+  }
+}
+
 // Test-only seed endpoint — proxies to the DO's /test-seed route.
 // Gated on ENVIRONMENT !== 'production' at both the worker and DO level.
 app.post("/api/test-seed", async (c) => {
-  if (c.env.ENVIRONMENT !== "test" && c.env.ENVIRONMENT !== "development") {
-    return c.json({ error: "Not found" }, 404);
-  }
-  const id = c.env.NEWS_DO.idFromName("news-singleton");
-  const stub = c.env.NEWS_DO.get(id);
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
-  }
-  const res = await stub.fetch("https://do/test-seed", {
+  if (!isTestEnv(c)) return c.json({ error: "Not found" }, 404);
+  const body = await parseJsonBody(c);
+  if (body === null) return c.json({ error: "Invalid JSON body" }, 400);
+  const res = await getDoStub(c).fetch("https://do/test-seed", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = await res.json();
-  return c.json(data, res.status as 200 | 400 | 404);
+  return c.json(await res.json(), res.status as 200 | 400 | 404);
 });
 
 app.get("/api/test/brief-signals/:date", async (c) => {
-  if (c.env.ENVIRONMENT !== "test" && c.env.ENVIRONMENT !== "development") {
-    return c.json({ error: "Not found" }, 404);
-  }
-  const id = c.env.NEWS_DO.idFromName("news-singleton");
-  const stub = c.env.NEWS_DO.get(id);
-  const res = await stub.fetch(`https://do/brief-signals/${encodeURIComponent(c.req.param("date"))}`);
-  const data = await res.json();
-  return c.json(data, res.status as 200 | 400 | 404);
+  if (!isTestEnv(c)) return c.json({ error: "Not found" }, 404);
+  const res = await getDoStub(c).fetch(`https://do/brief-signals/${encodeURIComponent(c.req.param("date"))}`);
+  return c.json(await res.json(), res.status as 200 | 400 | 404);
+});
+
+app.post("/api/test/payment-stage", async (c) => {
+  if (!isTestEnv(c)) return c.json({ error: "Not found" }, 404);
+  const body = await parseJsonBody(c);
+  if (body === null) return c.json({ error: "Invalid JSON body" }, 400);
+  const res = await getDoStub(c).fetch("https://do/payment-staging", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return c.json(await res.json(), res.status as 200 | 201 | 400 | 404);
+});
+
+app.get("/api/test/payment-stage/:paymentId", async (c) => {
+  if (!isTestEnv(c)) return c.json({ error: "Not found" }, 404);
+  const res = await getDoStub(c).fetch(`https://do/payment-staging/${encodeURIComponent(c.req.param("paymentId"))}`);
+  return c.json(await res.json(), res.status as 200 | 404);
+});
+
+app.post("/api/test/payment-stage/:paymentId/reconcile", async (c) => {
+  if (!isTestEnv(c)) return c.json({ error: "Not found" }, 404);
+  const body = await parseJsonBody(c);
+  if (body === null) return c.json({ error: "Invalid JSON body" }, 400);
+  const res = await getDoStub(c).fetch(`https://do/payment-staging/${encodeURIComponent(c.req.param("paymentId"))}/reconcile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return c.json(await res.json(), res.status as 200 | 400 | 404);
 });
 
 // Health endpoint (available at both /health and /api/health)

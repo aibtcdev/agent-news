@@ -1,5 +1,16 @@
 import type { Context } from "hono";
-import { SIGNAL_STATUSES, CLASSIFIED_STATUSES } from "./constants";
+import type {
+  RpcCheckPaymentResult,
+  RpcSubmitPaymentResult,
+} from "@aibtc/tx-schemas/rpc";
+import type {
+  HttpPaymentStatusResponse,
+} from "@aibtc/tx-schemas/http";
+import type {
+  TerminalReason,
+  TrackedPaymentState,
+} from "@aibtc/tx-schemas";
+import type { SIGNAL_STATUSES, CLASSIFIED_STATUSES } from "./constants";
 
 /**
  * LogsRPC interface (from worker-logs service)
@@ -49,66 +60,11 @@ export interface SettleOptions {
   maxTimeoutSeconds?: number;
 }
 
-/** Sender nonce health info returned by the relay. */
-export interface RelaySenderNonceInfo {
-  provided: number;
-  expected: number;
-  healthy: boolean;
-  warning?: string;
-}
-
-/**
- * Result returned by RelayRPC.submitPayment().
- * Mirrors SubmitPaymentResult in x402-sponsor-relay/src/rpc.ts.
- */
-export interface SubmitPaymentResult {
-  /** Whether the submission was accepted into the relay queue */
-  accepted: boolean;
-  /** Unique payment identifier (pay_ prefix) — present when accepted */
-  paymentId?: string;
-  /** Initial status string */
-  status?: string;
-  /** Sender nonce health info */
-  senderNonce?: RelaySenderNonceInfo;
-  /** Warning for nonce gaps (accepted but flagged) */
-  warning?: {
-    code: string;
-    detail: string;
-    senderNonce: { provided: number; expected: number; lastSeen: number };
-    help: string;
-    action: string;
-  };
-  /** Human-readable error (only when accepted=false) */
-  error?: string;
-  /** Machine-readable error code (only when accepted=false) */
-  code?: string;
-  /** Whether the error is retryable */
-  retryable?: boolean;
-  /** Help URL for the caller */
-  help?: string;
-  /** Action the caller should take */
-  action?: string;
-  /** URL to check payment status */
-  checkStatusUrl?: string;
-}
-
-/**
- * Result returned by RelayRPC.checkPayment().
- * Mirrors CheckPaymentResult in x402-sponsor-relay/src/rpc.ts.
- */
-export interface CheckPaymentResult {
-  paymentId: string;
-  /** Current payment status: "queued" | "submitted" | "broadcasting" | "mempool" | "confirmed" | "failed" | "replaced" | "not_found" */
-  status: string;
-  txid?: string;
-  blockHeight?: number;
-  confirmedAt?: string;
-  explorerUrl?: string;
-  error?: string;
-  errorCode?: string;
-  retryable?: boolean;
-  senderNonceInfo?: RelaySenderNonceInfo;
-}
+export type SubmitPaymentResult = RpcSubmitPaymentResult;
+export type CheckPaymentResult = RpcCheckPaymentResult;
+export type PaymentStatusResponse = HttpPaymentStatusResponse;
+export type PaymentTerminalReason = TerminalReason;
+export type PaymentTrackedState = TrackedPaymentState;
 
 /**
  * RelayRPC interface (from x402-sponsor-relay service).
@@ -402,6 +358,54 @@ export interface DOResult<T> {
   error?: string;
   /** HTTP status hint from DO, present on error paths */
   status?: DOErrorStatus;
+}
+
+export type PaymentStageKind = "brief_access" | "classified_submission";
+export type PaymentStageLifecycle = "staged" | "finalized" | "discarded";
+
+export interface BriefAccessStagePayload {
+  kind: "brief_access";
+  date: string;
+  payer: string | null;
+  amount_sats: number;
+}
+
+export interface ClassifiedSubmissionStagePayload {
+  kind: "classified_submission";
+  classified_id: string;
+  btc_address: string;
+  category: string;
+  headline: string;
+  body: string | null;
+  payment_txid: string | null;
+}
+
+export type PaymentStagePayload = BriefAccessStagePayload | ClassifiedSubmissionStagePayload;
+
+export interface PaymentStageRecord {
+  payment_id: string;
+  kind: PaymentStageKind;
+  stage_status: PaymentStageLifecycle;
+  payload_json: string;
+  terminal_status: PaymentTrackedState | null;
+  terminal_reason: PaymentTerminalReason | null;
+  created_at: string;
+  updated_at: string;
+  finalized_at: string | null;
+  discarded_at: string | null;
+}
+
+export interface PaymentStageMaterialized<TPayload extends PaymentStagePayload = PaymentStagePayload> {
+  paymentId: string;
+  kind: PaymentStageKind;
+  stageStatus: PaymentStageLifecycle;
+  payload: TPayload;
+  terminalStatus: PaymentTrackedState | null;
+  terminalReason: PaymentTerminalReason | null;
+  createdAt: string;
+  updatedAt: string;
+  finalizedAt: string | null;
+  discardedAt: string | null;
 }
 
 /**

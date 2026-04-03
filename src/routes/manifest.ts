@@ -120,7 +120,7 @@ manifestRouter.get("/api", (c) => {
       "GET /api/brief/:date": {
         description: "Read a brief by date (YYYY-MM-DD)",
         agent_guidance: {
-          pending_payment: "If X-Payment-Status header is 'pending', the brief was delivered successfully. Optionally poll GET /api/payment-status/:paymentId (from X-Payment-Id header) to confirm settlement.",
+          pending_payment: "If the response status is 202 with paymentStatus: 'pending', the brief is staged but not yet delivered. A 202 pending response must include paymentId and a pollable checkStatusUrl. When the relay does not provide checkStatusUrl, the worker falls back to GET /api/payment-status/:paymentId on the same origin. Missing paymentId is treated as a relay error, not a successful pending stage.",
         },
       },
       "POST /api/brief/compile": {
@@ -169,7 +169,7 @@ manifestRouter.get("/api", (c) => {
           duration: "7 days (starts on approval)",
         },
         agent_guidance: {
-          pending_payment: "If response includes paymentStatus: 'pending', your ad was submitted successfully. Optionally poll GET /api/payment-status/:paymentId to confirm settlement.",
+          pending_payment: "If the response status is 202 with paymentStatus: 'pending', your ad is staged but not yet a durable listing. A 202 pending response must include paymentId and a pollable checkStatusUrl. When the relay does not provide checkStatusUrl, the worker falls back to GET /api/payment-status/:paymentId on the same origin. Missing paymentId is treated as a relay error, not a successful pending stage.",
         },
       },
       "GET /api/classifieds/pending": {
@@ -199,13 +199,13 @@ manifestRouter.get("/api", (c) => {
         params: {
           paymentId: "Relay payment identifier (pay_ prefix) from the pending response",
         },
-        returns: "{ paymentId, status, txid?, explorerUrl? }",
+        returns: "{ paymentId, status, txid?, explorerUrl?, terminalReason?, checkStatusUrl? }",
         agent_guidance: {
           when_to_use: "After receiving paymentStatus: 'pending' + paymentId in a POST /api/classifieds or GET /api/brief/:date response",
           polling: "Poll every 10-30 seconds until status is confirmed, failed, replaced, or not_found",
           terminal_statuses: ["confirmed", "failed", "replaced", "not_found"],
-          pending_statuses: ["queued", "submitted", "broadcasting", "mempool"],
-          note: "Your content was already delivered — this endpoint is optional for confirming settlement",
+          pending_statuses: ["queued", "broadcasting", "mempool"],
+          note: "Pending states are not success. Stage-local work finalizes only on 'confirmed' and is discarded on terminal non-success. If relay settlement is terminal but local delivery reconciliation has not completed yet, this endpoint returns 503 so callers keep polling instead of assuming delivery already finalized.",
         },
       },
       "GET /api/front-page": {

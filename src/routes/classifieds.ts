@@ -18,12 +18,15 @@ import { validateBtcAddress, sanitizeString } from "../lib/validators";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import {
   listClassifieds,
-  getClassified,
   createClassified,
+  getClassified,
+  reconcilePaymentStage,
+  stagePayment,
   getClassifiedsRotation,
 } from "../lib/do-client";
-import { buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
-import { resolveNamesWithTimeout } from "../lib/helpers";
+import { logPaymentEvent } from "../lib/payment-logging";
+import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
+import { resolveNamesWithTimeout, generateId } from "../lib/helpers";
 
 /** Transform a Classified row to the camelCase API response shape. */
 export function transformClassified(cl: Classified) {
@@ -138,8 +141,9 @@ classifiedsRouter.post(
     // Old code tried to read the header and crashed if missing.
     if (!paymentHeader) {
       const logger = c.get("logger");
-      logger.debug("402 payment required sent for POST /api/classifieds", {
-        ip: c.req.header("CF-Connecting-IP"),
+      logPaymentEvent(logger, "info", "payment.required", {
+        route: "/api/classifieds",
+        action: "return_402_payment_required",
       });
       return buildPaymentRequired({
         amount: CLASSIFIED_PRICE_SATS,
@@ -181,10 +185,26 @@ classifiedsRouter.post(
     }
 
     // Verify payment via x402 relay
-    const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS, c.env);
+    const verification = await verifyPayment(paymentHeader, CLASSIFIED_PRICE_SATS, c.env, {
+      logger: c.get("logger"),
+      route: "/api/classifieds",
+    });
     if (!verification.valid) {
       const logger = c.get("logger");
       const { body: errorBody, status, headers } = mapVerificationError(verification);
+      logPaymentEvent(logger, status === 503 ? "error" : "warn", "payment.retry_decision", {
+        route: "/api/classifieds",
+        paymentId: verification.paymentId,
+        status: verification.paymentState ?? null,
+        terminalReason: verification.terminalReason ?? null,
+        action: status === 409
+          ? "retry_after_nonce_recovery"
+          : status === 503
+            ? "retry_after_relay_recovery"
+            : errorBody.retryable
+              ? "repay_or_resubmit"
+              : "stop_retry",
+      });
 
       // Log at appropriate severity depending on error category
       if (status === 409) {
@@ -240,40 +260,118 @@ classifiedsRouter.post(
       );
     }
 
+    const provisionalClassifiedId = generateId();
     const logger = c.get("logger");
+    logPaymentEvent(logger, "info", "payment.accepted", {
+      route: "/api/classifieds",
+      paymentId: verification.paymentId,
+      status: verification.paymentState ?? "confirmed",
+      action: "payment_verified",
+      checkStatusUrl_present: Boolean(verification.checkStatusUrl),
+    });
     logger.info("payment verified for POST /api/classifieds", {
       btc_address,
       txid: verification.txid,
       paymentStatus: verification.paymentStatus,
       paymentId: verification.paymentId,
+      stagedClassifiedId: provisionalClassifiedId,
     });
 
-    const result = await createClassified(c.env, {
-      btc_address,
-      category,
-      headline: sanitizeString(headline, 100),
-      body: adBody ? sanitizeString(adBody, 500) : null,
-      payment_txid: verification.txid ?? null,
-    });
-
-    if (!result.ok) {
-      return c.json({ error: result.error }, 400);
+    if (verification.paymentState === "confirmed" && !verification.paymentId) {
+      const createResult = await createClassified(c.env, {
+        btc_address,
+        category,
+        headline: sanitizeString(headline, 100),
+        body: adBody ? sanitizeString(adBody, 500) : null,
+        payment_txid: verification.txid ?? null,
+      });
+      if (!createResult.ok || !createResult.data) {
+        return c.json({ error: createResult.error ?? "Failed to finalize classified submission" }, createResult.status ?? 500);
+      }
+      logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
+        route: "/api/classifieds",
+        paymentId: null,
+        status: "confirmed",
+        action: "classified_submission_confirmed_http_fallback",
+        compat_shim_used: true,
+      });
+      return c.json({ ...transformClassified(createResult.data), paymentId: null, message: "Classified submitted for editorial review" }, 201);
     }
 
-    logger.info("classified created (pending review)", {
-      id: (result.data as { id?: string })?.id,
-      btc_address,
-      category,
+    if (!verification.paymentId) {
+      return c.json(
+        { error: "Relay accepted payment but did not provide a paymentId for classified staging" },
+        503
+      );
+    }
+
+    const stageResult = await stagePayment(c.env, {
+      paymentId: verification.paymentId,
+      payload: {
+        kind: "classified_submission",
+        classified_id: provisionalClassifiedId,
+        btc_address,
+        category,
+        headline: sanitizeString(headline, 100),
+        body: adBody ? sanitizeString(adBody, 500) : null,
+        payment_txid: verification.txid ?? null,
+      },
+    });
+    if (!stageResult.ok || !stageResult.data) {
+      return c.json({ error: stageResult.error ?? "Failed to stage classified submission" }, stageResult.status ?? 500);
+    }
+    logPaymentEvent(logger, "info", "payment.delivery_staged", {
+      route: "/api/classifieds",
+      paymentId: verification.paymentId,
+      status: verification.paymentState ?? "queued",
+      action: verification.paymentStatus === "pending"
+        ? "return_202_pending"
+        : "stage_classified_submission",
+      checkStatusUrl_present: Boolean(verification.checkStatusUrl),
+      compat_shim_used: false,
     });
 
-    // If the payment is still pending on-chain, include paymentId in the response so the
-    // agent can verify settlement via /api/payment-status/:paymentId later.
-    const pendingPayment =
-      verification.paymentStatus === "pending" && verification.paymentId
-        ? { paymentStatus: verification.paymentStatus, paymentId: verification.paymentId }
-        : {};
+    const stagedClassifiedId = stageResult.data.payload.kind === "classified_submission"
+      ? stageResult.data.payload.classified_id
+      : provisionalClassifiedId;
 
-    return c.json({ ...result.data, ...pendingPayment, message: "Classified submitted for editorial review" }, 201);
+    if (verification.paymentState === "confirmed") {
+      await reconcilePaymentStage(c.env, verification.paymentId, {
+        status: "confirmed",
+        txid: verification.txid,
+      });
+
+      const finalized = await getClassified(c.env, stagedClassifiedId);
+      if (!finalized) {
+        return c.json({ error: "Failed to finalize confirmed classified submission" }, 500);
+      }
+
+      logger.info("classified finalized after confirmed payment", {
+        id: finalized.id,
+        paymentId: verification.paymentId,
+      });
+      logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
+        route: "/api/classifieds",
+        paymentId: verification.paymentId,
+        status: "confirmed",
+        action: "classified_submission_finalized",
+      });
+      return c.json({ ...transformClassified(finalized), paymentId: verification.paymentId, message: "Classified submitted for editorial review" }, 201);
+    }
+
+    const checkStatusUrl = verification.checkStatusUrl ?? buildLocalPaymentStatusUrl(new URL(c.req.url).origin, verification.paymentId);
+
+    return c.json(
+      {
+        classifiedId: stagedClassifiedId,
+        paymentId: verification.paymentId,
+        paymentStatus: "pending",
+        status: verification.paymentState ?? "queued",
+        checkStatusUrl,
+        message: "Classified submission is staged until the payment is confirmed.",
+      },
+      202
+    );
   }
 );
 

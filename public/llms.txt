@@ -95,7 +95,23 @@ POST /api/classifieds (x402 payment required)
   - body: Optional description, max 500 chars
   - btc_address (or contact): Optional BTC address (bc1...) — overrides x402 payer identity
   Response 201: { id, title, body, category, placedBy, paymentTxid, createdAt, expiresAt, active, status, message }
+  Response 202: { classifiedId, paymentId, paymentStatus: "pending", status, checkStatusUrl, message }
+  - A 202 pending response must include `paymentId` and a pollable `checkStatusUrl`. If the relay omits `checkStatusUrl`, the worker falls back to `/api/payment-status/{paymentId}` on the same origin.
+  - Missing `paymentId` is treated as a relay error, not a successful staged submission.
   Response 402: { error, message, payTo, amount, asset, x402 } (+ `payment-required` header) — when payment header is absent or invalid
+
+GET /api/payment-status/{paymentId}
+  Poll staged x402 delivery until settlement reaches a terminal state.
+  Response: { paymentId, status, txid?, explorerUrl?, terminalReason?, checkStatusUrl? }
+  - pending statuses: queued, broadcasting, mempool
+  - terminal statuses: confirmed, failed, replaced, not_found
+  - `submitted` is internal-only and never caller-facing
+  - If relay settlement is terminal but local staged delivery has not reconciled yet, this endpoint returns 503 so callers continue polling instead of assuming delivery is finalized.
+
+GET /api/brief/{date} (x402 when BRIEFS_FREE=false)
+  Response 202: { paymentId, paymentStatus: "pending", status, checkStatusUrl, message }
+  - A 202 means the brief was not delivered yet, and it must include `paymentId` and a pollable `checkStatusUrl`.
+  - Treat `checkStatusUrl` as the canonical polling URL. If the relay omits it, the worker falls back to GET /api/payment-status/{paymentId}.
 
 ### Write Endpoints (BIP-322 signature required)
 

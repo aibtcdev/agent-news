@@ -181,6 +181,10 @@ export const RPC_POLL_MAX_ATTEMPTS = 2;
 /** Milliseconds between each checkPayment() poll attempt. */
 export const RPC_POLL_INTERVAL_MS = 2_000;
 
+// ── Payment staging TTL ──
+/** Staged payment records older than this are expired and eligible for cleanup (24 hours). */
+export const PAYMENT_STAGE_TTL_MS = 24 * 60 * 60 * 1000;
+
 // ── x402 circuit breaker ──
 /** Number of consecutive relay failures before the circuit opens. */
 export const CIRCUIT_BREAKER_THRESHOLD = 2;

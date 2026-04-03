@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, DOErrorStatus, PayoutRecord, WeeklyPayoutResult } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, DOErrorStatus, WeeklyPayoutResult, PaymentStageMaterialized, PaymentStagePayload, PaymentTrackedState, PaymentTerminalReason } from "./types";
 import { CLASSIFIED_BRIEF_SLOTS } from "./constants";
 
 /** Singleton DO stub ID — single instance manages all news data */
@@ -448,6 +448,42 @@ export async function createClassified(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(classified),
+  });
+}
+
+export interface StagePaymentInput {
+  paymentId: string;
+  payload: PaymentStagePayload;
+}
+
+export interface ReconcilePaymentStageInput {
+  status: PaymentTrackedState;
+  txid?: string;
+  terminalReason?: PaymentTerminalReason;
+}
+
+export async function stagePayment(
+  env: Env,
+  input: StagePaymentInput
+): Promise<DOResult<PaymentStageMaterialized>> {
+  const stub = getStub(env);
+  return doFetch<PaymentStageMaterialized>(stub, "/payment-staging", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function reconcilePaymentStage(
+  env: Env,
+  paymentId: string,
+  input: ReconcilePaymentStageInput
+): Promise<DOResult<PaymentStageMaterialized | null>> {
+  const stub = getStub(env);
+  return doFetch<PaymentStageMaterialized | null>(stub, `/payment-staging/${encodeURIComponent(paymentId)}/reconcile`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
   });
 }
 
