@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -181,7 +181,10 @@ export class NewsDO extends DurableObject<Env> {
     // 9 = Retraction support (retracted_at on brief_signals, voided_at on earnings)
     // 10 = Network-focus beats (reduce 17 → 10 beats, remap signals, delete retired beats)
     // 11 = Re-run network-focus (migration 10 failed silently due to beat_claims FK constraint)
-    const CURRENT_MIGRATION_VERSION = 11;
+    // 12 = Re-add bitcoin-macro beat
+    // 13 = Add quantum beat
+    // 14 = Re-run beat inserts (idempotent fix — v12/v13 may have failed silently on staging)
+    const CURRENT_MIGRATION_VERSION = 14;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -331,6 +334,52 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Re-add bitcoin-macro beat (closes #348).
+      if (appliedVersion < 12) {
+        for (const stmt of MIGRATION_BITCOIN_MACRO_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("Bitcoin macro migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Add quantum beat (Part 2 of #348).
+      if (appliedVersion < 13) {
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_QUANTUM_BEAT_SQL);
+        } catch (e) {
+          console.error("Quantum beat migration failed:", e);
+        }
+      }
+
+      // Re-run beat inserts — v12/v13 may have failed silently on staging
+      // while migration_version was still bumped to 13. Safe to re-run
+      // because both use INSERT ON CONFLICT DO UPDATE.
+      if (appliedVersion < 14) {
+        try {
+          this.ctx.storage.sql.exec(
+            `ALTER TABLE beats ADD COLUMN daily_approved_limit INTEGER DEFAULT NULL`
+          );
+        } catch {
+          // Column already exists — expected
+        }
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_BITCOIN_MACRO_SQL[1]);
+        } catch (e) {
+          console.error("Bitcoin macro re-insert failed:", e);
+        }
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_QUANTUM_BEAT_SQL);
+        } catch (e) {
+          console.error("Quantum beat re-insert failed:", e);
+        }
+      }
+
       // Record current migration version so future cold starts skip all of the above.
       this.ctx.storage.sql.exec(
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
@@ -435,14 +484,15 @@ export class NewsDO extends DurableObject<Env> {
 
       // Verify signal exists and enforce state transition rules
       const signalRows = this.ctx.storage.sql
-        .exec("SELECT id, status FROM signals WHERE id = ?", id)
+        .exec("SELECT id, status, beat_slug FROM signals WHERE id = ?", id)
         .toArray();
       if (signalRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
       }
 
       // State machine: prevent editorial regressions
-      const currentStatus = (signalRows[0] as { id: string; status: SignalStatus }).status;
+      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string };
+      const currentStatus = signalRow.status;
       const newStatus = status as SignalStatus; // validated above against SIGNAL_STATUSES
       const allowed = SIGNAL_VALID_TRANSITIONS[currentStatus] ?? [];
       if (!allowed.includes(newStatus)) {
@@ -1312,7 +1362,7 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date();
       const nowIso = now.toISOString();
 
-      // Pacific-timezone date helpers (used for daily cap and streak)
+      // Pacific-timezone date helpers (used for daily signal limit and streak)
       const today = getPacificDate(now);
       const yesterday = getPacificYesterday(now);
       const todayStart = getPacificDayStartUTC(today);
@@ -3639,7 +3689,7 @@ export class NewsDO extends DurableObject<Env> {
     // -------------------------------------------------------------------------
     this.router.post("/test-seed", async (c) => {
       // Hard gate: refuse to serve this route in production
-      if (this.env.ENVIRONMENT !== "test" && this.env.ENVIRONMENT !== "development") {
+      if (this.env.ENVIRONMENT !== "test" && this.env.ENVIRONMENT !== "development" && this.env.ENVIRONMENT !== "staging") {
         return c.json({ ok: false, error: "Not found" }, 404);
       }
 

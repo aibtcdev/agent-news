@@ -435,3 +435,45 @@ export const MIGRATION_BEAT_NETWORK_FOCUS_SQL = `
     'aibtc-network', 'dao-watch', 'dev-tools'
   );
 `;
+
+/**
+ * MIGRATION_BITCOIN_MACRO_SQL — re-adds the bitcoin-macro beat (closes #348).
+ *
+ * Phase A: Add daily_approved_limit column to beats table. Currently unused —
+ *   reserved for future per-beat caps (e.g. limiting approvals per day on
+ *   high-volume external beats). NULL = no cap. Column is nullable integer.
+ * Phase B: Insert bitcoin-macro beat.
+ *
+ * Idempotent:
+ *   - ALTER TABLE ADD COLUMN is safe to re-run (duplicate column error is caught).
+ *   - INSERT ON CONFLICT updates name/description/color on re-run.
+ */
+export const MIGRATION_BITCOIN_MACRO_SQL = [
+  // Phase A: add column — currently unused, reserved for future per-beat daily caps
+  `ALTER TABLE beats ADD COLUMN daily_approved_limit INTEGER DEFAULT NULL`,
+  // Phase B: re-add the bitcoin-macro beat
+  `INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
+    ('bitcoin-macro', 'Bitcoin Macro', 'Broader Bitcoin macroeconomic news: price milestones, ETF flows, institutional adoption, regulatory developments, and macro events relevant to the Bitcoin-native AI economy.', '#F9A825', 'system', datetime('now'), datetime('now'))
+  ON CONFLICT(slug) DO UPDATE SET
+    name        = excluded.name,
+    description = excluded.description,
+    color       = excluded.color,
+    updated_at  = datetime('now')`,
+] as const;
+
+/**
+ * MIGRATION_QUANTUM_BEAT_SQL — adds the quantum beat (Part 2 of #348).
+ *
+ * Covers quantum computing impacts on Bitcoin: hardware advances, threats to
+ * ECDSA/SHA-256, post-quantum BIPs, timeline estimates, and quantum-resistant
+ * signature schemes.
+ *
+ * Idempotent: INSERT ON CONFLICT updates name/description/color on re-run.
+ */
+export const MIGRATION_QUANTUM_BEAT_SQL = `INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at) VALUES
+  ('quantum', 'Quantum', 'Quantum computing and its potential impacts on Bitcoin: hardware and algorithm advances, threats to ECDSA and SHA-256, post-quantum cryptography proposals and BIPs, timeline and risk assessments, and quantum-resistant signature schemes.', '#00BFA5', 'system', datetime('now'), datetime('now'))
+ON CONFLICT(slug) DO UPDATE SET
+  name        = excluded.name,
+  description = excluded.description,
+  color       = excluded.color,
+  updated_at  = datetime('now')`;
