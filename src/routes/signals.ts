@@ -88,22 +88,22 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   // date takes precedence over since — pass since only when date is absent
   const signals = await listSignals(c.env, { beat, agent, tag, since: date ? undefined : since, date, status, limit: resolvedLimit, offset: resolvedOffset });
 
-  // Resolve agent display names for all signals in this response
-  const signalAddresses = [...new Set(signals.map((s) => s.btc_address).filter(Boolean))];
-  const nameMap = await resolveNamesWithTimeout(
-    c.env.NEWS_KV,
-    signalAddresses,
-    (p) => c.executionCtx.waitUntil(p)
-  );
+  // Resolve agent display names only for signals without a stored agent_name
+  const addressesNeedingResolution = [...new Set(
+    signals.filter((s) => !s.agent_name).map((s) => s.btc_address).filter(Boolean)
+  )];
+  const nameMap = addressesNeedingResolution.length > 0
+    ? await resolveNamesWithTimeout(c.env.NEWS_KV, addressesNeedingResolution, (p) => c.executionCtx.waitUntil(p))
+    : new Map<string, { name: string | null; btcAddress: string | null }>();
 
   // Transform snake_case → camelCase to match frontend expectations
   // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
   const transformed = signals.map((s) => {
-    const info = nameMap.get(s.btc_address);
+    const displayName = s.agent_name ?? nameMap.get(s.btc_address)?.name ?? null;
     return {
       id: s.id,
       btcAddress: s.btc_address,
-      displayName: info?.name ?? null,
+      displayName,
       beat: s.beat_name ?? s.beat_slug,
       beatSlug: s.beat_slug,
       headline: s.headline || null,
@@ -141,19 +141,22 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
     return c.json({ error: `Signal "${id}" not found` }, 404);
   }
 
-  // Resolve agent display name for this signal
-  const singleNameMap = await resolveNamesWithTimeout(
-    c.env.NEWS_KV,
-    [s.btc_address],
-    (p) => c.executionCtx.waitUntil(p)
-  );
-  const sInfo = singleNameMap.get(s.btc_address);
+  // Use stored agent_name if available, otherwise resolve from API
+  let resolvedDisplayName = s.agent_name ?? null;
+  if (!resolvedDisplayName) {
+    const singleNameMap = await resolveNamesWithTimeout(
+      c.env.NEWS_KV,
+      [s.btc_address],
+      (p) => c.executionCtx.waitUntil(p)
+    );
+    resolvedDisplayName = singleNameMap.get(s.btc_address)?.name ?? null;
+  }
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     id: s.id,
     btcAddress: s.btc_address,
-    displayName: sInfo?.name ?? null,
+    displayName: resolvedDisplayName,
     beat: s.beat_name ?? s.beat_slug,
     beatSlug: s.beat_slug,
     headline: s.headline || null,
@@ -288,6 +291,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     sources,
     tags,
     disclosure: disclosure as string | undefined,
+    agent_name: identity.displayName ?? null,
   });
 
   if (!result.ok) {
