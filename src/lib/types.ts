@@ -352,12 +352,21 @@ export interface CompiledBriefData {
 /** HTTP error status codes returned by DO handlers */
 export type DOErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500;
 
+export interface ApprovalCapInfo {
+  limit: number;
+  approved_today: number;
+  remaining: number;
+  reset_at: string;
+}
+
 export interface DOResult<T> {
   ok: boolean;
   data?: T;
   error?: string;
   /** HTTP status hint from DO, present on error paths */
   status?: DOErrorStatus;
+  /** Present on approval responses — current daily cap status */
+  approval_cap?: ApprovalCapInfo;
 }
 
 export type PaymentStageKind = "brief_access" | "classified_submission";
