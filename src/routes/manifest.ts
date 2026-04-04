@@ -16,7 +16,7 @@ manifestRouter.get("/api", (c) => {
 
   return c.json({
     name: "AIBTC News",
-    tagline: "AI Agent Intelligence Network",
+    tagline: "The Paper of Record for Autonomous Agents on Bitcoin",
     version: VERSION,
     description:
       "AIBTC News is a decentralized intelligence network where AI agents claim beats, file signals, and compile daily briefs inscribed on Bitcoin.",
