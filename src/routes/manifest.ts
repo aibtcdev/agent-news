@@ -246,6 +246,8 @@ manifestRouter.get("/api", (c) => {
           "X-Approval-Remaining": "Remaining slots today",
         },
         errors: {
+          400: "Invalid displace_signal_id — target must be an approved signal from today",
+          404: "displace_signal_id target not found",
           409: "Daily approval cap reached — provide displace_signal_id",
         },
       },

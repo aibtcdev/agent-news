@@ -742,9 +742,9 @@ export class NewsDO extends DurableObject<Env> {
       // When approving, enforce MAX_APPROVED_SIGNALS_PER_DAY. If at cap,
       // require displace_signal_id to atomically swap one out.
       let approvalCap: ApprovalCapInfo | undefined;
+      const nowDate = new Date();
 
       if (newStatus === "approved") {
-        const nowDate = new Date();
         const today = getPacificDate(nowDate);
         const dayStart = getPacificDayStartUTC(today);
         const dayEnd = getPacificDayEndUTC(today);
@@ -757,7 +757,8 @@ export class NewsDO extends DurableObject<Env> {
             dayStart, dayEnd
           )
           .toArray();
-        const approvedToday = (countRows[0] as Record<string, unknown>).count as number;
+        const rawCount = (countRows[0] as Record<string, unknown> | undefined)?.count;
+        const approvedToday = Number.isFinite(Number(rawCount)) ? Number(rawCount) : 0;
 
         if (approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY) {
           const displaceId = body.displace_signal_id as string | undefined;
@@ -772,7 +773,7 @@ export class NewsDO extends DurableObject<Env> {
                 remaining: 0,
                 reset_at: dayEnd,
               },
-            } as unknown as DOResult<Signal>, 409);
+            } satisfies DOResult<Signal>, 409);
           }
 
           // Validate displacement target
@@ -782,16 +783,16 @@ export class NewsDO extends DurableObject<Env> {
           if (displaceRows.length === 0) {
             return c.json({ ok: false, error: `Displace target "${displaceId}" not found` } satisfies DOResult<Signal>, 404);
           }
-          const displaceRow = displaceRows[0] as { id: string; status: string; reviewed_at: string };
+          const displaceRow = displaceRows[0] as { id: string; status: string; reviewed_at: string | null };
           if (displaceRow.status !== "approved") {
             return c.json({
               ok: false,
               error: `Displace target must have status "approved", got "${displaceRow.status}". Only "approved" signals can be displaced (not "brief_included" or other statuses).`,
             } satisfies DOResult<Signal>, 400);
           }
-          // Displacement target must be from today (same Pacific day) — displacing
-          // older signals wouldn't free a slot in today's count.
-          if (displaceRow.reviewed_at < dayStart || displaceRow.reviewed_at >= dayEnd) {
+          // Displacement target must have a reviewed_at timestamp and be from
+          // today (same Pacific day) — displacing older signals wouldn't free a slot.
+          if (!displaceRow.reviewed_at || displaceRow.reviewed_at < dayStart || displaceRow.reviewed_at >= dayEnd) {
             return c.json({
               ok: false,
               error: `Displace target was not approved today. Only today's approved signals can be displaced.`,
@@ -799,23 +800,23 @@ export class NewsDO extends DurableObject<Env> {
           }
 
           // Atomically displace: set old signal to 'replaced'
-          const displaceNow = nowDate.toISOString();
           this.ctx.storage.sql.exec(
             `UPDATE signals SET status = 'replaced', updated_at = ? WHERE id = ?`,
-            displaceNow, displaceId
+            nowDate.toISOString(), displaceId
           );
         }
 
-        // Build cap info for response (count will be recalculated after UPDATE below)
+        // Build cap info for response
+        const countAfter = approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY ? approvedToday : approvedToday + 1;
         approvalCap = {
           limit: MAX_APPROVED_SIGNALS_PER_DAY,
-          approved_today: approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY ? approvedToday : approvedToday + 1,
-          remaining: Math.max(0, MAX_APPROVED_SIGNALS_PER_DAY - (approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY ? approvedToday : approvedToday + 1)),
+          approved_today: countAfter,
+          remaining: Math.max(0, MAX_APPROVED_SIGNALS_PER_DAY - countAfter),
           reset_at: dayEnd,
         };
       }
 
-      const now = new Date().toISOString();
+      const now = nowDate.toISOString();
       this.ctx.storage.sql.exec(
         `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
          WHERE id = ?`,

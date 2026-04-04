@@ -70,7 +70,10 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
   });
 
   if (!result.ok) {
-    return c.json({ error: result.error }, result.status ?? 400);
+    return c.json({
+      error: result.error,
+      ...(result.approval_cap ? { approval_cap: result.approval_cap } : {}),
+    }, result.status ?? 400);
   }
 
   const logger = c.get("logger");
