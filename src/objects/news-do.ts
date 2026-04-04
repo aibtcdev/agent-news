@@ -726,21 +726,27 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-
-      // Daily approval cap gate: hard limit at DAILY_APPROVAL_CAP signals per day
+      // Daily approval cap gate: hard limit at DAILY_APPROVAL_CAP signals per editorial day (Pacific)
       if (newStatus === "approved") {
+        const today = getPacificDate();
+        const todayStart = getPacificDayStartUTC(today);
         const todayApprovalCount = this.ctx.storage.sql
           .exec(
-            `SELECT COUNT(*) as count FROM signals WHERE status = 'approved' AND DATE(reviewed_at) = DATE('now')`
+            `SELECT COUNT(*) as count FROM signals WHERE status = 'approved' AND reviewed_at >= ?`,
+            todayStart
           )
           .toArray();
-        const currentApprovals = (todayApprovalCount[0] as { count: number }).count;
+        const currentApprovals = (todayApprovalCount[0] as { count: number } | undefined)?.count ?? 0;
 
         if (currentApprovals >= DAILY_APPROVAL_CAP) {
           return c.json({
             ok: false,
             error: `Daily approval cap reached (${currentApprovals}/${DAILY_APPROVAL_CAP}). Use displacement to swap signals.`,
-            daily_approvals: { current: currentApprovals, cap: DAILY_APPROVAL_CAP },
+            daily_approvals: {
+              current: currentApprovals,
+              cap: DAILY_APPROVAL_CAP,
+              reset_at: getPacificDayStartUTC(getNextDate(today)),
+            },
           } satisfies DOResult<Signal>, 429);
         }
       }
