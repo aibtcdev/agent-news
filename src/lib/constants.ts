@@ -85,6 +85,9 @@ export const MAX_INCLUDED_SIGNALS_PER_BRIEF = 30;
 // ── Beat expiry ──
 export const BEAT_EXPIRY_DAYS = 14;
 
+// ── Daily approval cap ──
+export const DAILY_APPROVAL_CAP = 30;
+
 // ── Brief paywall ──
 export const BRIEF_PRICE_SATS = 1000;
 export const CORRESPONDENT_SHARE = 0.7;
