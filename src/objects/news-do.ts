@@ -747,7 +747,7 @@ export class NewsDO extends DurableObject<Env> {
               cap: DAILY_APPROVAL_CAP,
               reset_at: getPacificDayStartUTC(getNextDate(today)),
             },
-          } satisfies DOResult<Signal>, 429);
+          }, 429);
         }
       }
 
