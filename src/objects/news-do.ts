@@ -1,11 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL } from "./schema";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -229,7 +229,8 @@ export class NewsDO extends DurableObject<Env> {
     // 13 = Add quantum beat
     // 14 = Re-run beat inserts (idempotent fix — v12/v13 may have failed silently on staging)
     // 15 = Payment staging (confirmed-only x402 finalization keyed by paymentId)
-    const CURRENT_MIGRATION_VERSION = 15;
+    // 16 = Approval cap index — compound index on (status, reviewed_at) for daily count queries (#362)
+    const CURRENT_MIGRATION_VERSION = 16;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -432,6 +433,17 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(stmt);
           } catch (e) {
             console.error("Payment staging migration statement failed:", e);
+          }
+        }
+      }
+
+      // Approval cap index — compound index for efficient daily approved count queries (#362).
+      if (appliedVersion < 16) {
+        for (const stmt of MIGRATION_APPROVAL_CAP_INDEX_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Approval cap index migration failed:", e);
           }
         }
       }
@@ -726,6 +738,83 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // ── Daily approval cap ────────────────────────────────────────────
+      // When approving, enforce MAX_APPROVED_SIGNALS_PER_DAY. If at cap,
+      // require displace_signal_id to atomically swap one out.
+      let approvalCap: ApprovalCapInfo | undefined;
+
+      if (newStatus === "approved") {
+        const nowDate = new Date();
+        const today = getPacificDate(nowDate);
+        const dayStart = getPacificDayStartUTC(today);
+        const dayEnd = getPacificDayEndUTC(today);
+
+        const countRows = this.ctx.storage.sql
+          .exec(
+            `SELECT COUNT(*) as count FROM signals
+             WHERE status IN ('approved', 'brief_included')
+               AND reviewed_at >= ? AND reviewed_at < ?`,
+            dayStart, dayEnd
+          )
+          .toArray();
+        const approvedToday = (countRows[0] as Record<string, unknown>).count as number;
+
+        if (approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY) {
+          const displaceId = body.displace_signal_id as string | undefined;
+
+          if (!displaceId) {
+            return c.json({
+              ok: false,
+              error: `Daily approval cap reached (${MAX_APPROVED_SIGNALS_PER_DAY}). Provide displace_signal_id to swap.`,
+              approval_cap: {
+                limit: MAX_APPROVED_SIGNALS_PER_DAY,
+                approved_today: approvedToday,
+                remaining: 0,
+                reset_at: dayEnd,
+              },
+            } as unknown as DOResult<Signal>, 409);
+          }
+
+          // Validate displacement target
+          const displaceRows = this.ctx.storage.sql
+            .exec("SELECT id, status, reviewed_at FROM signals WHERE id = ?", displaceId)
+            .toArray();
+          if (displaceRows.length === 0) {
+            return c.json({ ok: false, error: `Displace target "${displaceId}" not found` } satisfies DOResult<Signal>, 404);
+          }
+          const displaceRow = displaceRows[0] as { id: string; status: string; reviewed_at: string };
+          if (displaceRow.status !== "approved") {
+            return c.json({
+              ok: false,
+              error: `Displace target must have status "approved", got "${displaceRow.status}". Only "approved" signals can be displaced (not "brief_included" or other statuses).`,
+            } satisfies DOResult<Signal>, 400);
+          }
+          // Displacement target must be from today (same Pacific day) — displacing
+          // older signals wouldn't free a slot in today's count.
+          if (displaceRow.reviewed_at < dayStart || displaceRow.reviewed_at >= dayEnd) {
+            return c.json({
+              ok: false,
+              error: `Displace target was not approved today. Only today's approved signals can be displaced.`,
+            } satisfies DOResult<Signal>, 400);
+          }
+
+          // Atomically displace: set old signal to 'replaced'
+          const displaceNow = nowDate.toISOString();
+          this.ctx.storage.sql.exec(
+            `UPDATE signals SET status = 'replaced', updated_at = ? WHERE id = ?`,
+            displaceNow, displaceId
+          );
+        }
+
+        // Build cap info for response (count will be recalculated after UPDATE below)
+        approvalCap = {
+          limit: MAX_APPROVED_SIGNALS_PER_DAY,
+          approved_today: approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY ? approvedToday : approvedToday + 1,
+          remaining: Math.max(0, MAX_APPROVED_SIGNALS_PER_DAY - (approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY ? approvedToday : approvedToday + 1)),
+          reset_at: dayEnd,
+        };
+      }
+
       const now = new Date().toISOString();
       this.ctx.storage.sql.exec(
         `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
@@ -768,7 +857,7 @@ export class NewsDO extends DurableObject<Env> {
         .toArray();
 
       const signal = rowToSignal(updated[0] as Record<string, unknown>);
-      return c.json({ ok: true, data: signal } satisfies DOResult<Signal>);
+      return c.json({ ok: true, data: signal, approval_cap: approvalCap } as DOResult<Signal>);
     });
 
     // -------------------------------------------------------------------------
@@ -2549,6 +2638,7 @@ export class NewsDO extends DurableObject<Env> {
           waitMinutes,
           signalsToday,
           maxSignalsPerDay: MAX_SIGNALS_PER_DAY,
+          maxApprovedSignalsPerDay: MAX_APPROVED_SIGNALS_PER_DAY,
           actions,
         },
       } satisfies DOResult<unknown>);
