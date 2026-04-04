@@ -87,6 +87,23 @@ earningsRouter.get("/api/earnings/:address", async (c) => {
 earningsRouter.patch("/api/earnings/:id", async (c) => {
   const id = c.req.param("id");
 
+  // Read the publisher address from the auth header, not the request body.
+  // Callers that previously included btc_address in the body were sending
+  // the correspondent's address by mistake (e.g. brief-payout CLI, issue #338),
+  // causing ADDRESS_MISMATCH on every payout attempt. The X-BTC-Address header
+  // is always the signing key owner — which must be the publisher.
+  const btc_address = c.req.header("X-BTC-Address");
+  if (!btc_address) {
+    return c.json(
+      { error: "Missing authentication headers: X-BTC-Address, X-BTC-Signature, X-BTC-Timestamp", code: "MISSING_AUTH" },
+      401
+    );
+  }
+
+  if (!validateBtcAddress(btc_address)) {
+    return c.json({ error: "Invalid BTC address format in X-BTC-Address header" }, 400);
+  }
+
   let body: Record<string, unknown>;
   try {
     body = await c.req.json<Record<string, unknown>>();
@@ -94,17 +111,10 @@ earningsRouter.patch("/api/earnings/:id", async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { btc_address, payout_txid } = body;
+  const { payout_txid } = body;
 
-  if (!btc_address || typeof btc_address !== "string") {
-    return c.json({ error: "Missing required field: btc_address" }, 400);
-  }
   if (!payout_txid || typeof payout_txid !== "string" || payout_txid.trim() === "") {
     return c.json({ error: "Missing required field: payout_txid (non-empty string)" }, 400);
-  }
-
-  if (!validateBtcAddress(btc_address)) {
-    return c.json({ error: "Invalid BTC address format" }, 400);
   }
 
   // BIP-322 auth — Publisher must sign the request
