@@ -564,3 +564,40 @@ export const MIGRATION_EDITORIAL_REVIEWS_SQL = [
 export const MIGRATION_EDITOR_REVIEW_RATE_SQL = [
   "ALTER TABLE beats ADD COLUMN editor_review_rate_sats INTEGER DEFAULT NULL",
 ] as const;
+
+/**
+ * MIGRATION_CURATION_CLEANUP_SQL — fixes Mar 28-29 brief curation data (#339).
+ *
+ * 1. Updates inscription IDs to the amended (curated 30-signal) versions.
+ * 2. Voids orphaned earnings from the over-sized original briefs that were
+ *    never paid out (no payout_txid) and not already voided.
+ *
+ * The voided_at timestamp uses 2026-03-31T03:00:00Z — the date the manual
+ * curation cleanup was performed.
+ */
+export const MIGRATION_CURATION_CLEANUP_SQL = [
+  // Mar 28 amended inscription
+  `UPDATE briefs SET inscription_id = '7cad42fa601bd0525e1e76a3e85d5898b6bdc1d71ee093854b7a7074b2b28abei0'
+   WHERE date = '2026-03-28'
+     AND inscription_id != '7cad42fa601bd0525e1e76a3e85d5898b6bdc1d71ee093854b7a7074b2b28abei0'`,
+  // Mar 29 amended inscription
+  `UPDATE briefs SET inscription_id = '07b3788e2dc67733f4bc8f59af841afcb24ef2a7f911581a2010bf7a963caf93i0'
+   WHERE date = '2026-03-29'
+     AND inscription_id != '07b3788e2dc67733f4bc8f59af841afcb24ef2a7f911581a2010bf7a963caf93i0'`,
+  // Void unpaid Mar 28 earnings (compiled ~2026-03-29T04:16Z) excluding the 30 curated signals
+  `UPDATE earnings SET voided_at = '2026-03-31T03:00:00Z'
+   WHERE reason = 'brief_inclusion'
+     AND payout_txid IS NULL AND voided_at IS NULL
+     AND created_at >= '2026-03-29T04:00:00Z' AND created_at < '2026-03-29T05:00:00Z'
+     AND reference_id NOT IN (
+       '930e1834-bef4-4e3f-a68a-3056477af468','1d6ece26-797b-43f7-b1e6-567ed87c631e','cb493430-5d9e-4e49-a725-2f1be7bb08ab','111d8292-8ab5-40e3-bc3b-208db92632c0','98a4d814-00b7-451a-968c-d976220cc7c5','c1343c15-e4b7-4298-9a39-4f8d00bee54d','82a50ffb-c6bf-4fd4-867b-6f0d67365bb6','0ed8c332-cc91-4a24-bc72-9490f5dc0822','9a892709-772e-496f-afe7-9185cce91c86','20bb3ede-6ecf-4b2a-a69f-122c4b57c613','0c4f667c-524d-40db-aecc-f0ef18c55de9','31981975-a6a3-4586-b2d4-870015b7f677','0a14999b-60bd-4fe4-ab7f-753dd9ceda75','b538613c-808b-444e-a31a-02b2579488c2','dc8792d8-f914-4efc-83c7-e340f649d530','6a9d716c-379c-4774-9c24-f8e76f73997a','01c0bedb-2b39-40bf-b686-411384054f1d','b5a3c5f6-4a3f-4637-af37-5a9f79e91c90','18dc8c21-1def-44f9-a2af-8d0a4074e89b','ad79de32-4646-4848-aa17-edb31c327465','55c5e5e6-92e9-43e3-8d8a-f264e4bcc043','f557dc4d-fc45-4fa7-af2d-a0288e9df9ed','9e5879c7-97ce-4f1c-a8fb-b032668fd255','575a3d65-4af8-43de-a65a-61fde6952df8','65a12c02-3b2c-4cdc-9574-a008ec360464','76f8d1e0-6d87-459f-9886-1480533dbcb1','d0cb7dcf-e49c-4bae-aba4-5cd73108f332','b59401dc-f81a-4c18-ba1e-d1c8013a9e8d','029c697b-40de-47d3-a48b-e7954acf93ed','e949fdb2-f75d-40d9-934f-13e8c4f0ed30'
+     )`,
+  // Void unpaid Mar 29 earnings (compiled ~2026-03-30T09:52Z) excluding the 30 curated signals
+  `UPDATE earnings SET voided_at = '2026-03-31T03:00:00Z'
+   WHERE reason = 'brief_inclusion'
+     AND payout_txid IS NULL AND voided_at IS NULL
+     AND created_at >= '2026-03-30T09:00:00Z' AND created_at < '2026-03-30T10:00:00Z'
+     AND reference_id NOT IN (
+       'db837a01-788d-4f08-a174-8758347ce61a','ffcb4de3-3998-4265-a8a2-eb8944f4af32','43800ead-c4bd-46ef-95f2-5cd1a1ae50a9','80e3529a-a4e9-4cd5-b41c-bcb701a0ba53','2b4cfe7a-75d0-4ce0-906a-bff3e09185cc','2e00e3ef-a979-4583-b010-7565d9b8e635','31cf9975-c3af-44d5-ba5c-b7e5f11375af','dc06393c-f1e0-4667-8ee0-3a593f39ff2c','248db72c-6082-43ca-8500-3c39b013c5e2','f74eb37a-cfba-47d4-adc9-06b62422e2b8','cef57500-2ee9-4c12-82eb-5cb3f8f03e52','3960c10e-92f8-43f6-b8bb-58f768dc5fc0','40d30fbb-459b-49ea-8f94-98b2c8d17a0c','52fadd57-8847-46a8-85e7-d8458f86374e','747ef5c5-30fc-4bff-a555-d52b982dcd4d','cb05bbc3-ed0c-4f77-8ec3-5c7e916bd796','772617b2-2c1b-4f61-bb50-2203b623787a','a1518f55-d566-47d0-a397-35ef9a50efd4','7d995511-db66-400c-8d26-ad198c985281','9f6d8223-aeb5-4de0-b2ab-1ecff104dcdc','545f7829-a536-464c-9417-6c06fa26d02a','bcd9e7ef-992c-4a80-b788-c7000fba15c7','14305d91-2348-4299-b26d-3a4bfebd2909','41bf9018-b15e-4995-9699-fcdb9357634f','b5e4f967-76f5-4012-9c64-c6369f010482','4f5f50e0-60f6-4901-aae7-a0468c61234b','8b866fc7-e02d-4a6f-ba88-fed94434466b','10c5c979-a1e9-45d8-92a4-59fe7d70bd2a','246983df-bd20-4d24-8dce-88b526284e82','45c3be21-17b1-41ca-ab18-82a2ec165146'
+     )`,
+] as const;

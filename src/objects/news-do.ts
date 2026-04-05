@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -273,7 +273,8 @@ export class NewsDO extends DurableObject<Env> {
     // 17 = Beat editors — beat_editors table for scoped editorial delegation
     // 18 = Editorial reviews — type/score/factcheck columns on corrections table
     // 19 = Editor review rate — editor_review_rate_sats column on beats table
-    const CURRENT_MIGRATION_VERSION = 19;
+    // 20 = Curation cleanup — fix Mar 28-29 inscription IDs + void 312 orphaned earnings (#339)
+    const CURRENT_MIGRATION_VERSION = 20;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -529,6 +530,17 @@ export class NewsDO extends DurableObject<Env> {
             if (!msg.includes("duplicate column")) {
               console.error("Editor review rate migration statement failed:", e);
             }
+          }
+        }
+      }
+
+      // Curation cleanup — fix Mar 28-29 inscription IDs and void orphaned earnings (#339).
+      if (appliedVersion < 20) {
+        for (const stmt of MIGRATION_CURATION_CLEANUP_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Curation cleanup migration failed:", e);
           }
         }
       }
