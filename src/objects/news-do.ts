@@ -81,7 +81,9 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     reviewed_at: raw.reviewed_at ?? null,
     disclosure: raw.disclosure ?? "",
     quality_score: raw.quality_score ?? null,
-    score_breakdown: raw.score_breakdown ? JSON.parse(raw.score_breakdown) : null,
+    score_breakdown: raw.score_breakdown
+      ? (() => { try { return JSON.parse(raw.score_breakdown); } catch { return null; } })()
+      : null,
   };
 }
 

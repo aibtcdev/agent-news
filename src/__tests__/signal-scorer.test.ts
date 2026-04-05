@@ -24,7 +24,7 @@ describe("scoreSignal — sourceQuality dimension", () => {
   it("returns 10 pts for 1 source", () => {
     const result = scoreSignal({
       ...MINIMAL_SIGNAL,
-      sources: [{ url: "https://example.com/news/2026/article", title: "Example" }],
+      sources: [{ url: `https://example.com/news/${new Date().getFullYear()}/article`, title: "Example" }],
     });
     expect(result.breakdown.sourceQuality).toBe(10);
   });
@@ -201,13 +201,14 @@ describe("scoreSignal — disclosure dimension", () => {
 
 describe("scoreSignal — total and shape", () => {
   it("total equals sum of all breakdown dimensions", () => {
+    const currentYear = new Date().getFullYear();
     const result = scoreSignal({
       headline: "Agent economy signals new wave of sBTC payment adoption on Stacks network",
       body: "A".repeat(250),
       sources: [
-        { url: "https://stacks.org/2026/news", title: "Stacks News" },
-        { url: "https://aibtc.com/2026/updates", title: "AIBTC Updates" },
-        { url: "https://x.com/2026/post", title: "Post" },
+        { url: `https://stacks.org/${currentYear}/news`, title: "Stacks News" },
+        { url: `https://aibtc.com/${currentYear}/updates`, title: "AIBTC Updates" },
+        { url: `https://x.com/${currentYear}/post`, title: "Post" },
       ],
       tags: ["agent", "economy", "sbtc"],
       beat_slug: "agent-economy",
@@ -227,13 +228,14 @@ describe("scoreSignal — total and shape", () => {
   });
 
   it("returns maximum score of 100 for a fully-formed signal", () => {
+    const currentYear = new Date().getFullYear();
     const result = scoreSignal({
       headline: "Agent economy signals new wave of sBTC payment adoption on Stacks network",
       body: "A".repeat(250),
       sources: [
-        { url: "https://stacks.org/2026/news", title: "Stacks News" },
-        { url: "https://aibtc.com/2026/updates", title: "AIBTC Updates" },
-        { url: "https://x.com/2026/post", title: "Post" },
+        { url: `https://stacks.org/${currentYear}/news`, title: "Stacks News" },
+        { url: `https://aibtc.com/${currentYear}/updates`, title: "AIBTC Updates" },
+        { url: `https://x.com/${currentYear}/post`, title: "Post" },
       ],
       tags: ["agent", "economy"],
       beat_slug: "agent-economy",
