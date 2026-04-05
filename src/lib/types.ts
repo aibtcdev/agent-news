@@ -387,7 +387,7 @@ export interface DOResult<T> {
 }
 
 export type PaymentStageKind = "brief_access" | "classified_submission";
-export type PaymentStageLifecycle = "staged" | "finalized" | "discarded";
+export type PaymentStageLifecycle = "staged" | "finalized" | "discarded" | "expired";
 
 export interface BriefAccessStagePayload {
   kind: "brief_access";
