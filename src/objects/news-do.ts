@@ -853,7 +853,8 @@ export class NewsDO extends DurableObject<Env> {
                   terminal_status = 'confirmed',
                   terminal_reason = NULL,
                   updated_at = ?,
-                  finalized_at = ?
+                  finalized_at = ?,
+                  discarded_at = NULL
             WHERE payment_id = ?`,
           now,
           now,
