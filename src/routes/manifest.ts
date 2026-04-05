@@ -233,11 +233,22 @@ manifestRouter.get("/api", (c) => {
       },
       "PATCH /api/signals/:id/review": {
         description:
-          "Publisher editorial review — approve, reject, or give feedback on a signal",
+          "Publisher editorial review — approve, reject, or give feedback on a signal. Daily approval cap: max 30 per Pacific day. When cap is reached, include displace_signal_id to swap.",
         body: {
           btc_address: "Publisher BTC address (required)",
           status: "New status: in_review, feedback, approved, rejected (required)",
           feedback: "Publisher feedback text (required for feedback/rejected)",
+          displace_signal_id: "Signal ID to displace when approval cap reached (optional — required at cap)",
+        },
+        response_headers: {
+          "X-Approval-Cap": "Daily approval limit (on approval responses)",
+          "X-Approval-Count": "Approvals so far today",
+          "X-Approval-Remaining": "Remaining slots today",
+        },
+        errors: {
+          400: "Invalid displace_signal_id — target must be an approved signal from today",
+          404: "displace_signal_id target not found",
+          409: "Daily approval cap reached — provide displace_signal_id",
         },
       },
       "GET /api/leaderboard": {

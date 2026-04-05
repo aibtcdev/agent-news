@@ -82,6 +82,11 @@ export const SIGNAL_COOLDOWN_HOURS = 1;
 export const MAX_SIGNALS_PER_DAY = 6;
 export const MAX_INCLUDED_SIGNALS_PER_BRIEF = 30;
 
+// ── Daily approval cap (Publisher-enforced) ──
+/** Maximum signals the Publisher may approve per Pacific day. Once reached,
+ *  further approvals require displacing an existing approved signal. */
+export const MAX_APPROVED_SIGNALS_PER_DAY = 30;
+
 // ── Beat expiry ──
 export const BEAT_EXPIRY_DAYS = 14;
 

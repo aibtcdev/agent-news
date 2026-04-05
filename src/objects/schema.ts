@@ -507,3 +507,11 @@ ON CONFLICT(slug) DO UPDATE SET
   description = excluded.description,
   color       = excluded.color,
   updated_at  = datetime('now')`;
+
+/**
+ * MIGRATION_APPROVAL_CAP_INDEX_SQL — adds compound index for daily approval cap (#362).
+ * Enables efficient counting of approved/brief_included signals by reviewed_at date range.
+ */
+export const MIGRATION_APPROVAL_CAP_INDEX_SQL = [
+  "CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed ON signals(status, reviewed_at)",
+] as const;

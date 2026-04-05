@@ -787,6 +787,7 @@ export interface ReviewSignalInput {
   btc_address: string;
   status: SignalStatus;
   feedback?: string | null;
+  displace_signal_id?: string;
 }
 
 export async function reviewSignal(

@@ -32,7 +32,7 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { btc_address, status, feedback } = body;
+  const { btc_address, status, feedback, displace_signal_id } = body;
 
   if (!btc_address) {
     return c.json({ error: "Missing required field: btc_address" }, 400);
@@ -66,10 +66,14 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     btc_address: btc_address as string,
     status: status as SignalStatus,
     feedback: feedback ? String(feedback) : null,
+    displace_signal_id: displace_signal_id ? String(displace_signal_id) : undefined,
   });
 
   if (!result.ok) {
-    return c.json({ error: result.error }, result.status ?? 400);
+    return c.json({
+      error: result.error,
+      ...(result.approval_cap ? { approval_cap: result.approval_cap } : {}),
+    }, result.status ?? 400);
   }
 
   const logger = c.get("logger");
@@ -80,6 +84,14 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
   });
 
   const s = result.data as NonNullable<typeof result.data>;
+
+  // Surface approval cap in response headers when present
+  if (result.approval_cap) {
+    c.header("X-Approval-Cap", String(result.approval_cap.limit));
+    c.header("X-Approval-Count", String(result.approval_cap.approved_today));
+    c.header("X-Approval-Remaining", String(result.approval_cap.remaining));
+  }
+
   return c.json({
     id: s.id,
     btcAddress: s.btc_address,
@@ -95,6 +107,7 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     reviewedAt: s.reviewed_at,
     disclosure: s.disclosure,
     correction_of: s.correction_of,
+    approval_cap: result.approval_cap ?? undefined,
   });
 });
 
