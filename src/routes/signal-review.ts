@@ -175,7 +175,7 @@ signalReviewRouter.patch("/api/signals/:id/feature", reviewRateLimit, async (c) 
     tags: s.tags,
     timestamp: s.created_at,
     status: s.status,
-    featured: s.featured === 1,
+    featured: s.featured,
     disclosure: s.disclosure,
     correction_of: s.correction_of,
   });
