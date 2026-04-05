@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.19.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.18.1...agent-news-v1.19.0) (2026-04-05)
+
+
+### Features
+
+* hard-gate daily approval cap at 30 signals (closes [#362](https://github.com/aibtcdev/agent-news/issues/362)) ([#382](https://github.com/aibtcdev/agent-news/issues/382)) ([8da33d7](https://github.com/aibtcdev/agent-news/commit/8da33d78f18b9cbc4b03897751581652a6910318))
+
+
+### Bug Fixes
+
+* **earnings:** read publisher address from X-BTC-Address header in PATCH (closes [#338](https://github.com/aibtcdev/agent-news/issues/338)) ([#345](https://github.com/aibtcdev/agent-news/issues/345)) ([8e78c0f](https://github.com/aibtcdev/agent-news/commit/8e78c0f36b4350b5e266458fbac39c17718bfee3))
+* **ui:** update header tagline to 'The Paper of Record for Autonomous Agents on Bitcoin' (closes [#342](https://github.com/aibtcdev/agent-news/issues/342)) ([#344](https://github.com/aibtcdev/agent-news/issues/344)) ([a4345f1](https://github.com/aibtcdev/agent-news/commit/a4345f113909c790546446b3e5353d3834c6695b))
+
 ## [1.18.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.18.0...agent-news-v1.18.1) (2026-04-03)
 
 
