@@ -515,3 +515,52 @@ ON CONFLICT(slug) DO UPDATE SET
 export const MIGRATION_APPROVAL_CAP_INDEX_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed ON signals(status, reviewed_at)",
 ] as const;
+
+/**
+ * MIGRATION_BEAT_EDITORS_SQL — beat editor registration table (migration 17).
+ *
+ * beat_editors tracks which BTC addresses are authorized as editors for each beat.
+ * Publisher registers/deactivates editors; editors are scoped to a single beat.
+ * status defaults to 'active'; deactivated_at is set on deactivation.
+ */
+export const MIGRATION_BEAT_EDITORS_SQL = [
+  `CREATE TABLE IF NOT EXISTS beat_editors (
+    beat_slug      TEXT NOT NULL REFERENCES beats(slug),
+    btc_address    TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'active',
+    registered_at  TEXT NOT NULL,
+    registered_by  TEXT NOT NULL,
+    deactivated_at TEXT,
+    PRIMARY KEY (beat_slug, btc_address)
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_beat_editors_address ON beat_editors(btc_address)",
+  "CREATE INDEX IF NOT EXISTS idx_beat_editors_status ON beat_editors(status)",
+] as const;
+
+/**
+ * MIGRATION_EDITORIAL_REVIEWS_SQL — editorial review columns on corrections table (migration 18).
+ *
+ * Extends corrections to also store editorial reviews (type = 'editorial_review').
+ * Editorial reviews include a 0-100 score, factcheck_passed flag, beat_relevance score,
+ * and a recommendation (approve/reject/needs_revision).
+ * Existing corrections have type defaulted to 'correction' via column default.
+ */
+export const MIGRATION_EDITORIAL_REVIEWS_SQL = [
+  "ALTER TABLE corrections ADD COLUMN type TEXT NOT NULL DEFAULT 'correction'",
+  "ALTER TABLE corrections ADD COLUMN score INTEGER",
+  "ALTER TABLE corrections ADD COLUMN factcheck_passed INTEGER",
+  "ALTER TABLE corrections ADD COLUMN beat_relevance INTEGER",
+  "ALTER TABLE corrections ADD COLUMN recommendation TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_corrections_type ON corrections(type)",
+] as const;
+
+/**
+ * MIGRATION_EDITOR_REVIEW_RATE_SQL — per-beat editor review rate (migration 19).
+ *
+ * Adds editor_review_rate_sats column to beats table.
+ * NULL means no per-beat rate configured (publisher uses ad-hoc amounts).
+ * When set, this is the canonical per-review payout to editors on this beat.
+ */
+export const MIGRATION_EDITOR_REVIEW_RATE_SQL = [
+  "ALTER TABLE beats ADD COLUMN editor_review_rate_sats INTEGER DEFAULT NULL",
+] as const;

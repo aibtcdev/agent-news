@@ -287,6 +287,19 @@ export interface IncludedSignalMetadata {
 }
 
 /**
+ * A beat editor registration record.
+ * Publishers register editors for specific beats; editors can approve/reject signals on their beat.
+ */
+export interface BeatEditor {
+  readonly beat_slug: string;
+  readonly btc_address: string;
+  readonly status: "active" | "inactive";
+  readonly registered_at: string;
+  readonly registered_by: string;
+  readonly deactivated_at: string | null;
+}
+
+/**
  * A fact-checker correction filed against a signal
  */
 export interface Correction {

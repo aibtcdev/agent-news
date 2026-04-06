@@ -5,15 +5,15 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
 
-/** Valid editorial transitions for signals: submitted → in_review → approved/rejected → brief_included */
+/** Valid editorial transitions for signals: submitted → approved/rejected → brief_included */
 export const SIGNAL_VALID_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
-  submitted: ["in_review", "approved", "rejected"],
-  in_review: ["approved", "rejected"],
+  submitted: ["approved", "rejected"],
+  in_review: ["approved", "rejected"], // legacy: in_review still allows transition for existing signals
   approved: ["replaced", "rejected", "brief_included"],
   replaced: ["approved", "rejected"],
   rejected: ["approved"],
@@ -230,7 +230,10 @@ export class NewsDO extends DurableObject<Env> {
     // 14 = Re-run beat inserts (idempotent fix — v12/v13 may have failed silently on staging)
     // 15 = Payment staging (confirmed-only x402 finalization keyed by paymentId)
     // 16 = Approval cap index — compound index on (status, reviewed_at) for daily count queries (#362)
-    const CURRENT_MIGRATION_VERSION = 16;
+    // 17 = Beat editors — beat_editors table for scoped editorial delegation
+    // 18 = Editorial reviews — type/score/factcheck columns on corrections table
+    // 19 = Editor review rate — editor_review_rate_sats column on beats table
+    const CURRENT_MIGRATION_VERSION = 19;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -444,6 +447,48 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(stmt);
           } catch (e) {
             console.error("Approval cap index migration failed:", e);
+          }
+        }
+      }
+
+      // Beat editors — beat_editors table for scoped editorial delegation.
+      if (appliedVersion < 17) {
+        for (const stmt of MIGRATION_BEAT_EDITORS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error("Beat editors migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Editorial reviews — type/score/factcheck columns on corrections table.
+      if (appliedVersion < 18) {
+        for (const stmt of MIGRATION_EDITORIAL_REVIEWS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
+              console.error("Editorial reviews migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Editor review rate — editor_review_rate_sats column on beats table.
+      if (appliedVersion < 19) {
+        for (const stmt of MIGRATION_EDITOR_REVIEW_RATE_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("Editor review rate migration statement failed:", e);
+            }
           }
         }
       }

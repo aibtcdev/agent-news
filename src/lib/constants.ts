@@ -106,7 +106,6 @@ export const SIGNAL_STATUSES = [
 
 export const REVIEWABLE_SIGNAL_STATUSES = [
   "submitted",
-  "in_review",
   "approved",
   "replaced",
   "rejected",
@@ -154,6 +153,11 @@ export const REFERRAL_RATE_LIMIT = {
 // Publisher-only routes (single operator, generous limits)
 export const REVIEW_RATE_LIMIT = {
   maxRequests: 200,
+  windowSeconds: 3600, // 1 hour
+} as const;
+
+export const EDITOR_REVIEW_RATE_LIMIT = {
+  maxRequests: 100,
   windowSeconds: 3600, // 1 hour
 } as const;
 
