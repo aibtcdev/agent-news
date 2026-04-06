@@ -28,7 +28,7 @@
     "wrangler": "^4.75.0"
   },
   "dependencies": {
-    "@aibtc/tx-schemas": "^0.5.0",
+    "@aibtc/tx-schemas": "file:../tx-schemas/aibtc-tx-schemas-0.5.1.tgz",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^2.1.0",

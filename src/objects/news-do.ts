@@ -1227,6 +1227,8 @@ export class NewsDO extends DurableObject<Env> {
         created_by: row.created_by as string,
         created_at: row.created_at as string,
         updated_at: row.updated_at as string,
+        daily_approved_limit: row.daily_approved_limit as number | null,
+        editor_review_rate_sats: row.editor_review_rate_sats as number | null,
         status,
         members: memberRows.map((r) => {
           const mr = r as Record<string, unknown>;
