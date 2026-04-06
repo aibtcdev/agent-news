@@ -194,6 +194,47 @@ function verifyPublisher(
 }
 
 /**
+ * Verify that the given BTC address is the designated Publisher OR an active editor
+ * for the specified beat. Used by signal review and editorial review endpoints.
+ *
+ * Returns role ('publisher' | 'editor') on success, or error on failure.
+ */
+function verifyEditorOrPublisher(
+  sql: DurableObjectState["storage"]["sql"],
+  btcAddress: string,
+  beatSlug: string
+): { ok: true; role: "publisher" | "editor" } | { ok: false; error: string; status: 403 } {
+  // Check publisher designation first
+  const publisherRows = sql
+    .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
+    .toArray();
+  if (publisherRows.length > 0) {
+    const publisherAddress = (publisherRows[0] as { value: string }).value;
+    if (btcAddress === publisherAddress) {
+      return { ok: true, role: "publisher" };
+    }
+  }
+
+  // Check active editor for the specified beat
+  const editorRows = sql
+    .exec(
+      "SELECT beat_slug FROM beat_editors WHERE beat_slug = ? AND btc_address = ? AND status = 'active'",
+      beatSlug,
+      btcAddress
+    )
+    .toArray();
+  if (editorRows.length > 0) {
+    return { ok: true, role: "editor" };
+  }
+
+  return {
+    ok: false,
+    error: "Access denied: must be the designated Publisher or an active editor for this beat",
+    status: 403,
+  };
+}
+
+/**
  * NewsDO — Durable Object with SQLite storage for agent-news.
  *
  * Uses this.ctx.storage.sql.exec() to initialize the schema on construction.
@@ -553,6 +594,119 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // -------------------------------------------------------------------------
+    // Beat Editors (publisher-managed editorial delegation)
+    // -------------------------------------------------------------------------
+
+    // POST /beat-editors — Publisher registers an editor for a beat
+    this.router.post("/beat-editors", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>, 400);
+      }
+      const { btc_address, beat_slug, registered_by } = body;
+      if (!btc_address || !beat_slug || !registered_by) {
+        return c.json(
+          { ok: false, error: "Missing required fields: btc_address, beat_slug, registered_by" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+
+      const pubCheck = verifyPublisher(this.ctx.storage.sql, registered_by as string);
+      if (!pubCheck.ok) {
+        return c.json({ ok: false, error: pubCheck.error } satisfies DOResult<unknown>, pubCheck.status);
+      }
+
+      // Verify beat exists
+      const beatRows = this.ctx.storage.sql
+        .exec("SELECT slug FROM beats WHERE slug = ?", beat_slug as string)
+        .toArray();
+      if (beatRows.length === 0) {
+        return c.json({ ok: false, error: `Beat "${beat_slug as string}" not found` } satisfies DOResult<unknown>, 404);
+      }
+
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        `INSERT INTO beat_editors (beat_slug, btc_address, status, registered_at, registered_by, deactivated_at)
+         VALUES (?, ?, 'active', ?, ?, NULL)
+         ON CONFLICT(beat_slug, btc_address) DO UPDATE SET
+           status = 'active',
+           registered_at = excluded.registered_at,
+           registered_by = excluded.registered_by,
+           deactivated_at = NULL`,
+        beat_slug as string,
+        btc_address as string,
+        now,
+        registered_by as string
+      );
+
+      const rows = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM beat_editors WHERE beat_slug = ? AND btc_address = ?",
+          beat_slug as string,
+          btc_address as string
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows[0] } satisfies DOResult<unknown>, 201);
+    });
+
+    // DELETE /beat-editors/:slug/:address — Publisher deactivates an editor
+    this.router.delete("/beat-editors/:slug/:address", async (c) => {
+      const slug = c.req.param("slug");
+      const address = c.req.param("address");
+      const body = await parseRequiredJson(c);
+      if (!body || !body.registered_by) {
+        return c.json({ ok: false, error: "Missing required field: registered_by" } satisfies DOResult<unknown>, 400);
+      }
+
+      const pubCheck = verifyPublisher(this.ctx.storage.sql, body.registered_by as string);
+      if (!pubCheck.ok) {
+        return c.json({ ok: false, error: pubCheck.error } satisfies DOResult<unknown>, pubCheck.status);
+      }
+
+      const existing = this.ctx.storage.sql
+        .exec(
+          "SELECT status FROM beat_editors WHERE beat_slug = ? AND btc_address = ?",
+          slug,
+          address
+        )
+        .toArray();
+      if (existing.length === 0) {
+        return c.json({ ok: false, error: `Editor "${address}" not registered for beat "${slug}"` } satisfies DOResult<unknown>, 404);
+      }
+
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        "UPDATE beat_editors SET status = 'inactive', deactivated_at = ? WHERE beat_slug = ? AND btc_address = ?",
+        now, slug, address
+      );
+      return c.json({ ok: true, data: { deactivated: true, beat_slug: slug, btc_address: address } } satisfies DOResult<unknown>);
+    });
+
+    // GET /beat-editors/:slug — List active editors for a beat
+    this.router.get("/beat-editors/:slug", (c) => {
+      const slug = c.req.param("slug");
+      const rows = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM beat_editors WHERE beat_slug = ? AND status = 'active' ORDER BY registered_at ASC",
+          slug
+        )
+        .toArray();
+      return c.json({ ok: true, data: { beat_slug: slug, editors: rows } } satisfies DOResult<unknown>);
+    });
+
+    // GET /editors/:address — List beats assigned to an editor
+    this.router.get("/editors/:address", (c) => {
+      const address = c.req.param("address");
+      const rows = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM beat_editors WHERE btc_address = ? ORDER BY registered_at ASC",
+          address
+        )
+        .toArray();
+      return c.json({ ok: true, data: { btc_address: address, beats: rows } } satisfies DOResult<unknown>);
+    });
+
+    // -------------------------------------------------------------------------
     // Payment staging (confirmed-only x402 finalization)
     // -------------------------------------------------------------------------
 
@@ -695,10 +849,10 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // -------------------------------------------------------------------------
-    // Signal Review (Publisher-only editorial actions)
+    // Signal Review (Publisher or beat editor editorial actions)
     // -------------------------------------------------------------------------
 
-    // PATCH /signals/:id/review — Publisher sets status + optional feedback
+    // PATCH /signals/:id/review — Publisher or beat editor sets status + optional feedback
     this.router.patch("/signals/:id/review", async (c) => {
       const id = c.req.param("id");
       const body = await parseRequiredJson(c);
@@ -707,18 +861,6 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const { btc_address, status, feedback } = body;
-
-      // Verify publisher designation
-      const publisherRows = this.ctx.storage.sql
-        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
-        .toArray();
-      if (publisherRows.length === 0) {
-        return c.json({ ok: false, error: "Publisher not yet designated" } satisfies DOResult<Signal>, 403);
-      }
-      const publisherAddress = (publisherRows[0] as { value: string }).value;
-      if (btc_address !== publisherAddress) {
-        return c.json({ ok: false, error: "Only the designated Publisher can perform this action" } satisfies DOResult<Signal>, 403);
-      }
 
       // Validate status. brief_included is backend-owned and cannot be set manually.
       if (
@@ -737,7 +879,7 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Feedback is required when rejecting a signal" } satisfies DOResult<Signal>, 400);
       }
 
-      // Verify signal exists and enforce state transition rules
+      // Verify signal exists first so we know its beat_slug for auth check
       const signalRows = this.ctx.storage.sql
         .exec("SELECT id, status, beat_slug FROM signals WHERE id = ?", id)
         .toArray();
@@ -756,6 +898,13 @@ export class NewsDO extends DurableObject<Env> {
           error: `Invalid transition: "${currentStatus}" → "${newStatus}". Allowed from ${currentStatus}: ${allowed.length ? allowed.join(", ") : "none (terminal state)"}`,
         } satisfies DOResult<Signal>, 400);
       }
+
+      // Verify publisher or active editor for this signal's beat
+      const authCheck = verifyEditorOrPublisher(this.ctx.storage.sql, btc_address as string, signalRow.beat_slug);
+      if (!authCheck.ok) {
+        return c.json({ ok: false, error: authCheck.error } satisfies DOResult<Signal>, authCheck.status);
+      }
+      const reviewerRole = authCheck.role;
 
       // Pre-inscription subtraction gate: brief_included may only be demoted to
       // replaced/rejected before the associated brief is inscribed.
@@ -794,26 +943,44 @@ export class NewsDO extends DurableObject<Env> {
         const dayStart = getPacificDayStartUTC(today);
         const dayEnd = getPacificDayEndUTC(today);
 
+        // Determine the effective cap: use beat's daily_approved_limit if set.
+        // For editors (scoped to one beat), apply beat cap against that beat's signals.
+        // For publisher, apply beat cap against that beat's signals if set,
+        // otherwise apply the global MAX_APPROVED_SIGNALS_PER_DAY across all beats.
+        const beatCapRows = this.ctx.storage.sql
+          .exec("SELECT daily_approved_limit FROM beats WHERE slug = ?", signalRow.beat_slug)
+          .toArray();
+        const beatCap = beatCapRows.length > 0
+          ? (beatCapRows[0] as { daily_approved_limit: number | null }).daily_approved_limit
+          : null;
+
+        const effectiveCap = beatCap !== null ? beatCap : MAX_APPROVED_SIGNALS_PER_DAY;
+        // Scope the count query: per-beat if beat cap is set (or reviewer is editor), global otherwise
+        const useBeatScope = beatCap !== null || reviewerRole === "editor";
         const countRows = this.ctx.storage.sql
           .exec(
-            `SELECT COUNT(*) as count FROM signals
-             WHERE status IN ('approved', 'brief_included')
-               AND reviewed_at >= ? AND reviewed_at < ?`,
-            dayStart, dayEnd
+            useBeatScope
+              ? `SELECT COUNT(*) as count FROM signals
+                 WHERE beat_slug = ? AND status IN ('approved', 'brief_included')
+                   AND reviewed_at >= ? AND reviewed_at < ?`
+              : `SELECT COUNT(*) as count FROM signals
+                 WHERE status IN ('approved', 'brief_included')
+                   AND reviewed_at >= ? AND reviewed_at < ?`,
+            ...(useBeatScope ? [signalRow.beat_slug, dayStart, dayEnd] : [dayStart, dayEnd])
           )
           .toArray();
         const rawCount = (countRows[0] as Record<string, unknown> | undefined)?.count;
         const approvedToday = Number.isFinite(Number(rawCount)) ? Number(rawCount) : 0;
 
-        if (approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY) {
+        if (approvedToday >= effectiveCap) {
           const displaceId = body.displace_signal_id as string | undefined;
 
           if (!displaceId) {
             return c.json({
               ok: false,
-              error: `Daily approval cap reached (${MAX_APPROVED_SIGNALS_PER_DAY}). Provide displace_signal_id to swap.`,
+              error: `Daily approval cap reached (${effectiveCap}${useBeatScope ? ` for beat "${signalRow.beat_slug}"` : ""}). Provide displace_signal_id to swap.`,
               approval_cap: {
-                limit: MAX_APPROVED_SIGNALS_PER_DAY,
+                limit: effectiveCap,
                 approved_today: approvedToday,
                 remaining: 0,
                 reset_at: dayEnd,
@@ -852,11 +1019,11 @@ export class NewsDO extends DurableObject<Env> {
         }
 
         // Build cap info for response
-        const countAfter = approvedToday >= MAX_APPROVED_SIGNALS_PER_DAY ? approvedToday : approvedToday + 1;
+        const countAfter = approvedToday >= effectiveCap ? approvedToday : approvedToday + 1;
         approvalCap = {
-          limit: MAX_APPROVED_SIGNALS_PER_DAY,
+          limit: effectiveCap,
           approved_today: countAfter,
-          remaining: Math.max(0, MAX_APPROVED_SIGNALS_PER_DAY - countAfter),
+          remaining: Math.max(0, effectiveCap - countAfter),
           reset_at: dayEnd,
         };
       }
@@ -3415,51 +3582,107 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: rows as unknown as Correction[] } satisfies DOResult<Correction[]>);
     });
 
-    // POST /corrections — file a correction
+    // POST /corrections — file a correction or editorial review
     this.router.post("/corrections", async (c) => {
       const body = await parseRequiredJson(c);
       if (!body) {
         return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Correction>, 400);
       }
 
-      const { signal_id, btc_address, claim, correction, sources } = body;
-      if (!signal_id || !btc_address || !claim || !correction) {
+      const { signal_id, btc_address, type } = body;
+      const entryType = (type as string | undefined) ?? "correction";
+
+      if (!signal_id || !btc_address) {
         return c.json({
           ok: false,
-          error: "Missing required fields: signal_id, btc_address, claim, correction",
+          error: "Missing required fields: signal_id, btc_address",
         } satisfies DOResult<Correction>, 400);
       }
 
-      // Verify signal exists
+      if (entryType !== "correction" && entryType !== "editorial_review") {
+        return c.json({
+          ok: false,
+          error: "Invalid type. Must be 'correction' or 'editorial_review'",
+        } satisfies DOResult<Correction>, 400);
+      }
+
+      // Verify signal exists and get its beat_slug for auth
       const sigRows = this.ctx.storage.sql
-        .exec("SELECT id, status FROM signals WHERE id = ?", signal_id as string)
+        .exec("SELECT id, status, beat_slug, btc_address as author_address FROM signals WHERE id = ?", signal_id as string)
         .toArray();
       if (sigRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${signal_id}" not found` } satisfies DOResult<Correction>, 404);
       }
-
-      // Can't correct your own signal
-      const sigAddr = this.ctx.storage.sql
-        .exec("SELECT btc_address FROM signals WHERE id = ?", signal_id as string)
-        .toArray();
-      if (sigAddr.length > 0 && (sigAddr[0] as Record<string, unknown>).btc_address === btc_address) {
-        return c.json({ ok: false, error: "Cannot file a correction on your own signal" } satisfies DOResult<Correction>, 400);
-      }
+      const sigRow = sigRows[0] as { id: string; status: string; beat_slug: string; author_address: string };
 
       const id = generateId();
       const now = new Date().toISOString();
 
-      this.ctx.storage.sql.exec(
-        `INSERT INTO corrections (id, signal_id, btc_address, claim, correction, sources, status, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        id,
-        signal_id as string,
-        btc_address as string,
-        sanitizeString(claim, 500),
-        sanitizeString(correction, 500),
-        sources ? sanitizeString(sources, 1000) : null,
-        now
-      );
+      if (entryType === "editorial_review") {
+        // Editorial reviews: requires editor or publisher for the signal's beat
+        const authCheck = verifyEditorOrPublisher(this.ctx.storage.sql, btc_address as string, sigRow.beat_slug);
+        if (!authCheck.ok) {
+          return c.json({ ok: false, error: authCheck.error } satisfies DOResult<Correction>, authCheck.status);
+        }
+
+        // Validate editorial review fields
+        const { score, factcheck_passed, beat_relevance, recommendation, feedback } = body;
+        if (score !== undefined && (typeof score !== "number" || score < 0 || score > 100)) {
+          return c.json({ ok: false, error: "score must be an integer between 0 and 100" } satisfies DOResult<Correction>, 400);
+        }
+        if (beat_relevance !== undefined && (typeof beat_relevance !== "number" || beat_relevance < 0 || beat_relevance > 100)) {
+          return c.json({ ok: false, error: "beat_relevance must be an integer between 0 and 100" } satisfies DOResult<Correction>, 400);
+        }
+        const validRecs = ["approve", "reject", "needs_revision"];
+        if (recommendation !== undefined && !validRecs.includes(recommendation as string)) {
+          return c.json({ ok: false, error: `recommendation must be one of: ${validRecs.join(", ")}` } satisfies DOResult<Correction>, 400);
+        }
+
+        // Use feedback as both claim and correction for editorial reviews (structural fit)
+        const feedbackText = feedback ? sanitizeString(feedback, 2000) : "";
+        this.ctx.storage.sql.exec(
+          `INSERT INTO corrections
+             (id, signal_id, btc_address, claim, correction, sources, status, type,
+              score, factcheck_passed, beat_relevance, recommendation, created_at)
+           VALUES (?, ?, ?, ?, ?, NULL, 'pending', 'editorial_review', ?, ?, ?, ?, ?)`,
+          id,
+          signal_id as string,
+          btc_address as string,
+          "editorial_review",
+          feedbackText,
+          score !== undefined ? Math.round(score as number) : null,
+          factcheck_passed !== undefined ? (factcheck_passed ? 1 : 0) : null,
+          beat_relevance !== undefined ? Math.round(beat_relevance as number) : null,
+          recommendation ?? null,
+          now
+        );
+      } else {
+        // Standard correction
+        const { claim, correction, sources } = body;
+        if (!claim || !correction) {
+          return c.json({
+            ok: false,
+            error: "Missing required fields: claim, correction",
+          } satisfies DOResult<Correction>, 400);
+        }
+
+        // Can't correct your own signal
+        if (sigRow.author_address === btc_address) {
+          return c.json({ ok: false, error: "Cannot file a correction on your own signal" } satisfies DOResult<Correction>, 400);
+        }
+
+        this.ctx.storage.sql.exec(
+          `INSERT INTO corrections (id, signal_id, btc_address, claim, correction, sources, status, type, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, 'pending', 'correction', ?)`,
+          id,
+          signal_id as string,
+          btc_address as string,
+          sanitizeString(claim, 500),
+          sanitizeString(correction, 500),
+          sources ? sanitizeString(sources, 1000) : null,
+          now
+        );
+      }
 
       const rows = this.ctx.storage.sql
         .exec("SELECT * FROM corrections WHERE id = ?", id)
@@ -3538,6 +3761,127 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // -------------------------------------------------------------------------
+    // Editor Earnings — beat editor self-reported review payouts
+    // -------------------------------------------------------------------------
+
+    // POST /editor-earnings — Editor self-reports an earning
+    this.router.post("/editor-earnings", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Earning>, 400);
+      }
+
+      const { btc_address, beat_slug, amount_sats, reason, signal_id } = body;
+      if (!btc_address || !beat_slug || !amount_sats || !reason) {
+        return c.json(
+          { ok: false, error: "Missing required fields: btc_address, beat_slug, amount_sats, reason" } satisfies DOResult<Earning>,
+          400
+        );
+      }
+      if (typeof amount_sats !== "number" || amount_sats <= 0 || !Number.isInteger(amount_sats)) {
+        return c.json({ ok: false, error: "amount_sats must be a positive integer" } satisfies DOResult<Earning>, 400);
+      }
+
+      // Verify editor is active for this beat OR is publisher
+      const authCheck = verifyEditorOrPublisher(this.ctx.storage.sql, btc_address as string, beat_slug as string);
+      if (!authCheck.ok) {
+        return c.json({ ok: false, error: authCheck.error } satisfies DOResult<Earning>, authCheck.status);
+      }
+
+      const id = generateId();
+      const now = new Date().toISOString();
+      // Encode beat context in reason field: "editor_review:{beat_slug}"
+      const earningReason = `editor_review:${beat_slug as string}`;
+
+      this.ctx.storage.sql.exec(
+        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        id,
+        btc_address as string,
+        amount_sats as number,
+        earningReason,
+        signal_id ? String(signal_id) : null,
+        now
+      );
+
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM earnings WHERE id = ?", id)
+        .toArray();
+      return c.json({ ok: true, data: rows[0] as unknown as Earning } satisfies DOResult<Earning>, 201);
+    });
+
+    // GET /editor-earnings/:address — List editor earnings for an address
+    this.router.get("/editor-earnings/:address", (c) => {
+      const address = c.req.param("address");
+      const callerAddress = c.req.query("caller_address") ?? "";
+
+      // Verify caller is the editor or publisher
+      const publisherRows = this.ctx.storage.sql
+        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
+        .toArray();
+      const isPublisher = publisherRows.length > 0 &&
+        callerAddress === (publisherRows[0] as { value: string }).value;
+      const isSelf = callerAddress === address;
+
+      if (!isPublisher && !isSelf) {
+        return c.json(
+          { ok: false, error: "Access denied: must be the editor or the designated Publisher" } satisfies DOResult<Earning[]>,
+          403
+        );
+      }
+
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT * FROM earnings
+           WHERE btc_address = ? AND reason LIKE 'editor_review:%'
+           ORDER BY created_at DESC`,
+          address
+        )
+        .toArray();
+      return c.json({ ok: true, data: rows as unknown as Earning[] } satisfies DOResult<Earning[]>);
+    });
+
+    // PATCH /editor-earnings/:id — Publisher records payout_txid
+    this.router.patch("/editor-earnings/:id", async (c) => {
+      const id = c.req.param("id");
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Earning>, 400);
+      }
+
+      const { btc_address, payout_txid } = body;
+      if (!btc_address || !payout_txid) {
+        return c.json(
+          { ok: false, error: "Missing required fields: btc_address, payout_txid" } satisfies DOResult<Earning>,
+          400
+        );
+      }
+
+      const pubCheck = verifyPublisher(this.ctx.storage.sql, btc_address as string);
+      if (!pubCheck.ok) {
+        return c.json({ ok: false, error: pubCheck.error } satisfies DOResult<Earning>, pubCheck.status);
+      }
+
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM earnings WHERE id = ? AND reason LIKE 'editor_review:%'", id)
+        .toArray();
+      if (rows.length === 0) {
+        return c.json({ ok: false, error: `Editor earning "${id}" not found` } satisfies DOResult<Earning>, 404);
+      }
+
+      this.ctx.storage.sql.exec(
+        "UPDATE earnings SET payout_txid = ? WHERE id = ?",
+        payout_txid as string,
+        id
+      );
+
+      const updated = this.ctx.storage.sql
+        .exec("SELECT * FROM earnings WHERE id = ?", id)
+        .toArray();
+      return c.json({ ok: true, data: updated[0] as unknown as Earning } satisfies DOResult<Earning>);
     });
 
     // -------------------------------------------------------------------------

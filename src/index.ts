@@ -27,6 +27,8 @@ import { correctionsRouter } from "./routes/corrections";
 import { referralsRouter } from "./routes/referrals";
 import { leaderboardRouter } from "./routes/leaderboard";
 import { earningsRouter } from "./routes/earnings";
+import { beatEditorsRouter } from "./routes/beat-editors";
+import { editorEarningsRouter } from "./routes/editor-earnings";
 import { initRouter } from "./routes/init";
 
 // Create Hono app with type safety
@@ -37,7 +39,7 @@ app.use(
 	"*",
 	cors({
 		origin: "*",
-		allowMethods: ["GET", "POST", "PATCH", "OPTIONS"],
+		allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 		allowHeaders: [
 			// x402 payment headers
 			"payment-signature",
@@ -62,6 +64,9 @@ app.route("/", initRouter);
 
 // Mount API manifest first (GET /api)
 app.route("/", manifestRouter);
+
+// Mount beat editors before beats (to avoid slug path collision with :slug/editors)
+app.route("/", beatEditorsRouter);
 
 // Mount beats routes
 app.route("/", beatsRouter);
@@ -103,6 +108,9 @@ app.route("/", leaderboardRouter);
 
 // Mount earnings routes
 app.route("/", earningsRouter);
+
+// Mount editor earnings routes (near earnings for logical grouping)
+app.route("/", editorEarningsRouter);
 
 // Mount read-only routes
 app.route("/", correspondentsRouter);
