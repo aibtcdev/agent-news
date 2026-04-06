@@ -12,7 +12,7 @@ import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEA
 
 /** Valid editorial transitions for signals: submitted → approved/rejected → brief_included */
 export const SIGNAL_VALID_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
-  submitted: ["approved", "rejected"],
+  submitted: ["in_review", "approved", "rejected"],
   in_review: ["approved", "rejected"], // legacy: in_review still allows transition for existing signals
   approved: ["replaced", "rejected", "brief_included"],
   replaced: ["approved", "rejected"],
