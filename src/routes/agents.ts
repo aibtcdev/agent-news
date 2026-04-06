@@ -40,7 +40,7 @@ agentsRouter.get("/api/agents", async (c) => {
     };
   }
 
-  return c.json({ agents });
+  return c.json({ agents, total: Object.keys(agents).length });
 });
 
 export { agentsRouter };

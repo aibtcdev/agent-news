@@ -2700,8 +2700,7 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN streaks st ON s.btc_address = st.btc_address
            WHERE s.correction_of IS NULL
            GROUP BY s.btc_address
-           ORDER BY signal_count DESC
-           LIMIT 200`
+           ORDER BY signal_count DESC`
         )
         .toArray();
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
@@ -4072,8 +4071,7 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN streaks st ON s.btc_address = st.btc_address
            WHERE s.correction_of IS NULL
            GROUP BY s.btc_address
-           ORDER BY signal_count DESC
-           LIMIT 200`
+           ORDER BY signal_count DESC`
         )
         .toArray();
 
@@ -4195,8 +4193,7 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN streaks st ON s.btc_address = st.btc_address
            WHERE s.correction_of IS NULL
            GROUP BY s.btc_address
-           ORDER BY signal_count DESC
-           LIMIT 200`
+           ORDER BY signal_count DESC`
         )
         .toArray();
 
