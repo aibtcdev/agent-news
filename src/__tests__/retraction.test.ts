@@ -44,8 +44,7 @@ describe("SIGNAL_VALID_TRANSITIONS — retraction support", () => {
 
   it("other transitions remain unchanged", async () => {
     const { SIGNAL_VALID_TRANSITIONS } = await import("../objects/news-do");
-    expect(SIGNAL_VALID_TRANSITIONS.submitted).toEqual(["in_review", "approved", "rejected"]);
-    expect(SIGNAL_VALID_TRANSITIONS.in_review).toEqual(["approved", "rejected"]);
+    expect(SIGNAL_VALID_TRANSITIONS.submitted).toEqual(["approved", "rejected"]);
     expect(SIGNAL_VALID_TRANSITIONS.approved).toEqual(["replaced", "rejected", "brief_included"]);
     expect(SIGNAL_VALID_TRANSITIONS.replaced).toEqual(["approved", "rejected"]);
     expect(SIGNAL_VALID_TRANSITIONS.rejected).toEqual(["approved"]);

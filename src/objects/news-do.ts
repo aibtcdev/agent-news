@@ -12,8 +12,7 @@ import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEA
 
 /** Valid editorial transitions for signals: submitted → approved/rejected → brief_included */
 export const SIGNAL_VALID_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
-  submitted: ["in_review", "approved", "rejected"],
-  in_review: ["approved", "rejected"], // legacy: in_review still allows transition for existing signals
+  submitted: ["approved", "rejected"],
   approved: ["replaced", "rejected", "brief_included"],
   replaced: ["approved", "rejected"],
   rejected: ["approved"],
@@ -1753,7 +1752,6 @@ export class NewsDO extends DurableObject<Env> {
 
       const counts: Record<string, number> = {
         submitted: 0,
-        in_review: 0,
         approved: 0,
         replaced: 0,
         rejected: 0,
@@ -3769,51 +3767,8 @@ export class NewsDO extends DurableObject<Env> {
     // Editor Earnings — beat editor self-reported review payouts
     // -------------------------------------------------------------------------
 
-    // POST /editor-earnings — Editor self-reports an earning
-    this.router.post("/editor-earnings", async (c) => {
-      const body = await parseRequiredJson(c);
-      if (!body) {
-        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Earning>, 400);
-      }
-
-      const { btc_address, beat_slug, amount_sats, reason, signal_id } = body;
-      if (!btc_address || !beat_slug || !amount_sats || !reason) {
-        return c.json(
-          { ok: false, error: "Missing required fields: btc_address, beat_slug, amount_sats, reason" } satisfies DOResult<Earning>,
-          400
-        );
-      }
-      if (typeof amount_sats !== "number" || amount_sats <= 0 || !Number.isInteger(amount_sats)) {
-        return c.json({ ok: false, error: "amount_sats must be a positive integer" } satisfies DOResult<Earning>, 400);
-      }
-
-      // Verify editor is active for this beat OR is publisher
-      const authCheck = verifyEditorOrPublisher(this.ctx.storage.sql, btc_address as string, beat_slug as string);
-      if (!authCheck.ok) {
-        return c.json({ ok: false, error: authCheck.error } satisfies DOResult<Earning>, authCheck.status);
-      }
-
-      const id = generateId();
-      const now = new Date().toISOString();
-      // Encode beat context in reason field: "editor_review:{beat_slug}"
-      const earningReason = `editor_review:${beat_slug as string}`;
-
-      this.ctx.storage.sql.exec(
-        `INSERT INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        id,
-        btc_address as string,
-        amount_sats as number,
-        earningReason,
-        signal_id ? String(signal_id) : null,
-        now
-      );
-
-      const rows = this.ctx.storage.sql
-        .exec("SELECT * FROM earnings WHERE id = ?", id)
-        .toArray();
-      return c.json({ ok: true, data: rows[0] as unknown as Earning } satisfies DOResult<Earning>, 201);
-    });
+    // Editor earnings are system-created at compile time (see compile handler).
+    // No self-report POST endpoint — editors earn per brief-included signal on their beat.
 
     // GET /editor-earnings/:address — List editor earnings for an address
     this.router.get("/editor-earnings/:address", (c) => {

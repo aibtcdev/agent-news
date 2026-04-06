@@ -1,7 +1,9 @@
 /**
- * Editor earnings routes — beat editor self-reported review payouts.
+ * Editor earnings routes — system-created at compile time, read and payout by auth'd users.
  *
- * POST   /api/editors/:address/earnings      — Editor self-reports an earning (BIP-322 auth)
+ * Editor earnings are created by the compile job for each brief-included signal
+ * on a beat with an active editor. The amount is the beat's editor_review_rate_sats.
+ *
  * GET    /api/editors/:address/earnings      — List earnings for an editor (BIP-322 auth, editor or publisher)
  * PATCH  /api/editors/:address/earnings/:id — Publisher records payout_txid (publisher-only)
  */
@@ -10,77 +12,9 @@ import { Hono } from "hono";
 import type { Env, AppVariables, Earning } from "../lib/types";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
-import { recordEditorEarning, listEditorEarnings, updateEditorEarning } from "../lib/do-client";
+import { listEditorEarnings, updateEditorEarning } from "../lib/do-client";
 
 const editorEarningsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
-
-// POST /api/editors/:address/earnings — Editor self-reports an earning
-editorEarningsRouter.post("/api/editors/:address/earnings", async (c) => {
-  const address = c.req.param("address");
-
-  if (!validateBtcAddress(address)) {
-    return c.json({ error: "Invalid BTC address in path" }, 400);
-  }
-
-  // BIP-322 auth — the signer must be the editor address in the path
-  const signerAddress = c.req.header("X-BTC-Address");
-  if (!signerAddress) {
-    return c.json(
-      { error: "Missing authentication headers: X-BTC-Address, X-BTC-Signature, X-BTC-Timestamp", code: "MISSING_AUTH" },
-      401
-    );
-  }
-  if (signerAddress !== address) {
-    return c.json({ error: "X-BTC-Address must match the editor address in the path" }, 403);
-  }
-
-  const authResult = verifyAuth(
-    c.req.raw.headers,
-    address,
-    "POST",
-    `/api/editors/${address}/earnings`
-  );
-  if (!authResult.valid) {
-    return c.json({ error: authResult.error, code: authResult.code }, 401);
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = await c.req.json<Record<string, unknown>>();
-  } catch {
-    return c.json({ error: "Invalid JSON body" }, 400);
-  }
-
-  const { beat_slug, amount_sats, reason, signal_id } = body;
-  if (!beat_slug || !amount_sats || !reason) {
-    return c.json({ error: "Missing required fields: beat_slug, amount_sats, reason" }, 400);
-  }
-  if (typeof amount_sats !== "number" || amount_sats <= 0 || !Number.isInteger(amount_sats)) {
-    return c.json({ error: "amount_sats must be a positive integer" }, 400);
-  }
-
-  const result = await recordEditorEarning(c.env, address, {
-    beat_slug: beat_slug as string,
-    amount_sats: amount_sats as number,
-    reason: reason as string,
-    signal_id: signal_id ? String(signal_id) : null,
-  });
-
-  if (!result.ok) {
-    return c.json({ error: result.error }, result.status ?? 400);
-  }
-
-  const logger = c.get("logger");
-  logger.info("editor earning recorded", {
-    editor: address,
-    beat_slug,
-    amount_sats,
-    reason,
-    signal_id: signal_id ?? null,
-  });
-
-  return c.json(result.data as Earning, 201);
-});
 
 // GET /api/editors/:address/earnings — List earnings for an editor (editor or publisher)
 editorEarningsRouter.get("/api/editors/:address/earnings", async (c) => {

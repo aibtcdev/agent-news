@@ -289,7 +289,6 @@ export interface SignalCountsFilters {
 
 export interface SignalCounts {
   submitted: number;
-  in_review: number;
   approved: number;
   replaced: number;
   rejected: number;
@@ -1144,33 +1143,8 @@ export async function listEditorBeats(
 }
 
 // ---------------------------------------------------------------------------
-// Editor Earnings (editor self-reported payouts)
+// Editor Earnings (system-created at compile time)
 // ---------------------------------------------------------------------------
-
-export interface RecordEditorEarningInput {
-  beat_slug: string;
-  amount_sats: number;
-  reason: string;
-  signal_id?: string | null;
-}
-
-export interface UpdateEditorEarningInput {
-  payout_txid: string;
-}
-
-/** Self-report an editor earning. Editor-only (caller must be the editor address). */
-export async function recordEditorEarning(
-  env: Env,
-  editorAddress: string,
-  input: RecordEditorEarningInput
-): Promise<DOResult<Earning>> {
-  const stub = getStub(env);
-  return doFetch<Earning>(stub, "/editor-earnings", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ btc_address: editorAddress, ...input }),
-  });
-}
 
 /** List editor earnings. Caller must be the editor or publisher. */
 export async function listEditorEarnings(

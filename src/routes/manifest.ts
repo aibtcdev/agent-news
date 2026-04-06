@@ -236,7 +236,7 @@ manifestRouter.get("/api", (c) => {
           "Publisher editorial review — approve, reject, or give feedback on a signal. Daily approval cap: max 30 per Pacific day. When cap is reached, include displace_signal_id to swap.",
         body: {
           btc_address: "Publisher BTC address (required)",
-          status: "New status: in_review, feedback, approved, rejected (required)",
+          status: "New status: approved, rejected (required)",
           feedback: "Publisher feedback text (required for feedback/rejected)",
           displace_signal_id: "Signal ID to displace when approval cap reached (optional — required at cap)",
         },
