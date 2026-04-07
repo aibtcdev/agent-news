@@ -4279,6 +4279,7 @@ export class NewsDO extends DurableObject<Env> {
            COALESCE(cr.correction_count, 0) as approved_corrections_30d,
            COALESCE(rf.referral_count, 0) as referral_credits_30d,
            COALESCE(ea.total_earned_sats, 0) as total_earned_sats,
+           COALESCE(ua.unpaid_sats, 0) as unpaid_sats,
            (COALESCE(bi.inclusion_count, 0) * 20  /* SCORING_WEIGHTS.brief_inclusions */
             + COALESCE(sc.signal_count, 0) * 5    /* SCORING_WEIGHTS.signal_count */
             + COALESCE(st.current_streak, 0) * 5  /* SCORING_WEIGHTS.current_streak */
@@ -4327,11 +4328,18 @@ export class NewsDO extends DurableObject<Env> {
            GROUP BY scout_address
          ) rf ON a.btc_address = rf.btc_address
          LEFT JOIN (
-           -- Lifetime cumulative earnings (positive amounts only; not windowed to 30 days).
+           -- Lifetime paid earnings: only rows with an on-chain payout_txid.
+           -- This ensures the leaderboard reflects sats actually sent, not accrued.
            SELECT btc_address, SUM(amount_sats) AS total_earned_sats
-           FROM earnings WHERE amount_sats > 0 AND voided_at IS NULL
+           FROM earnings WHERE amount_sats > 0 AND voided_at IS NULL AND payout_txid IS NOT NULL
            GROUP BY btc_address
          ) ea ON a.btc_address = ea.btc_address
+         LEFT JOIN (
+           -- Accrued but unpaid earnings: rows not yet backed by an on-chain payout_txid.
+           SELECT btc_address, SUM(amount_sats) AS unpaid_sats
+           FROM earnings WHERE amount_sats > 0 AND voided_at IS NULL AND payout_txid IS NULL
+           GROUP BY btc_address
+         ) ua ON a.btc_address = ua.btc_address
          LEFT JOIN (
            -- Earliest-ever non-correction signal per scout — used as tenure tie-breaker.
            -- Not windowed: a scout who joined 2 years ago always beats a newcomer with the same score.

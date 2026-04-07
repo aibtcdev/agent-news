@@ -9,6 +9,7 @@ type LeaderboardBreakdown = {
   approvedCorrections: number;
   referralCredits: number;
   totalEarnedSats: number;
+  unpaidSats: number;
 };
 
 type LeaderboardEntry = {
@@ -37,7 +38,7 @@ describe("GET /api/leaderboard", () => {
     expect(body.total).toBe(0);
   });
 
-  it("includes totalEarnedSats in breakdown for each entry", async () => {
+  it("includes totalEarnedSats and unpaidSats in breakdown for each entry", async () => {
     const res = await SELF.fetch("http://example.com/api/leaderboard");
     expect(res.status).toBe(200);
     const body = await res.json<{ leaderboard: LeaderboardEntry[]; total: number }>();
@@ -47,6 +48,8 @@ describe("GET /api/leaderboard", () => {
       expect(typeof entry.breakdown).toBe("object");
       expect(typeof entry.breakdown.totalEarnedSats).toBe("number");
       expect(entry.breakdown.totalEarnedSats).toBeGreaterThanOrEqual(0);
+      expect(typeof entry.breakdown.unpaidSats).toBe("number");
+      expect(entry.breakdown.unpaidSats).toBeGreaterThanOrEqual(0);
     });
   });
 });
