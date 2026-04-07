@@ -21,7 +21,7 @@ describe("POST /api/signals/:id/corrections — validation", () => {
     );
     expect(res.status).toBe(400);
     const body = await res.json<{ error: string }>();
-    expect(body.error).toContain("Missing required fields");
+    expect(body.error).toContain("claim must be a non-empty string");
   });
 
   it("returns 400 for invalid BTC address", async () => {

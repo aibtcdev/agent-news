@@ -624,6 +624,16 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const now = new Date().toISOString();
+
+      // One active editor per beat — deactivate any existing active editor first
+      this.ctx.storage.sql.exec(
+        `UPDATE beat_editors SET status = 'inactive', deactivated_at = ?
+         WHERE beat_slug = ? AND status = 'active' AND btc_address != ?`,
+        now,
+        beat_slug as string,
+        btc_address as string
+      );
+
       this.ctx.storage.sql.exec(
         `INSERT INTO beat_editors (beat_slug, btc_address, status, registered_at, registered_by, deactivated_at)
          VALUES (?, ?, 'active', ?, ?, NULL)
@@ -693,12 +703,12 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: { beat_slug: slug, editors: rows } } satisfies DOResult<unknown>);
     });
 
-    // GET /editors/:address — List beats assigned to an editor
+    // GET /editors/:address — List active beat assignments for an editor
     this.router.get("/editors/:address", (c) => {
       const address = c.req.param("address");
       const rows = this.ctx.storage.sql
         .exec(
-          "SELECT * FROM beat_editors WHERE btc_address = ? ORDER BY registered_at ASC",
+          "SELECT * FROM beat_editors WHERE btc_address = ? AND status = 'active' ORDER BY registered_at ASC",
           address
         )
         .toArray();
@@ -878,16 +888,16 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Feedback is required when rejecting a signal" } satisfies DOResult<Signal>, 400);
       }
 
-      // Verify signal exists first so we know its beat_slug for auth check
+      // Verify signal exists first so we know its beat_slug and author for auth check
       const signalRows = this.ctx.storage.sql
-        .exec("SELECT id, status, beat_slug FROM signals WHERE id = ?", id)
+        .exec("SELECT id, status, beat_slug, btc_address FROM signals WHERE id = ?", id)
         .toArray();
       if (signalRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
       }
 
       // State machine: prevent editorial regressions
-      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string };
+      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string; btc_address: string };
       const currentStatus = signalRow.status;
       const newStatus = status as SignalStatus; // validated above against SIGNAL_STATUSES
       const allowed = SIGNAL_VALID_TRANSITIONS[currentStatus] ?? [];
@@ -904,6 +914,11 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: authCheck.error } satisfies DOResult<Signal>, authCheck.status);
       }
       const reviewerRole = authCheck.role;
+
+      // Editors cannot review their own signals
+      if (reviewerRole === "editor" && (btc_address as string) === signalRow.btc_address) {
+        return c.json({ ok: false, error: "Editors cannot review their own signals" } satisfies DOResult<Signal>, 403);
+      }
 
       // Pre-inscription subtraction gate: brief_included may only be demoted to
       // replaced/rejected before the associated brief is inscribed.
@@ -2184,8 +2199,9 @@ export class NewsDO extends DurableObject<Env> {
         .toArray()
         .map((row) => rowToCompiledSignal(row as Record<string, unknown>));
 
-      // Cap at MAX_INCLUDED_SIGNALS_PER_BRIEF — earliest-reviewed signals take priority.
-      // When at cap, the last-reviewed signal is the overflow candidate.
+      // Safety cap at MAX_INCLUDED_SIGNALS_PER_BRIEF. Per-beat caps managed by the
+      // publisher should prevent overflow; this is a hard ceiling for misconfigured caps.
+      // Most-recently-reviewed signals take priority in the overflow edge case.
       const selectedSignals = candidateRows.slice(0, MAX_INCLUDED_SIGNALS_PER_BRIEF);
       const includedSignals = buildIncludedSignalMetadata(selectedSignals);
 
@@ -3199,13 +3215,22 @@ export class NewsDO extends DurableObject<Env> {
           .toArray() as { beat_slug: string; editor_address: string; editor_review_rate_sats: number }[];
 
         if (editorBeats.length > 0) {
+          // One active editor per beat — Map keyed by beat_slug is correct
           const editorMap = new Map(editorBeats.map((eb) => [eb.beat_slug, eb]));
+
+          // Batch: fetch beat_slug for all signals in one query
+          const idPlaceholders = validIds.map(() => "?").join(", ");
+          const signalBeatRows = this.ctx.storage.sql
+            .exec(
+              `SELECT id, beat_slug FROM signals WHERE id IN (${idPlaceholders})`,
+              ...validIds
+            )
+            .toArray() as { id: string; beat_slug: string }[];
+          const signalBeatMap = new Map(signalBeatRows.map((r) => [r.id, r.beat_slug]));
+
           for (const signalId of validIds) {
-            const sigBeatRows = this.ctx.storage.sql
-              .exec("SELECT beat_slug FROM signals WHERE id = ?", signalId)
-              .toArray();
-            if (sigBeatRows.length === 0) continue;
-            const beatSlug = (sigBeatRows[0] as { beat_slug: string }).beat_slug;
+            const beatSlug = signalBeatMap.get(signalId);
+            if (!beatSlug) continue;
             const editorInfo = editorMap.get(beatSlug);
             if (!editorInfo) continue;
 

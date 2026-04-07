@@ -78,8 +78,11 @@ correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, asyn
   // Validate type-specific required fields at the route level
   if (entryType === "correction") {
     const { claim, correction } = body;
-    if (!claim || !correction) {
-      return c.json({ error: "Missing required fields for correction: claim, correction" }, 400);
+    if (typeof claim !== "string" || claim.trim().length === 0) {
+      return c.json({ error: "claim must be a non-empty string" }, 400);
+    }
+    if (typeof correction !== "string" || correction.trim().length === 0) {
+      return c.json({ error: "correction must be a non-empty string" }, 400);
     }
   }
 
