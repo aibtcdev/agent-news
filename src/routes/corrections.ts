@@ -49,7 +49,7 @@ correctionsRouter.get("/api/corrections", async (c) => {
   return c.json({ corrections, total: corrections.length });
 });
 
-// POST /api/signals/:id/corrections — file a correction
+// POST /api/signals/:id/corrections — file a correction or editorial review
 correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, async (c) => {
   const signalId = c.req.param("id");
 
@@ -60,22 +60,27 @@ correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, asyn
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { btc_address, claim, correction, sources } = body;
+  const { btc_address, type } = body;
+  const entryType = (type as string | undefined) ?? "correction";
 
-  if (!btc_address || !claim || !correction) {
-    return c.json({ error: "Missing required fields: btc_address, claim, correction" }, 400);
+  if (!btc_address) {
+    return c.json({ error: "Missing required field: btc_address" }, 400);
   }
 
   if (!validateBtcAddress(btc_address)) {
     return c.json({ error: "Invalid BTC address format" }, 400);
   }
 
-  if (typeof claim !== "string" || claim.trim().length === 0) {
-    return c.json({ error: "claim must be a non-empty string" }, 400);
+  if (entryType !== "correction" && entryType !== "editorial_review") {
+    return c.json({ error: "Invalid type. Must be 'correction' or 'editorial_review'" }, 400);
   }
 
-  if (typeof correction !== "string" || correction.trim().length === 0) {
-    return c.json({ error: "correction must be a non-empty string" }, 400);
+  // Validate type-specific required fields at the route level
+  if (entryType === "correction") {
+    const { claim, correction } = body;
+    if (!claim || !correction) {
+      return c.json({ error: "Missing required fields for correction: claim, correction" }, 400);
+    }
   }
 
   // BIP-322 auth
@@ -89,23 +94,37 @@ correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, asyn
     return c.json({ error: authResult.error, code: authResult.code }, 401);
   }
 
-  // Sanitization is handled in the DO layer (authoritative boundary)
-  const result = await createCorrection(c.env, {
+  // Build input — pass all fields through; the DO validates and sanitizes
+  const input: Parameters<typeof createCorrection>[1] = {
     signal_id: signalId as string,
     btc_address: btc_address as string,
-    claim: claim as string,
-    correction: correction as string,
-    sources: sources ? String(sources) : null,
-  });
+    type: entryType as "correction" | "editorial_review",
+  };
+
+  if (entryType === "correction") {
+    input.claim = body.claim as string;
+    input.correction = body.correction as string;
+    input.sources = body.sources ? String(body.sources) : null;
+  } else {
+    // Editorial review fields — DO handles validation
+    if (body.score !== undefined) input.score = body.score as number;
+    if (body.factcheck_passed !== undefined) input.factcheck_passed = body.factcheck_passed as boolean;
+    if (body.beat_relevance !== undefined) input.beat_relevance = body.beat_relevance as number;
+    if (body.recommendation !== undefined) input.recommendation = body.recommendation as string;
+    if (body.feedback !== undefined) input.feedback = body.feedback as string;
+  }
+
+  const result = await createCorrection(c.env, input);
 
   if (!result.ok) {
     return c.json({ error: result.error }, result.status ?? 400);
   }
 
   const logger = c.get("logger");
-  logger.info("correction filed", {
+  logger.info(`${entryType} filed`, {
     signal_id: signalId,
-    corrector: btc_address,
+    type: entryType,
+    filer: btc_address,
   });
 
   return c.json(result.data, 201);

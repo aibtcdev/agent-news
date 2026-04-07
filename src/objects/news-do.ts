@@ -2162,31 +2162,10 @@ export class NewsDO extends DurableObject<Env> {
       const dayStart = getPacificDayStartUTC(date);
       const dayEnd = getPacificDayStartUTC(getNextDate(date));
 
-      const existingIncludedRows = this.ctx.storage.sql
-        .exec(
-          `SELECT s.id, s.beat_slug, s.btc_address, s.headline, s.body, s.sources,
-                  s.created_at, s.correction_of, s.reviewed_at,
-                  b.name as beat_name, b.color as beat_color,
-                  st.current_streak, st.longest_streak, st.total_signals,
-                  bs.position
-           FROM brief_signals bs
-           JOIN signals s ON bs.signal_id = s.id
-           JOIN beats b ON s.beat_slug = b.slug
-           LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE bs.brief_date = ?1
-             AND bs.retracted_at IS NULL
-             AND s.created_at >= ?2
-             AND s.created_at < ?3
-             AND s.status IN ('approved', 'brief_included')
-           ORDER BY bs.position ASC, s.id ASC`,
-          date,
-          dayStart,
-          dayEnd
-        )
-        .toArray()
-        .map((row) => rowToCompiledSignal(row as Record<string, unknown>));
-
-      const approvedRows = this.ctx.storage.sql
+      // Simplified compile: the roster IS the set of approved signals for the day.
+      // All curation happened at review time via cap-enforced approval.
+      // Include both 'approved' (new) and 'brief_included' (recompile) signals.
+      const candidateRows = this.ctx.storage.sql
         .exec(
           `SELECT s.id, s.beat_slug, s.btc_address, s.headline, s.body, s.sources,
                   s.created_at, s.correction_of, s.reviewed_at,
@@ -2197,7 +2176,7 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN streaks st ON s.btc_address = st.btc_address
            WHERE s.created_at >= ?1
              AND s.created_at < ?2
-             AND s.status = 'approved'
+             AND s.status IN ('approved', 'brief_included')
            ORDER BY s.reviewed_at DESC, s.created_at DESC, s.id ASC`,
           dayStart,
           dayEnd
@@ -2205,19 +2184,8 @@ export class NewsDO extends DurableObject<Env> {
         .toArray()
         .map((row) => rowToCompiledSignal(row as Record<string, unknown>));
 
-      const candidateRows: CompiledSignalRow[] = [];
-      const seen = new Set<string>();
-      for (const row of existingIncludedRows) {
-        if (seen.has(row.id)) continue;
-        seen.add(row.id);
-        candidateRows.push(row);
-      }
-      for (const row of approvedRows) {
-        if (seen.has(row.id)) continue;
-        seen.add(row.id);
-        candidateRows.push(row);
-      }
-
+      // Cap at MAX_INCLUDED_SIGNALS_PER_BRIEF — earliest-reviewed signals take priority.
+      // When at cap, the last-reviewed signal is the overflow candidate.
       const selectedSignals = candidateRows.slice(0, MAX_INCLUDED_SIGNALS_PER_BRIEF);
       const includedSignals = buildIncludedSignalMetadata(selectedSignals);
 
@@ -2229,7 +2197,7 @@ export class NewsDO extends DurableObject<Env> {
         included_signal_ids: includedSignals.map((signal) => signal.signal_id),
         included_signals: includedSignals,
         candidate_count: candidateRows.length,
-        overflow_count: Math.max(0, candidateRows.length - selectedSignals.length),
+        overflow_count: Math.max(0, candidateRows.length - MAX_INCLUDED_SIGNALS_PER_BRIEF),
       };
 
       return c.json({ ok: true, data } satisfies DOResult<CompiledBriefData>);
@@ -3214,6 +3182,44 @@ export class NewsDO extends DurableObject<Env> {
           );
           if (cursor.rowsWritten > 0) paid++;
           else skipped++;
+        }
+
+        // Editor earnings: for each included signal on a beat with an active editor,
+        // create an editor_inclusion earning. Amount from beats.editor_review_rate_sats.
+        // Idempotent: INSERT OR IGNORE skips duplicates (reason, reference_id).
+        const editorBeats = this.ctx.storage.sql
+          .exec(
+            `SELECT DISTINCT be.beat_slug, be.btc_address as editor_address, b.editor_review_rate_sats
+             FROM beat_editors be
+             JOIN beats b ON be.beat_slug = b.slug
+             WHERE be.status = 'active'
+               AND b.editor_review_rate_sats IS NOT NULL
+               AND b.editor_review_rate_sats > 0`
+          )
+          .toArray() as { beat_slug: string; editor_address: string; editor_review_rate_sats: number }[];
+
+        if (editorBeats.length > 0) {
+          const editorMap = new Map(editorBeats.map((eb) => [eb.beat_slug, eb]));
+          for (const signalId of validIds) {
+            const sigBeatRows = this.ctx.storage.sql
+              .exec("SELECT beat_slug FROM signals WHERE id = ?", signalId)
+              .toArray();
+            if (sigBeatRows.length === 0) continue;
+            const beatSlug = (sigBeatRows[0] as { beat_slug: string }).beat_slug;
+            const editorInfo = editorMap.get(beatSlug);
+            if (!editorInfo) continue;
+
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              generateId(),
+              editorInfo.editor_address,
+              editorInfo.editor_review_rate_sats,
+              `editor_inclusion:${beatSlug}`,
+              signalId,
+              now
+            );
+          }
         }
 
         // Defensive cleanup if the caller passed ids that are no longer active after

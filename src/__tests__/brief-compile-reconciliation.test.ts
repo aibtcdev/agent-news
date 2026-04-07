@@ -127,11 +127,11 @@ describe("brief compile reconciliation", () => {
       brief_signals: briefSignals,
       earnings: [
         {
-          id: "earning-overflow-30",
-          btc_address: REPORTER_B,
+          id: "earning-overflow-00",
+          btc_address: REPORTER_A,
           amount_sats: 30000,
           reason: "brief_inclusion",
-          reference_id: "over-cap-30",
+          reference_id: "over-cap-00",
           created_at: "2026-04-11T23:59:30Z",
         },
       ],
@@ -148,9 +148,12 @@ describe("brief compile reconciliation", () => {
       payouts: { paid: number; skipped: number; revived: number; voided: number };
     }>();
 
+    // Simplified compile orders by reviewed_at DESC — most recently reviewed first.
+    // With 31 signals (reviewed_at 23:00-23:30), signal 30 (latest) is first,
+    // signal 00 (earliest) is the overflow candidate dropped at the 30-signal cap.
     expect(firstCompile.brief.included_signal_ids).toHaveLength(30);
-    expect(firstCompile.brief.included_signal_ids[0]).toBe("over-cap-00");
-    expect(firstCompile.brief.included_signal_ids[29]).toBe("over-cap-29");
+    expect(firstCompile.brief.included_signal_ids[0]).toBe("over-cap-30");
+    expect(firstCompile.brief.included_signal_ids[29]).toBe("over-cap-01");
     expect(firstCompile.brief.roster).toEqual(expect.objectContaining({
       candidate_count: 31,
       selected_count: 30,
@@ -167,17 +170,17 @@ describe("brief compile reconciliation", () => {
     expect(briefSignalsRes.status).toBe(200);
     const briefSignalsBody = await briefSignalsRes.json<{ ok: true; data: Array<{ signal_id: string }> }>();
     expect(briefSignalsBody.data).toHaveLength(30);
-    expect(briefSignalsBody.data.some((row) => row.signal_id === "over-cap-30")).toBe(false);
+    expect(briefSignalsBody.data.some((row) => row.signal_id === "over-cap-00")).toBe(false);
 
     const replacedRes = await SELF.fetch(`http://example.com/api/signals?date=${date}&status=replaced`);
     expect(replacedRes.status).toBe(200);
     const replacedBody = await replacedRes.json<{ signals: Array<{ id: string }> }>();
-    expect(replacedBody.signals.map((signal) => signal.id)).toContain("over-cap-30");
+    expect(replacedBody.signals.map((signal) => signal.id)).toContain("over-cap-00");
 
     const curatedRes = await SELF.fetch("http://example.com/api/front-page");
     expect(curatedRes.status).toBe(200);
     const curatedBody = await curatedRes.json<{ signals: Array<{ id: string }> }>();
-    expect(curatedBody.signals.some((signal) => signal.id === "over-cap-30")).toBe(false);
+    expect(curatedBody.signals.some((signal) => signal.id === "over-cap-00")).toBe(false);
 
     const secondCompileRes = await compile(date);
     expect(secondCompileRes.status).toBe(201);

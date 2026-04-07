@@ -833,9 +833,15 @@ export async function getBriefSignals(env: Env, date: string): Promise<unknown[]
 export interface CreateCorrectionInput {
   signal_id: string;
   btc_address: string;
-  claim: string;
-  correction: string;
+  claim?: string;
+  correction?: string;
   sources?: string | null;
+  type?: "correction" | "editorial_review";
+  score?: number;
+  factcheck_passed?: boolean;
+  beat_relevance?: number;
+  recommendation?: string;
+  feedback?: string;
 }
 
 export async function createCorrection(
