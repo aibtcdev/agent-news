@@ -251,7 +251,7 @@
     }
 
     function renderParentCard(parentId) {
-      const shortId = parentId.length > 24 ? parentId.slice(0, 12) + '...' + parentId.slice(-10) : parentId;
+      if (!parentId) return '';
       return `<div class="parent-card">
         <div class="parent-card-label">Canonical Parent Inscription</div>
         <div class="parent-card-id">
