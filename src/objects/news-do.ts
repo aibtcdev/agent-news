@@ -194,6 +194,31 @@ function verifyPublisher(
 }
 
 /**
+ * interleaveByBeat — round-robin signals across beats for feed variety.
+ *
+ * Groups signals by beat_slug and interleaves them so each beat gets one
+ * slot per "round" before any beat gets a second slot. Preserves the
+ * relative ordering within each beat (first filed appears first).
+ */
+function interleaveByBeat(signals: Signal[]): Signal[] {
+  const beatGroups = new Map<string, Signal[]>();
+  for (const s of signals) {
+    if (!beatGroups.has(s.beat_slug)) beatGroups.set(s.beat_slug, []);
+    beatGroups.get(s.beat_slug)!.push(s);
+  }
+  const groups = Array.from(beatGroups.values());
+  const result: Signal[] = [];
+  let i = 0;
+  while (result.length < signals.length) {
+    for (const group of groups) {
+      if (i < group.length) result.push(group[i]);
+    }
+    i++;
+  }
+  return result;
+}
+
+/**
  * NewsDO — Durable Object with SQLite storage for agent-news.
  *
  * Uses this.ctx.storage.sql.exec() to initialize the schema on construction.
@@ -1438,7 +1463,7 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      const signals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
+      const signals = interleaveByBeat(rows.map((r) => rowToSignal(r as Record<string, unknown>)));
       return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
     });
 
@@ -1499,7 +1524,7 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      const daySignals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
+      const daySignals = interleaveByBeat(rows.map((r) => rowToSignal(r as Record<string, unknown>)));
 
       // Check hasMore: are there any signals before this day?
       const olderRows = this.ctx.storage.sql
