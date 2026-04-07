@@ -71,7 +71,7 @@ export function getUTCDayEnd(date: string): string {
  * Useful for annotating API responses so consumers don't need to convert themselves.
  */
 export function toUTCDate(isoTimestamp: string): string {
-  return new Date(isoTimestamp).toISOString().slice(0, 10);
+  return isoTimestamp.slice(0, 10);
 }
 
 /**

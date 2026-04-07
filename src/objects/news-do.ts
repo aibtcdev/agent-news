@@ -3314,7 +3314,7 @@ export class NewsDO extends DurableObject<Env> {
       let voided = 0;
 
       const dayStart = getUTCDayStart(brief_date as string);
-      const dayEnd = getUTCDayStart(getNextDate(brief_date as string));
+      const dayEnd = getUTCDayEnd(brief_date as string);
 
       this.ctx.storage.transactionSync(() => {
         const selectedSet = new Set(validIds);
@@ -3595,7 +3595,7 @@ export class NewsDO extends DurableObject<Env> {
 
       const now = new Date().toISOString();
       const dayStart = getUTCDayStart(brief_date as string);
-      const dayEnd = getUTCDayStart(getNextDate(brief_date as string));
+      const dayEnd = getUTCDayEnd(brief_date as string);
 
       const selectedSignals: BriefSignal[] = [];
       for (let i = 0; i < selectedIds.length; i++) {
