@@ -71,7 +71,7 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     btc_address: raw.btc_address,
     headline: raw.headline,
     body: raw.body,
-    sources: JSON.parse(raw.sources || "[]"),
+    sources: (() => { try { return JSON.parse(raw.sources || "[]"); } catch { return []; } })(),
     tags: raw.tags_csv ? raw.tags_csv.split(",") : [],
     created_at: raw.created_at,
     updated_at: raw.updated_at,

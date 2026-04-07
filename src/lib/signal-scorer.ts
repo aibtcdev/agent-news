@@ -111,7 +111,7 @@ function scoreBeatRelevance(tags: string[], beat_slug: string): number {
   const beatKeywords = beat_slug
     .toLowerCase()
     .split(/[-_\s]+/)
-    .filter((k) => k.length > 2);
+    .filter((k) => k.length > 2); // Drop 1-2 char fragments (e.g. split artifacts) — real beat keywords are 3+ chars
 
   const tagSet = new Set(tags.map((t) => t.toLowerCase()));
 
