@@ -8,7 +8,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, SignalStatus } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { reviewSignal, listFrontPagePage, listFrontPage } from "../lib/do-client";
+import { reviewSignal, featureSignal, listFrontPagePage, listFrontPage } from "../lib/do-client";
 import { validateDateFormat } from "../lib/validators";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
@@ -108,6 +108,76 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     disclosure: s.disclosure,
     correction_of: s.correction_of,
     approval_cap: result.approval_cap ?? undefined,
+  });
+});
+
+// PATCH /api/signals/:id/feature — Publisher pins/unpins a signal as a top story (BIP-322 auth required)
+signalReviewRouter.patch("/api/signals/:id/feature", reviewRateLimit, async (c) => {
+  const signalId = c.req.param("id");
+  if (!signalId) return c.json({ error: "Missing signal ID" }, 400);
+
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { btc_address, featured } = body;
+
+  if (!btc_address) {
+    return c.json({ error: "Missing required field: btc_address" }, 400);
+  }
+  if (typeof featured !== "boolean") {
+    return c.json({ error: '"featured" must be a boolean' }, 400);
+  }
+
+  if (!validateBtcAddress(btc_address)) {
+    return c.json({ error: "Invalid BTC address format" }, 400);
+  }
+
+  // BIP-322 auth
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btc_address as string,
+    "PATCH",
+    `/api/signals/${signalId}/feature`
+  );
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  const result = await featureSignal(c.env, signalId, {
+    btc_address: btc_address as string,
+    featured,
+  });
+
+  if (!result.ok) {
+    return c.json({ error: result.error }, result.status ?? 400);
+  }
+
+  const logger = c.get("logger");
+  logger.info("signal featured", {
+    signal_id: signalId,
+    featured,
+    publisher: btc_address,
+  });
+
+  const s = result.data as NonNullable<typeof result.data>;
+  return c.json({
+    id: s.id,
+    btcAddress: s.btc_address,
+    beat: s.beat_name ?? s.beat_slug,
+    beatSlug: s.beat_slug,
+    headline: s.headline,
+    content: s.body,
+    sources: s.sources,
+    tags: s.tags,
+    timestamp: s.created_at,
+    status: s.status,
+    featured: s.featured,
+    disclosure: s.disclosure,
+    correction_of: s.correction_of,
   });
 });
 

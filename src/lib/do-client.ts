@@ -803,6 +803,24 @@ export async function reviewSignal(
   });
 }
 
+export interface FeatureSignalInput {
+  btc_address: string;
+  featured: boolean;
+}
+
+export async function featureSignal(
+  env: Env,
+  signalId: string,
+  input: FeatureSignalInput
+): Promise<DOResult<Signal>> {
+  const stub = getStub(env);
+  return doFetch<Signal>(stub, `/signals/${encodeURIComponent(signalId)}/feature`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Brief Signals (inclusion tracking)
 // ---------------------------------------------------------------------------

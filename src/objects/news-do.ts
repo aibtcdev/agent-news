@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_FEATURED_SIGNAL_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -48,6 +48,7 @@ interface RawSignalRow {
   publisher_feedback: string | null;
   reviewed_at: string | null;
   disclosure: string;
+  featured: number;
 }
 
 interface RawCompiledSignalRow extends CompiledSignalRow {
@@ -78,6 +79,7 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     publisher_feedback: raw.publisher_feedback ?? null,
     reviewed_at: raw.reviewed_at ?? null,
     disclosure: raw.disclosure ?? "",
+    featured: (raw.featured ?? 0) === 1,
   };
 }
 
@@ -230,7 +232,10 @@ export class NewsDO extends DurableObject<Env> {
     // 14 = Re-run beat inserts (idempotent fix — v12/v13 may have failed silently on staging)
     // 15 = Payment staging (confirmed-only x402 finalization keyed by paymentId)
     // 16 = Approval cap index — compound index on (status, reviewed_at) for daily count queries (#362)
-    const CURRENT_MIGRATION_VERSION = 16;
+    // 17 = (reserved — see PR #343)
+    // 18 = (reserved — see PR #333)
+    // 19 = Featured signal column (publisher homepage curation — signals.featured INTEGER 0/1, closes #347)
+    const CURRENT_MIGRATION_VERSION = 19;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -444,6 +449,20 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(stmt);
           } catch (e) {
             console.error("Approval cap index migration failed:", e);
+          }
+        }
+      }
+
+      // Featured signal column — publisher homepage curation (closes #347).
+      if (appliedVersion < 19) {
+        for (const stmt of MIGRATION_FEATURED_SIGNAL_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
+              console.error("Featured signal migration statement failed:", e);
+            }
           }
         }
       }
@@ -859,6 +878,74 @@ export class NewsDO extends DurableObject<Env> {
 
       const signal = rowToSignal(updated[0] as Record<string, unknown>);
       return c.json({ ok: true, data: signal, approval_cap: approvalCap } as DOResult<Signal>);
+    });
+
+    // PATCH /signals/:id/feature — Publisher toggles homepage featured flag
+    // Body: { btc_address, featured: boolean }
+    // Only approved/brief_included signals can be featured.
+    this.router.patch("/signals/:id/feature", async (c) => {
+      const id = c.req.param("id");
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Signal>, 400);
+      }
+
+      const { btc_address, featured } = body;
+      if (typeof featured !== "boolean") {
+        return c.json({ ok: false, error: '"featured" must be a boolean' } satisfies DOResult<Signal>, 400);
+      }
+
+      // Verify publisher designation
+      const publisherRows = this.ctx.storage.sql
+        .exec("SELECT value FROM config WHERE key = ?", CONFIG_PUBLISHER_ADDRESS)
+        .toArray();
+      if (publisherRows.length === 0) {
+        return c.json({ ok: false, error: "Publisher not yet designated" } satisfies DOResult<Signal>, 403);
+      }
+      const publisherAddress = (publisherRows[0] as { value: string }).value;
+      if (btc_address !== publisherAddress) {
+        return c.json({ ok: false, error: "Only the designated Publisher can perform this action" } satisfies DOResult<Signal>, 403);
+      }
+
+      // Verify signal exists
+      const signalRows = this.ctx.storage.sql
+        .exec("SELECT id, status FROM signals WHERE id = ?", id)
+        .toArray();
+      if (signalRows.length === 0) {
+        return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
+      }
+
+      // Only approved or brief_included signals can be featured
+      const currentStatus = (signalRows[0] as { id: string; status: SignalStatus }).status;
+      if (currentStatus !== "approved" && currentStatus !== "brief_included") {
+        return c.json({
+          ok: false,
+          error: `Only approved or brief_included signals can be featured (current: "${currentStatus}")`,
+        } satisfies DOResult<Signal>, 400);
+      }
+
+      const now = new Date().toISOString();
+      this.ctx.storage.sql.exec(
+        "UPDATE signals SET featured = ?, updated_at = ? WHERE id = ?",
+        featured ? 1 : 0,
+        now,
+        id
+      );
+
+      const updated = this.ctx.storage.sql
+        .exec(
+          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+           FROM signals s
+           LEFT JOIN beats b ON s.beat_slug = b.slug
+           LEFT JOIN signal_tags st ON s.id = st.signal_id
+           WHERE s.id = ?1
+           GROUP BY s.id`,
+          id
+        )
+        .toArray();
+
+      const signal = rowToSignal(updated[0] as Record<string, unknown>);
+      return c.json({ ok: true, data: signal } satisfies DOResult<Signal>);
     });
 
     // -------------------------------------------------------------------------
@@ -1424,6 +1511,8 @@ export class NewsDO extends DurableObject<Env> {
     // GET /signals/front-page — all approved + brief_included signals in a single query
     // Eliminates the need for two separate /signals calls from the Worker route.
     // LIMIT 500 preserves the old behavior (200 approved + 200 brief_included = up to 400).
+    // Featured signals (featured=1) float to the top; within featured and non-featured,
+    // signals are ordered by created_at DESC.
     this.router.get("/signals/front-page", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
@@ -1433,7 +1522,7 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN signal_tags st ON s.id = st.signal_id
            WHERE s.status IN ('approved', 'brief_included')
            GROUP BY s.id
-           ORDER BY s.created_at DESC
+           ORDER BY s.featured DESC, s.created_at DESC
            LIMIT 500`
         )
         .toArray();
