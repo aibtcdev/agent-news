@@ -142,18 +142,29 @@ function getPaymentStageRow(
 }
 
 /**
- * Delete staged payment records that have been in the "staged" state longer
- * than PAYMENT_STAGE_TTL_MS. Returns the number of rows deleted.
+ * Expire staged payment records that have been in the "staged" state longer
+ * than PAYMENT_STAGE_TTL_MS. Marks them as 'expired' instead of deleting so
+ * the payment history remains recoverable (e.g. if the on-chain tx confirmed
+ * but the relay never reported settlement). Returns the number of rows expired.
  */
 function purgeExpiredStagedRecords(
   sql: DurableObjectState["storage"]["sql"]
 ): number {
   const cutoff = new Date(Date.now() - PAYMENT_STAGE_TTL_MS).toISOString();
-  const deleted = sql.exec(
-    "DELETE FROM payment_staging WHERE stage_status = 'staged' AND created_at < ?",
+  const now = new Date().toISOString();
+  const expired = sql.exec(
+    `UPDATE payment_staging
+        SET stage_status = 'expired',
+            terminal_status = 'expired',
+            terminal_reason = 'settlement not received within TTL',
+            updated_at = ?,
+            discarded_at = ?
+      WHERE stage_status = 'staged' AND created_at < ?`,
+    now,
+    now,
     cutoff
   );
-  return deleted.rowsWritten;
+  return expired.rowsWritten;
 }
 
 /**
@@ -798,7 +809,7 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: true, data: null } satisfies DOResult<PaymentStageMaterialized | null>);
       }
 
-      if (staged.stageStatus !== "staged") {
+      if (staged.stageStatus !== "staged" && staged.stageStatus !== "expired") {
         return c.json({ ok: true, data: staged } satisfies DOResult<PaymentStageMaterialized>);
       }
 
@@ -842,7 +853,8 @@ export class NewsDO extends DurableObject<Env> {
                   terminal_status = 'confirmed',
                   terminal_reason = NULL,
                   updated_at = ?,
-                  finalized_at = ?
+                  finalized_at = ?,
+                  discarded_at = NULL
             WHERE payment_id = ?`,
           now,
           now,
