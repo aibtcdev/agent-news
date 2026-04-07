@@ -1540,11 +1540,49 @@ export class NewsDO extends DurableObject<Env> {
         params.push(body.color ?? null);
       }
 
+      if (body.daily_approved_limit !== undefined) {
+        const dailyLimit = body.daily_approved_limit as number | null;
+        if (
+          dailyLimit !== null &&
+          (!Number.isInteger(dailyLimit) || dailyLimit <= 0)
+        ) {
+          return c.json(
+            {
+              ok: false,
+              error: "daily_approved_limit must be a positive integer or null",
+            } satisfies DOResult<Beat>,
+            400
+          );
+        }
+        setClauses.push("daily_approved_limit = ?");
+        params.push(dailyLimit ?? null);
+      }
+
+      if (body.editor_review_rate_sats !== undefined) {
+        const reviewRate = body.editor_review_rate_sats as number | null;
+        if (
+          reviewRate !== null &&
+          (!Number.isInteger(reviewRate) || reviewRate < 0)
+        ) {
+          return c.json(
+            {
+              ok: false,
+              error:
+                "editor_review_rate_sats must be a non-negative integer or null",
+            } satisfies DOResult<Beat>,
+            400
+          );
+        }
+        setClauses.push("editor_review_rate_sats = ?");
+        params.push(reviewRate ?? null);
+      }
+
       if (setClauses.length === 0) {
         return c.json(
           {
             ok: false,
-            error: "No updatable fields provided (name, description, color)",
+            error:
+              "No updatable fields provided (name, description, color, daily_approved_limit, editor_review_rate_sats)",
           } satisfies DOResult<Beat>,
           400
         );
@@ -3794,7 +3832,7 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // -------------------------------------------------------------------------
-    // Editor Earnings — beat editor self-reported review payouts
+    // Editor Earnings — system-created editorial earnings (created at compile time)
     // -------------------------------------------------------------------------
 
     // Editor earnings are system-created at compile time (see compile handler).
