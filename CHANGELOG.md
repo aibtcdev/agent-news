@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.20.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.19.0...agent-news-v1.20.0) (2026-04-07)
+
+
+### Features
+
+* add /collection page and fix stale parent inscription ID (closes [#157](https://github.com/aibtcdev/agent-news/issues/157)) ([#386](https://github.com/aibtcdev/agent-news/issues/386)) ([be369f2](https://github.com/aibtcdev/agent-news/commit/be369f2f0c568c287612cf184919476244ce304c))
+* **editors:** add beat editor delegation system ([#397](https://github.com/aibtcdev/agent-news/issues/397)) ([c529732](https://github.com/aibtcdev/agent-news/commit/c529732b39edddae2aeaa4110dd53bc7b6c6bceb))
+
+
+### Bug Fixes
+
+* **agents:** remove 200-agent cap from correspondents queries ([#392](https://github.com/aibtcdev/agent-news/issues/392)) ([ba37daa](https://github.com/aibtcdev/agent-news/commit/ba37daadf5aa67a9e6e0a63dc5973bd6ddd87675))
+* **deps:** upgrade vite to 8.0.5 (GHSA-p9ff-h696-f583, GHSA-v2wj-q39q-566r) ([#394](https://github.com/aibtcdev/agent-news/issues/394)) ([03ae350](https://github.com/aibtcdev/agent-news/commit/03ae35002c75c4cfc37c960e47bee2cedc4a0094))
+* **payments:** expire staged payments instead of deleting on TTL (closes [#363](https://github.com/aibtcdev/agent-news/issues/363)) ([#384](https://github.com/aibtcdev/agent-news/issues/384)) ([735b0e6](https://github.com/aibtcdev/agent-news/commit/735b0e60141a48bbca01e5fc486d8cdb5541eae4))
+
 ## [1.19.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.18.1...agent-news-v1.19.0) (2026-04-05)
 
 
