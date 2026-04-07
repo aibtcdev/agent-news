@@ -32,7 +32,9 @@ CREATE TABLE IF NOT EXISTS signals (
   status            TEXT NOT NULL DEFAULT 'submitted',
   publisher_feedback TEXT,
   reviewed_at       TEXT,
-  disclosure        TEXT NOT NULL DEFAULT ''
+  disclosure        TEXT NOT NULL DEFAULT '',
+  quality_score     INTEGER DEFAULT NULL,
+  score_breakdown   TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS signal_tags (
@@ -514,4 +516,16 @@ ON CONFLICT(slug) DO UPDATE SET
  */
 export const MIGRATION_APPROVAL_CAP_INDEX_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed ON signals(status, reviewed_at)",
+] as const;
+
+/**
+ * Migration 17 — Signal quality auto-scoring.
+ * Adds quality_score (composite 0–100) and score_breakdown (JSON) columns to
+ * the signals table. Both are nullable so existing rows remain valid.
+ * quality_score is indexed to allow publisher queues to sort by quality.
+ */
+export const MIGRATION_SIGNAL_SCORING_SQL = [
+  "ALTER TABLE signals ADD COLUMN quality_score INTEGER DEFAULT NULL",
+  "ALTER TABLE signals ADD COLUMN score_breakdown TEXT DEFAULT NULL",
+  "CREATE INDEX IF NOT EXISTS idx_signals_quality_score ON signals(quality_score)",
 ] as const;
