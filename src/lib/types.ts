@@ -134,7 +134,7 @@ export interface Beat {
   readonly created_by: string;
   readonly created_at: string;
   readonly updated_at: string;
-  /** Per-beat daily approval cap (null = unlimited). Added in migration 16. */
+  /** Per-beat daily approval cap (null = unlimited). Added in MIGRATION_BITCOIN_MACRO_SQL. */
   readonly daily_approved_limit?: number | null;
   /** Per-review payment rate for the beat editor in satoshis (null = not configured). Added in migration 19. */
   readonly editor_review_rate_sats?: number | null;

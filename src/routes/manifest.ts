@@ -252,6 +252,42 @@ manifestRouter.get("/api", (c) => {
           409: "Per-beat daily cap reached — provide displace_signal_id to swap",
         },
       },
+      "POST /api/beats/:slug/editors": {
+        description:
+          "Register an editor for a beat (Publisher-only, BIP-322 auth). One active editor per beat — registering a new editor deactivates any existing one.",
+        body: {
+          btc_address: "Publisher BTC address (required)",
+          editor_address: "Editor BTC address to register (required)",
+        },
+      },
+      "DELETE /api/beats/:slug/editors/:address": {
+        description:
+          "Deactivate a beat editor (Publisher-only, BIP-322 auth)",
+        body: {
+          btc_address: "Publisher BTC address (required)",
+        },
+      },
+      "GET /api/beats/:slug/editors": {
+        description: "List active editors for a beat (public)",
+        returns: "{ editors }",
+      },
+      "GET /api/editors/:address": {
+        description: "List beats an editor is assigned to (public, active only)",
+        returns: "{ beats }",
+      },
+      "GET /api/editors/:address/earnings": {
+        description:
+          "List editor earnings — system-created at compile time for brief-included signals on beats with active editors (BIP-322 auth, self or publisher)",
+        returns: "{ earnings }",
+      },
+      "PATCH /api/editors/:address/earnings/:id": {
+        description:
+          "Record payout transaction on an editor earning (Publisher-only, BIP-322 auth)",
+        body: {
+          btc_address: "Publisher BTC address (required)",
+          payout_txid: "Bitcoin transaction ID (required)",
+        },
+      },
       "GET /api/leaderboard": {
         description:
           "Weighted leaderboard with 6-component scoring and 30-day rolling window",

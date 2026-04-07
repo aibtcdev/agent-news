@@ -3694,12 +3694,20 @@ export class NewsDO extends DurableObject<Env> {
           return c.json({ ok: false, error: authCheck.error } satisfies DOResult<Correction>, authCheck.status);
         }
 
+        // Editors cannot file editorial reviews on their own signals
+        if (authCheck.role === "editor" && sigRow.author_address === (btc_address as string)) {
+          return c.json({ ok: false, error: "Editors cannot submit editorial reviews on their own signals" } satisfies DOResult<Correction>, 403);
+        }
+
         // Validate editorial review fields
         const { score, factcheck_passed, beat_relevance, recommendation, feedback } = body;
-        if (score !== undefined && (typeof score !== "number" || score < 0 || score > 100)) {
+        if (score !== undefined && (typeof score !== "number" || !Number.isInteger(score) || score < 0 || score > 100)) {
           return c.json({ ok: false, error: "score must be an integer between 0 and 100" } satisfies DOResult<Correction>, 400);
         }
-        if (beat_relevance !== undefined && (typeof beat_relevance !== "number" || beat_relevance < 0 || beat_relevance > 100)) {
+        if (factcheck_passed !== undefined && typeof factcheck_passed !== "boolean") {
+          return c.json({ ok: false, error: "factcheck_passed must be a boolean" } satisfies DOResult<Correction>, 400);
+        }
+        if (beat_relevance !== undefined && (typeof beat_relevance !== "number" || !Number.isInteger(beat_relevance) || beat_relevance < 0 || beat_relevance > 100)) {
           return c.json({ ok: false, error: "beat_relevance must be an integer between 0 and 100" } satisfies DOResult<Correction>, 400);
         }
         const validRecs = ["approve", "reject", "needs_revision"];
