@@ -2237,9 +2237,10 @@ export class NewsDO extends DurableObject<Env> {
         .toArray()
         .map((row) => rowToCompiledSignal(row as Record<string, unknown>));
 
-      // Safety cap at MAX_INCLUDED_SIGNALS_PER_BRIEF. Per-beat caps managed by the
-      // publisher should prevent overflow; this is a hard ceiling for misconfigured caps.
-      // Most-recently-reviewed signals take priority in the overflow edge case.
+      // Safety cap at MAX_INCLUDED_SIGNALS_PER_BRIEF. Each beat editor approves up to
+      // their beat's daily_approved_limit (e.g. 6/30 for quantum); the publisher fills
+      // remaining slots from other beats. Per-beat caps should sum to <= 30, so this
+      // slice is a hard ceiling for misconfigured caps, not a curation mechanism.
       const selectedSignals = candidateRows.slice(0, MAX_INCLUDED_SIGNALS_PER_BRIEF);
       const includedSignals = buildIncludedSignalMetadata(selectedSignals);
 
