@@ -109,7 +109,7 @@ editorEarningsRouter.patch("/api/editors/:address/earnings/:id", async (c) => {
     return c.json({ error: "Missing required field: payout_txid (non-empty string)" }, 400);
   }
 
-  const result = await updateEditorEarning(c.env, id, publisherAddress, payout_txid.trim());
+  const result = await updateEditorEarning(c.env, id, address, publisherAddress, payout_txid.trim());
 
   if (!result.ok) {
     return c.json({ error: result.error }, result.status ?? 400);

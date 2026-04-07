@@ -233,22 +233,23 @@ manifestRouter.get("/api", (c) => {
       },
       "PATCH /api/signals/:id/review": {
         description:
-          "Publisher editorial review — approve, reject, or give feedback on a signal. Daily approval cap: max 30 per Pacific day. When cap is reached, include displace_signal_id to swap.",
+          "Editorial review — approve or reject a signal. Beat editors can review signals on their assigned beat; publisher can review any beat. Per-beat daily cap enforced when daily_approved_limit is set. When cap is reached, include displace_signal_id to swap.",
         body: {
-          btc_address: "Publisher BTC address (required)",
+          btc_address: "Reviewer BTC address — editor or publisher (required)",
           status: "New status: approved, rejected (required)",
-          feedback: "Publisher feedback text (required for feedback/rejected)",
-          displace_signal_id: "Signal ID to displace when approval cap reached (optional — required at cap)",
+          feedback: "Reviewer feedback text (required for rejected)",
+          displace_signal_id: "Signal ID to displace when beat cap reached (optional — required at cap)",
         },
         response_headers: {
-          "X-Approval-Cap": "Daily approval limit (on approval responses)",
-          "X-Approval-Count": "Approvals so far today",
-          "X-Approval-Remaining": "Remaining slots today",
+          "X-Approval-Cap": "Per-beat daily approval limit (on approval responses, only when cap is set)",
+          "X-Approval-Count": "Approvals so far today on this beat",
+          "X-Approval-Remaining": "Remaining slots today on this beat",
         },
         errors: {
           400: "Invalid displace_signal_id — target must be an approved signal from today",
+          403: "Editor not authorized for this beat",
           404: "displace_signal_id target not found",
-          409: "Daily approval cap reached — provide displace_signal_id",
+          409: "Per-beat daily cap reached — provide displace_signal_id to swap",
         },
       },
       "GET /api/leaderboard": {

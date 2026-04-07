@@ -943,9 +943,8 @@ export class NewsDO extends DurableObject<Env> {
         const dayEnd = getPacificDayEndUTC(today);
 
         // Determine the effective cap: use beat's daily_approved_limit if set.
-        // For editors (scoped to one beat), apply beat cap against that beat's signals.
-        // For publisher, apply beat cap against that beat's signals if set,
-        // otherwise apply the global MAX_APPROVED_SIGNALS_PER_DAY across all beats.
+        // NULL = no per-beat cap (unlimited). The global MAX_APPROVED_SIGNALS_PER_DAY
+        // hard-gate applies separately in the brief compilation step.
         const beatCapRows = this.ctx.storage.sql
           .exec("SELECT daily_approved_limit FROM beats WHERE slug = ?", signalRow.beat_slug)
           .toArray();
@@ -953,33 +952,31 @@ export class NewsDO extends DurableObject<Env> {
           ? (beatCapRows[0] as { daily_approved_limit: number | null }).daily_approved_limit
           : null;
 
-        const effectiveCap = beatCap !== null ? beatCap : MAX_APPROVED_SIGNALS_PER_DAY;
-        // Scope the count query: per-beat if beat cap is set (or reviewer is editor), global otherwise
-        const useBeatScope = beatCap !== null || reviewerRole === "editor";
-        const countRows = this.ctx.storage.sql
-          .exec(
-            useBeatScope
-              ? `SELECT COUNT(*) as count FROM signals
-                 WHERE beat_slug = ? AND status IN ('approved', 'brief_included')
-                   AND reviewed_at >= ? AND reviewed_at < ?`
-              : `SELECT COUNT(*) as count FROM signals
-                 WHERE status IN ('approved', 'brief_included')
-                   AND reviewed_at >= ? AND reviewed_at < ?`,
-            ...(useBeatScope ? [signalRow.beat_slug, dayStart, dayEnd] : [dayStart, dayEnd])
-          )
-          .toArray();
-        const rawCount = (countRows[0] as Record<string, unknown> | undefined)?.count;
-        const approvedToday = Number.isFinite(Number(rawCount)) ? Number(rawCount) : 0;
+        // Skip per-beat cap enforcement when daily_approved_limit is NULL (unlimited)
+        const enforceCapCheck = beatCap !== null;
+        let approvedToday = 0;
+        if (enforceCapCheck) {
+          const countRows = this.ctx.storage.sql
+            .exec(
+              `SELECT COUNT(*) as count FROM signals
+               WHERE beat_slug = ? AND status IN ('approved', 'brief_included')
+                 AND reviewed_at >= ? AND reviewed_at < ?`,
+              signalRow.beat_slug, dayStart, dayEnd
+            )
+            .toArray();
+          const rawCount = (countRows[0] as Record<string, unknown> | undefined)?.count;
+          approvedToday = Number.isFinite(Number(rawCount)) ? Number(rawCount) : 0;
+        }
 
-        if (approvedToday >= effectiveCap) {
+        if (enforceCapCheck && approvedToday >= beatCap) {
           const displaceId = body.displace_signal_id as string | undefined;
 
           if (!displaceId) {
             return c.json({
               ok: false,
-              error: `Daily approval cap reached (${effectiveCap}${useBeatScope ? ` for beat "${signalRow.beat_slug}"` : ""}). Provide displace_signal_id to swap.`,
+              error: `Daily approval cap reached (${beatCap} for beat "${signalRow.beat_slug}"). Provide displace_signal_id to swap.`,
               approval_cap: {
-                limit: effectiveCap,
+                limit: beatCap,
                 approved_today: approvedToday,
                 remaining: 0,
                 reset_at: dayEnd,
@@ -1017,14 +1014,16 @@ export class NewsDO extends DurableObject<Env> {
           );
         }
 
-        // Build cap info for response
-        const countAfter = approvedToday >= effectiveCap ? approvedToday : approvedToday + 1;
-        approvalCap = {
-          limit: effectiveCap,
-          approved_today: countAfter,
-          remaining: Math.max(0, effectiveCap - countAfter),
-          reset_at: dayEnd,
-        };
+        // Build cap info for response (only when beat has a configured cap)
+        if (enforceCapCheck) {
+          const countAfter = approvedToday >= beatCap ? approvedToday : approvedToday + 1;
+          approvalCap = {
+            limit: beatCap,
+            approved_today: countAfter,
+            remaining: Math.max(0, beatCap - countAfter),
+            reset_at: dayEnd,
+          };
+        }
       }
 
       const now = nowDate.toISOString();
@@ -3638,7 +3637,7 @@ export class NewsDO extends DurableObject<Env> {
           return c.json({ ok: false, error: `recommendation must be one of: ${validRecs.join(", ")}` } satisfies DOResult<Correction>, 400);
         }
 
-        // Use feedback as both claim and correction for editorial reviews (structural fit)
+        // Store type marker in claim column, feedback in correction column
         const feedbackText = feedback ? sanitizeString(feedback, 2000) : "";
         this.ctx.storage.sql.exec(
           `INSERT INTO corrections
@@ -3793,7 +3792,7 @@ export class NewsDO extends DurableObject<Env> {
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT * FROM earnings
-           WHERE btc_address = ? AND reason LIKE 'editor_review:%'
+           WHERE btc_address = ? AND reason LIKE 'editor_%'
            ORDER BY created_at DESC`,
           address
         )
@@ -3809,7 +3808,7 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Earning>, 400);
       }
 
-      const { btc_address, payout_txid } = body;
+      const { btc_address, editor_address, payout_txid } = body;
       if (!btc_address || !payout_txid) {
         return c.json(
           { ok: false, error: "Missing required fields: btc_address, payout_txid" } satisfies DOResult<Earning>,
@@ -3823,10 +3822,16 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const rows = this.ctx.storage.sql
-        .exec("SELECT * FROM earnings WHERE id = ? AND reason LIKE 'editor_review:%'", id)
+        .exec("SELECT * FROM earnings WHERE id = ? AND reason LIKE 'editor_%'", id)
         .toArray();
       if (rows.length === 0) {
         return c.json({ ok: false, error: `Editor earning "${id}" not found` } satisfies DOResult<Earning>, 404);
+      }
+
+      // Validate earning belongs to the editor address in the URL path
+      const earning = rows[0] as { btc_address: string };
+      if (editor_address && earning.btc_address !== (editor_address as string)) {
+        return c.json({ ok: false, error: `Earning "${id}" does not belong to editor "${editor_address}"` } satisfies DOResult<Earning>, 403);
       }
 
       this.ctx.storage.sql.exec(

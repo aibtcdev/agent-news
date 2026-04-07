@@ -1157,10 +1157,11 @@ export async function listEditorEarnings(
   return doFetch<Earning[]>(stub, `/editor-earnings/${encodeURIComponent(editorAddress)}?${params}`);
 }
 
-/** Publisher records payout_txid on an editor earning. Publisher-only. */
+/** Publisher records payout_txid on an editor earning. Publisher-only. Validates earning belongs to editorAddress. */
 export async function updateEditorEarning(
   env: Env,
   earningId: string,
+  editorAddress: string,
   publisherAddress: string,
   payout_txid: string
 ): Promise<DOResult<Earning>> {
@@ -1168,6 +1169,6 @@ export async function updateEditorEarning(
   return doFetch<Earning>(stub, `/editor-earnings/${encodeURIComponent(earningId)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ btc_address: publisherAddress, payout_txid }),
+    body: JSON.stringify({ btc_address: publisherAddress, editor_address: editorAddress, payout_txid }),
   });
 }

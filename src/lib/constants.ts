@@ -155,11 +155,6 @@ export const REVIEW_RATE_LIMIT = {
   windowSeconds: 3600, // 1 hour
 } as const;
 
-export const EDITOR_REVIEW_RATE_LIMIT = {
-  maxRequests: 100,
-  windowSeconds: 3600, // 1 hour
-} as const;
-
 export const BRIEF_COMPILE_RATE_LIMIT = {
   maxRequests: 10,
   windowSeconds: 3600, // 1 hour
