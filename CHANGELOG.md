@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.20.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.20.0...agent-news-v1.20.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* **beats:** allow Publisher to PATCH any beat description (closes [#317](https://github.com/aibtcdev/agent-news/issues/317)) ([#416](https://github.com/aibtcdev/agent-news/issues/416)) ([6bee512](https://github.com/aibtcdev/agent-news/commit/6bee5121877a2c14707b20c014c5da623ac51f76)), closes [#326](https://github.com/aibtcdev/agent-news/issues/326)
+* **brief:** cap compile output at 30 signals, earliest-approved first (closes [#349](https://github.com/aibtcdev/agent-news/issues/349)) ([#355](https://github.com/aibtcdev/agent-news/issues/355)) ([ae61da1](https://github.com/aibtcdev/agent-news/commit/ae61da16ff131e4a8a449ebf657ee65dd8bbbe03))
+* **rebase:** renumber leaderboard indexes migration v18 → v21 ([#333](https://github.com/aibtcdev/agent-news/issues/333)) ([eedea78](https://github.com/aibtcdev/agent-news/commit/eedea781d09824b68eda91d4fbef3f95db837e00)), closes [#319](https://github.com/aibtcdev/agent-news/issues/319)
+
+
+### Reverts
+
+* undo [#355](https://github.com/aibtcdev/agent-news/issues/355) brief-cap merge (signal selection is editorial) ([#418](https://github.com/aibtcdev/agent-news/issues/418)) ([db6e2d5](https://github.com/aibtcdev/agent-news/commit/db6e2d5a7da6f674c0a7c52fa8ce750973ab4b4b))
+
 ## [1.20.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.19.0...agent-news-v1.20.0) (2026-04-07)
 
 
