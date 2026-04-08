@@ -601,3 +601,24 @@ export const MIGRATION_CURATION_CLEANUP_SQL = [
        'db837a01-788d-4f08-a174-8758347ce61a','ffcb4de3-3998-4265-a8a2-eb8944f4af32','43800ead-c4bd-46ef-95f2-5cd1a1ae50a9','80e3529a-a4e9-4cd5-b41c-bcb701a0ba53','2b4cfe7a-75d0-4ce0-906a-bff3e09185cc','2e00e3ef-a979-4583-b010-7565d9b8e635','31cf9975-c3af-44d5-ba5c-b7e5f11375af','dc06393c-f1e0-4667-8ee0-3a593f39ff2c','248db72c-6082-43ca-8500-3c39b013c5e2','f74eb37a-cfba-47d4-adc9-06b62422e2b8','cef57500-2ee9-4c12-82eb-5cb3f8f03e52','3960c10e-92f8-43f6-b8bb-58f768dc5fc0','40d30fbb-459b-49ea-8f94-98b2c8d17a0c','52fadd57-8847-46a8-85e7-d8458f86374e','747ef5c5-30fc-4bff-a555-d52b982dcd4d','cb05bbc3-ed0c-4f77-8ec3-5c7e916bd796','772617b2-2c1b-4f61-bb50-2203b623787a','a1518f55-d566-47d0-a397-35ef9a50efd4','7d995511-db66-400c-8d26-ad198c985281','9f6d8223-aeb5-4de0-b2ab-1ecff104dcdc','545f7829-a536-464c-9417-6c06fa26d02a','bcd9e7ef-992c-4a80-b788-c7000fba15c7','14305d91-2348-4299-b26d-3a4bfebd2909','41bf9018-b15e-4995-9699-fcdb9357634f','b5e4f967-76f5-4012-9c64-c6369f010482','4f5f50e0-60f6-4901-aae7-a0468c61234b','8b866fc7-e02d-4a6f-ba88-fed94434466b','10c5c979-a1e9-45d8-92a4-59fe7d70bd2a','246983df-bd20-4d24-8dce-88b526284e82','45c3be21-17b1-41ca-ab18-82a2ec165146'
      )`,
 ] as const;
+
+/**
+ * Migration 21 — Leaderboard composite indexes.
+ * Adds composite indexes to accelerate the 30-day rolling window subqueries
+ * in queryLeaderboard(). Without these, each LEFT JOIN subquery performs a
+ * full table scan on every leaderboard request (10s+ for tables with 1k+ rows).
+ *
+ * Indexes added:
+ *   - signals(correction_of, created_at)      — covers the correction_of IS NULL + 30-day filter
+ *   - brief_signals(created_at, retracted_at)  — covers the 30-day window + retracted_at IS NULL filter
+ *   - corrections(status, created_at)          — covers the status='approved' + 30-day filter
+ *   - referral_credits(credited_at)            — covers the credited_at IS NOT NULL + 30-day filter
+ *
+ * Expected improvement: 5–10 s → <500 ms per arc0btc's analysis (issue #319).
+ */
+export const MIGRATION_LEADERBOARD_INDEXES_SQL = [
+  "CREATE INDEX IF NOT EXISTS idx_signals_correction_created ON signals(correction_of, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_brief_signals_created_retracted ON brief_signals(created_at, retracted_at)",
+  "CREATE INDEX IF NOT EXISTS idx_corrections_status_created ON corrections(status, created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_referral_credits_credited ON referral_credits(credited_at)",
+] as const;
