@@ -3,7 +3,8 @@ import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { BEAT_RATE_LIMIT } from "../lib/constants";
 import { validateSlug, validateHexColor, validateBtcAddress, sanitizeString } from "../lib/validators";
-import { listBeats, getBeat, createBeat, updateBeat, deleteBeat, getBeatMembership } from "../lib/do-client";
+import { listBeats, getBeat, createBeat, updateBeat, deleteBeat, getBeatMembership, getConfig } from "../lib/do-client";
+import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import { verifyAuth } from "../services/auth";
 
 const beatsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -199,12 +200,17 @@ beatsRouter.patch("/api/beats/:slug", beatRateLimit, async (c) => {
   }
 
   // Ownership check: ensure the authenticated address owns the beat
+  // Publisher override: the designated Publisher can update any beat (issue #317)
   const existingBeat = await getBeat(c.env, slug);
   if (!existingBeat) {
     return c.json({ error: `Beat "${slug}" not found` }, 404);
   }
   if (existingBeat.created_by !== btc_address) {
-    return c.json({ error: "Forbidden: you do not own this beat" }, 403);
+    const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+    const isPublisher = publisherConfig?.value === btc_address;
+    if (!isPublisher) {
+      return c.json({ error: "Forbidden: you do not own this beat" }, 403);
+    }
   }
 
   const result = await updateBeat(c.env, slug, body);
