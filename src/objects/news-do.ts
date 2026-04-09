@@ -1007,6 +1007,63 @@ export class NewsDO extends DurableObject<Env> {
           ? (beatCapRows[0] as { daily_approved_limit: number | null }).daily_approved_limit
           : null;
 
+        // ── Global daily cap (MAX_APPROVED_SIGNALS_PER_DAY across all beats) ──
+        const globalCountRows = this.ctx.storage.sql
+          .exec(
+            `SELECT COUNT(*) as count FROM signals
+             WHERE status IN ('approved', 'brief_included')
+               AND reviewed_at >= ? AND reviewed_at < ?`,
+            dayStart, dayEnd
+          )
+          .toArray();
+        const globalRaw = (globalCountRows[0] as Record<string, unknown> | undefined)?.count;
+        const globalApprovedToday = Number.isFinite(Number(globalRaw)) ? Number(globalRaw) : 0;
+
+        if (globalApprovedToday >= MAX_APPROVED_SIGNALS_PER_DAY) {
+          const displaceId = body.displace_signal_id as string | undefined;
+
+          if (!displaceId) {
+            return c.json({
+              ok: false,
+              error: `Global daily approval cap reached (${MAX_APPROVED_SIGNALS_PER_DAY}). Provide displace_signal_id to swap.`,
+              approval_cap: {
+                limit: MAX_APPROVED_SIGNALS_PER_DAY,
+                approved_today: globalApprovedToday,
+                remaining: 0,
+                reset_at: dayEnd,
+              },
+            } satisfies DOResult<Signal>, 409);
+          }
+
+          // Validate displacement target
+          const displaceRows = this.ctx.storage.sql
+            .exec("SELECT id, status, reviewed_at FROM signals WHERE id = ?", displaceId)
+            .toArray();
+          if (displaceRows.length === 0) {
+            return c.json({ ok: false, error: `Displace target "${displaceId}" not found` } satisfies DOResult<Signal>, 404);
+          }
+          const displaceRow = displaceRows[0] as { id: string; status: string; reviewed_at: string | null };
+          if (displaceRow.status !== "approved") {
+            return c.json({
+              ok: false,
+              error: `Displace target must have status "approved", got "${displaceRow.status}". Only "approved" signals can be displaced (not "brief_included" or other statuses).`,
+            } satisfies DOResult<Signal>, 400);
+          }
+          if (!displaceRow.reviewed_at || displaceRow.reviewed_at < dayStart || displaceRow.reviewed_at >= dayEnd) {
+            return c.json({
+              ok: false,
+              error: `Displace target was not approved today. Only today's approved signals can be displaced.`,
+            } satisfies DOResult<Signal>, 400);
+          }
+
+          // Atomically displace: set old signal to 'replaced'
+          this.ctx.storage.sql.exec(
+            `UPDATE signals SET status = 'replaced', updated_at = ? WHERE id = ?`,
+            nowDate.toISOString(), displaceId
+          );
+        }
+
+        // ── Per-beat cap (daily_approved_limit, only when set) ──
         // Skip per-beat cap enforcement when daily_approved_limit is NULL (unlimited)
         const enforceCapCheck = beatCap !== null;
         let approvedToday = 0;
@@ -1069,13 +1126,24 @@ export class NewsDO extends DurableObject<Env> {
           );
         }
 
-        // Build cap info for response (only when beat has a configured cap)
+        // Build cap info for response — always include global cap
+        const globalCountAfter = globalApprovedToday >= MAX_APPROVED_SIGNALS_PER_DAY ? globalApprovedToday : globalApprovedToday + 1;
         if (enforceCapCheck) {
           const countAfter = approvedToday >= beatCap ? approvedToday : approvedToday + 1;
           approvalCap = {
             limit: beatCap,
             approved_today: countAfter,
             remaining: Math.max(0, beatCap - countAfter),
+            reset_at: dayEnd,
+            global_limit: MAX_APPROVED_SIGNALS_PER_DAY,
+            global_approved_today: globalCountAfter,
+            global_remaining: Math.max(0, MAX_APPROVED_SIGNALS_PER_DAY - globalCountAfter),
+          };
+        } else {
+          approvalCap = {
+            limit: MAX_APPROVED_SIGNALS_PER_DAY,
+            approved_today: globalCountAfter,
+            remaining: Math.max(0, MAX_APPROVED_SIGNALS_PER_DAY - globalCountAfter),
             reset_at: dayEnd,
           };
         }

@@ -374,6 +374,10 @@ export interface ApprovalCapInfo {
   approved_today: number;
   remaining: number;
   reset_at: string;
+  /** Present when per-beat cap is active — global cap details */
+  global_limit?: number;
+  global_approved_today?: number;
+  global_remaining?: number;
 }
 
 export interface DOResult<T> {
