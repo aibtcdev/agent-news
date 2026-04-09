@@ -45,6 +45,7 @@ export const WEEKLY_PRIZE_2ND_SATS = 100000;
 /** Weekly leaderboard 3rd-place prize (≈$50 at $100k/BTC). */
 export const WEEKLY_PRIZE_3RD_SATS = 50000;
 
+export const SIGNAL_PRICE_SATS = 100;
 export const CLASSIFIED_PRICE_SATS = 3000;
 export const CLASSIFIED_DURATION_DAYS = 7;
 export const CLASSIFIED_BRIEF_SLOTS = 3;
