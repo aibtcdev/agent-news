@@ -8,6 +8,7 @@
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
+import { serializeBeatResponse } from "../lib/beat-response";
 import { getInitBundle } from "../lib/do-client";
 import { transformClassified } from "./classifieds";
 import { getPacificDate, truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
@@ -59,24 +60,22 @@ initRouter.get("/api/init", async (c) => {
 
   // --- Beats ---
   // Build a claims-by-beat map for member lists
-  const claimsByBeat = new Map<string, Array<{ address: string; claimedAt: string }>>();
+  const claimsByBeat = new Map<string, typeof bundle.claims>();
   for (const claim of bundle.claims) {
-    if (!claimsByBeat.has(claim.beat_slug)) claimsByBeat.set(claim.beat_slug, []);
-    claimsByBeat.get(claim.beat_slug)!.push({
-      address: claim.btc_address,
-      claimedAt: claim.claimed_at,
-    });
+    const existing = claimsByBeat.get(claim.beat_slug) ?? [];
+    existing.push(claim);
+    claimsByBeat.set(claim.beat_slug, existing);
   }
-  const beatsPayload = bundle.beats.map((b) => ({
-    slug: b.slug,
-    name: b.name,
-    description: b.description,
-    color: b.color,
-    claimedBy: b.created_by,
-    claimedAt: b.created_at,
-    status: b.status,
-    members: claimsByBeat.get(b.slug) ?? [],
-  }));
+  const beatsPayload = bundle.beats.map((beat) =>
+    serializeBeatResponse({
+      ...beat,
+      members: (claimsByBeat.get(beat.slug) ?? []).map((claim) => ({
+        btc_address: claim.btc_address,
+        claimed_at: claim.claimed_at,
+        status: "active",
+      })),
+    })
+  );
 
   // --- Classifieds ---
   const classifiedsPayload = {

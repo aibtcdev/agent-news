@@ -3705,8 +3705,8 @@
       const grid = el('roster-grid');
       grid.innerHTML = sorted.map(beat => {
         const color = beat.color || '#1a1a1a';
-        // Use correspondents data first; fall back to beat.claimedBy (skip 'system' placeholder)
-        const claimedBy = beat.claimedBy && beat.claimedBy !== 'system' ? beat.claimedBy : null;
+        // Use correspondents data first; fall back to beat.created_by (skip 'system' placeholder)
+        const claimedBy = beat.created_by && beat.created_by !== 'system' ? beat.created_by : null;
         const agents = beatAgents[beat.slug] || (claimedBy ? [claimedBy] : []);
         const MAX_AVATARS = 5;
         let agentsHTML;

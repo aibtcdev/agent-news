@@ -275,7 +275,8 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
         429
       );
     }
-    return c.json({ error: result.error }, result.status ?? 400);
+    const { ok: _ok, data: _data, status, ...rest } = result as typeof result & Record<string, unknown>;
+    return c.json(rest, status ?? 400);
   }
 
   const logger = c.get("logger");
@@ -298,9 +299,22 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     );
   }
   if (warnings.length > 0) {
-    return c.json({ ...(result.data as object), warnings }, 201);
+    return c.json(
+      {
+        ...(result.data as object),
+        ...(result.transition ? { transition: result.transition } : {}),
+        warnings,
+      },
+      201
+    );
   }
-  return c.json(result.data, 201);
+  return c.json(
+    {
+      ...(result.data as object),
+      ...(result.transition ? { transition: result.transition } : {}),
+    },
+    201
+  );
 });
 
 // PATCH /api/signals/:id — correct a signal (original author only, BIP-322 auth required)

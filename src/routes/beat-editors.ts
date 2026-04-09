@@ -67,7 +67,8 @@ beatEditorsRouter.post("/api/beats/:slug/editors", async (c) => {
   });
 
   if (!result.ok) {
-    return c.json({ error: result.error }, result.status ?? 400);
+    const { ok: _ok, data: _data, status, ...rest } = result as typeof result & Record<string, unknown>;
+    return c.json(rest, status ?? 400);
   }
 
   const logger = c.get("logger");

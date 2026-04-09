@@ -49,41 +49,21 @@ describe("DO constructor: schema initialization", () => {
     expect(res.status).toBe(200);
   });
 
-  it("beat migrations populate 12 canonical beats", async () => {
-    // MIGRATION_BEAT_NETWORK_FOCUS_SQL reduces 17 beats to 10 network-focused beats.
-    // MIGRATION_BITCOIN_MACRO_SQL (migration 12) re-adds bitcoin-macro → 11.
-    // MIGRATION_QUANTUM_BEAT_SQL (migration 13) adds quantum → 12.
+  it("beat lifecycle migration exposes 3 active beats and preserves the retired archive", async () => {
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
-    const body = await res.json<{ slug: string; name: string }[]>();
-    expect(body.length).toBe(12);
+    const body = await res.json<{ slug: string; name: string; lifecycle: string }[]>();
+    expect(body.length).toBe(3);
     const slugs = body.map((b) => b.slug);
-    // Network-focused beats (migration 11)
-    expect(slugs).toContain("agent-economy");
-    expect(slugs).toContain("agent-trading");
-    expect(slugs).toContain("agent-social");
-    expect(slugs).toContain("agent-skills");
-    expect(slugs).toContain("security");
-    expect(slugs).toContain("deal-flow");
-    expect(slugs).toContain("onboarding");
-    expect(slugs).toContain("governance");
-    expect(slugs).toContain("distribution");
-    expect(slugs).toContain("infrastructure");
-    // Re-added beat (migration 12)
+    expect(slugs).toContain("aibtc-network");
     expect(slugs).toContain("bitcoin-macro");
-    // New beat (migration 13)
     expect(slugs).toContain("quantum");
-    // Other previously-removed beats should not be present
-    expect(slugs).not.toContain("bitcoin-culture");
-    expect(slugs).not.toContain("bitcoin-yield");
-    expect(slugs).not.toContain("ordinals");
-    expect(slugs).not.toContain("runes");
-    expect(slugs).not.toContain("art");
-    expect(slugs).not.toContain("world-intel");
-    expect(slugs).not.toContain("comics");
-    // Renamed beats should not be present under old names
-    expect(slugs).not.toContain("aibtc-network");
-    expect(slugs).not.toContain("dao-watch");
-    expect(slugs).not.toContain("dev-tools");
+    expect(body.every((beat) => beat.lifecycle === "active")).toBe(true);
+
+    const archiveRes = await SELF.fetch("http://example.com/api/beats?view=all");
+    expect(archiveRes.status).toBe(200);
+    const allBeats = await archiveRes.json<{ slug: string; lifecycle: string }[]>();
+    expect(allBeats.length).toBe(13);
+    expect(allBeats.some((beat) => beat.slug === "onboarding" && beat.lifecycle === "retired")).toBe(true);
   });
 });

@@ -16,7 +16,15 @@ CREATE TABLE IF NOT EXISTS beats (
   color       TEXT,
   created_by  TEXT NOT NULL,
   created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL
+  updated_at  TEXT NOT NULL,
+  lifecycle   TEXT NOT NULL DEFAULT 'active',
+  replacement_beats TEXT NOT NULL DEFAULT '[]',
+  transition_started_at TEXT,
+  transition_effective_at TEXT,
+  transition_message TEXT,
+  transition_docs_url TEXT,
+  daily_approved_limit INTEGER DEFAULT NULL,
+  editor_review_rate_sats INTEGER DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS signals (
@@ -139,6 +147,7 @@ CREATE INDEX IF NOT EXISTS idx_corrections_address      ON corrections(btc_addre
 CREATE INDEX IF NOT EXISTS idx_referral_scout           ON referral_credits(scout_address);
 CREATE INDEX IF NOT EXISTS idx_referral_recruit         ON referral_credits(recruit_address);
 CREATE INDEX IF NOT EXISTS idx_payment_staging_status   ON payment_staging(stage_status);
+CREATE INDEX IF NOT EXISTS idx_beats_lifecycle          ON beats(lifecycle);
 `;
 
 /**
@@ -621,4 +630,73 @@ export const MIGRATION_LEADERBOARD_INDEXES_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_brief_signals_created_retracted ON brief_signals(created_at, retracted_at)",
   "CREATE INDEX IF NOT EXISTS idx_corrections_status_created ON corrections(status, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_referral_credits_credited ON referral_credits(credited_at)",
+] as const;
+
+/**
+ * Migration 22 — three-beat soft-retire lifecycle contract.
+ *
+ * Adds first-class lifecycle/transition metadata to beats, restores
+ * aibtc-network as a live beat, retires all non-launch beats by default,
+ * and sets the 10-per-day cap on the 3 active beats.
+ */
+export const MIGRATION_BEAT_LIFECYCLE_SQL = [
+  "ALTER TABLE beats ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'active'",
+  "ALTER TABLE beats ADD COLUMN replacement_beats TEXT NOT NULL DEFAULT '[]'",
+  "ALTER TABLE beats ADD COLUMN transition_started_at TEXT",
+  "ALTER TABLE beats ADD COLUMN transition_effective_at TEXT",
+  "ALTER TABLE beats ADD COLUMN transition_message TEXT",
+  "ALTER TABLE beats ADD COLUMN transition_docs_url TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_beats_lifecycle ON beats(lifecycle)",
+  `INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at, lifecycle, replacement_beats, transition_docs_url, daily_approved_limit)
+   VALUES (
+     'aibtc-network',
+     'AIBTC Network',
+     'Network-wide AIBTC activity: launches, partnerships, agent coordination, platform milestones, and consequential developments that span the broader newsroom.',
+     '#1E88E5',
+     'system',
+     datetime('now'),
+     datetime('now'),
+     'active',
+     '[]',
+     'https://aibtc.news/about/#beat-lifecycle',
+     10
+   )
+   ON CONFLICT(slug) DO UPDATE SET
+     name = excluded.name,
+     description = excluded.description,
+     color = excluded.color,
+     updated_at = datetime('now'),
+     lifecycle = 'active',
+     replacement_beats = '[]',
+     transition_started_at = NULL,
+     transition_effective_at = NULL,
+     transition_message = NULL,
+     transition_docs_url = 'https://aibtc.news/about/#beat-lifecycle',
+     daily_approved_limit = 10`,
+  `UPDATE beats
+      SET lifecycle = CASE
+        WHEN slug IN ('aibtc-network', 'bitcoin-macro', 'quantum') THEN 'active'
+        ELSE 'retired'
+      END,
+          replacement_beats = CASE
+        WHEN slug IN ('aibtc-network', 'bitcoin-macro', 'quantum') THEN '[]'
+        ELSE '["aibtc-network","bitcoin-macro","quantum"]'
+      END,
+          transition_started_at = CASE
+        WHEN slug IN ('aibtc-network', 'bitcoin-macro', 'quantum') THEN NULL
+        ELSE transition_started_at
+      END,
+          transition_effective_at = CASE
+        WHEN slug IN ('aibtc-network', 'bitcoin-macro', 'quantum') THEN NULL
+        ELSE transition_effective_at
+      END,
+          transition_message = CASE
+        WHEN slug IN ('aibtc-network', 'bitcoin-macro', 'quantum') THEN NULL
+        ELSE COALESCE(transition_message, 'This beat is archive-only. Choose an active beat and retry.')
+      END,
+          transition_docs_url = COALESCE(transition_docs_url, 'https://aibtc.news/about/#beat-lifecycle'),
+          daily_approved_limit = CASE
+        WHEN slug IN ('aibtc-network', 'bitcoin-macro', 'quantum') THEN 10
+        ELSE NULL
+      END`,
 ] as const;

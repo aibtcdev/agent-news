@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { SELF } from "cloudflare:test";
+import { BeatSchema, BeatWithLifecycleSchema } from "@aibtc/tx-schemas/news";
 
 /**
  * Integration tests for /api/beats endpoints.
@@ -12,6 +13,45 @@ describe("GET /api/beats", () => {
     const body = await res.json<unknown[]>();
     expect(Array.isArray(body)).toBe(true);
   });
+
+  it("lists only the 3 active beats by default", async () => {
+    const res = await SELF.fetch("http://example.com/api/beats");
+    expect(res.status).toBe(200);
+    const body = await res.json<Array<{ slug: string; lifecycle: string; is_fileable: boolean }>>();
+    expect(body).toHaveLength(3);
+    expect(body.map((beat) => beat.slug).sort()).toEqual([
+      "aibtc-network",
+      "bitcoin-macro",
+      "quantum",
+    ]);
+    expect(body.every((beat) => BeatWithLifecycleSchema.safeParse(beat).success)).toBe(true);
+    body.forEach((beat) => {
+      expect(beat.lifecycle).toBe("active");
+      expect(beat.is_fileable).toBe(true);
+    });
+  });
+
+  it("exposes retired beats through the archive view", async () => {
+    const res = await SELF.fetch("http://example.com/api/beats/archive");
+    expect(res.status).toBe(200);
+    const body = await res.json<Array<{ slug: string; lifecycle: string; archive_only: boolean }>>();
+    expect(body.length).toBeGreaterThan(0);
+    expect(body.every((beat) => BeatWithLifecycleSchema.safeParse(beat).success)).toBe(true);
+    expect(body.some((beat) => beat.slug === "onboarding")).toBe(true);
+    expect(body.every((beat) => beat.lifecycle === "grace" || beat.lifecycle === "retired")).toBe(true);
+  });
+
+  it("returns beat fields using the shared tx-schemas snake_case contract", async () => {
+    const res = await SELF.fetch("http://example.com/api/beats");
+    expect(res.status).toBe(200);
+    const body = await res.json<Array<Record<string, unknown>>>();
+    expect(BeatSchema.safeParse(body[0]).success).toBe(true);
+    expect(body[0]).toHaveProperty("created_by");
+    expect(body[0]).toHaveProperty("created_at");
+    expect(body[0]).toHaveProperty("updated_at");
+    expect(body[0]).not.toHaveProperty("claimedBy");
+    expect(body[0]).not.toHaveProperty("claimedAt");
+  });
 });
 
 describe("GET /api/beats/:slug — not found", () => {
@@ -22,6 +62,18 @@ describe("GET /api/beats/:slug — not found", () => {
     expect(res.status).toBe(404);
     const body = await res.json<{ error: string }>();
     expect(body.error).toContain("not found");
+  });
+});
+
+describe("GET /api/beats/:slug", () => {
+  it("keeps retired beat detail readable for historical hydration", async () => {
+    const res = await SELF.fetch("http://example.com/api/beats/onboarding");
+    expect(res.status).toBe(200);
+    const body = await res.json<{ slug: string; lifecycle: string; archive_only: boolean }>();
+    expect(BeatWithLifecycleSchema.safeParse(body).success).toBe(true);
+    expect(body.slug).toBe("onboarding");
+    expect(body.lifecycle).toBe("retired");
+    expect(body.archive_only).toBe(true);
   });
 });
 

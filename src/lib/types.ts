@@ -10,6 +10,12 @@ import type {
   TerminalReason,
   TrackedPaymentState,
 } from "@aibtc/tx-schemas";
+import type {
+  Beat as SharedBeat,
+  BeatClaim as SharedBeatClaim,
+  BeatGracePeriodSuccess,
+  BeatMember as SharedBeatMember,
+} from "@aibtc/tx-schemas/news";
 import type { SIGNAL_STATUSES, CLASSIFIED_STATUSES } from "./constants";
 
 /**
@@ -126,42 +132,22 @@ export type AppContext = Context<{ Bindings: Env; Variables: AppVariables }>;
 /**
  * A beat is a named topic category for signals
  */
-export interface Beat {
-  readonly slug: string;
-  readonly name: string;
-  readonly description: string | null;
-  readonly color: string | null;
-  readonly created_by: string;
-  readonly created_at: string;
-  readonly updated_at: string;
-  /** Per-beat daily approval cap (null = unlimited). Added in MIGRATION_BITCOIN_MACRO_SQL. */
-  readonly daily_approved_limit?: number | null;
-  /** Per-review payment rate for the beat editor in satoshis (null = not configured). Added in migration 19. */
-  readonly editor_review_rate_sats?: number | null;
+export type Beat = SharedBeat & {
   /** Computed on read — not stored in DB */
   readonly status?: "active" | "inactive";
   /** Active members from beat_claims — populated when joined */
   readonly members?: BeatMember[];
-}
+};
 
 /**
  * A beat claim row from the beat_claims table (full row including beat_slug)
  */
-export interface BeatClaim {
-  readonly beat_slug: string;
-  readonly btc_address: string;
-  readonly claimed_at: string;
-  readonly status: "active" | "inactive";
-}
+export type BeatClaim = SharedBeatClaim;
 
 /**
  * A beat member nested inside a Beat response (beat_slug omitted since it's the parent)
  */
-export interface BeatMember {
-  readonly btc_address: string;
-  readonly claimed_at: string;
-  readonly status: "active" | "inactive";
-}
+export type BeatMember = SharedBeatMember;
 
 /**
  * A URL+title pair for signal source attribution
@@ -382,6 +368,15 @@ export interface DOResult<T> {
   error?: string;
   /** HTTP status hint from DO, present on error paths */
   status?: DOErrorStatus;
+  code?: string;
+  beat_lifecycle?: import("./beat-lifecycle").BeatLifecycle;
+  archive_only?: boolean;
+  replacement_beats?: string[];
+  transition_started_at?: string | null;
+  transition_effective_at?: string | null;
+  docs_url?: string | null;
+  message_for_agent?: string;
+  transition?: BeatGracePeriodSuccess | null;
   /** Present on approval responses — current daily cap status */
   approval_cap?: ApprovalCapInfo;
 }

@@ -38,9 +38,13 @@ async function doFetch<T>(
 // Beats
 // ---------------------------------------------------------------------------
 
-export async function listBeats(env: Env): Promise<Beat[]> {
+export async function listBeats(
+  env: Env,
+  view: "active" | "archive" | "all" = "active"
+): Promise<Beat[]> {
   const stub = getStub(env);
-  const result = await doFetch<Beat[]>(stub, "/beats");
+  const suffix = view === "active" ? "" : `?view=${encodeURIComponent(view)}`;
+  const result = await doFetch<Beat[]>(stub, `/beats${suffix}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list beats");
   if (result.data === undefined) throw new Error("Missing data in response");
   return result.data;
@@ -57,7 +61,7 @@ export async function getBeat(env: Env, slug: string): Promise<Beat | null> {
 
 export async function createBeat(
   env: Env,
-  beat: Omit<Beat, "created_at" | "updated_at">
+  beat: Pick<Beat, "slug" | "name" | "description" | "color" | "created_by">
 ): Promise<DOResult<Beat>> {
   const stub = getStub(env);
   return doFetch<Beat>(stub, "/beats", {
@@ -668,6 +672,8 @@ export interface ReportData {
   signalsToday: number;
   totalSignals: number;
   totalBeats: number;
+  preservedBeats?: number;
+  retiredBeats?: number;
   activeCorrespondents: number;
   latestBrief: { date: string; inscribed_txid: string | null; inscription_id: string | null } | null;
   topAgents: { btc_address: string; signal_count: number }[];

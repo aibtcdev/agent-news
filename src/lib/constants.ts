@@ -168,6 +168,15 @@ export const BRIEF_INSCRIBE_RATE_LIMIT = {
 // ── Config keys ──
 export const CONFIG_PUBLISHER_ADDRESS = "publisher_btc_address" as const;
 
+// ── Beat lifecycle / soft-retire cutover ──
+export const ACTIVE_NEWSROOM_BEAT_SLUGS = [
+  "aibtc-network",
+  "bitcoin-macro",
+  "quantum",
+] as const;
+export const ACTIVE_NEWSROOM_DAILY_APPROVED_LIMIT = 10;
+export const BEAT_TRANSITION_DOCS_URL = "https://aibtc.news/about/#beat-lifecycle" as const;
+
 // ── Canonical parent inscription ──
 /** The root ordinal inscription for the aibtc.news collection. All daily brief
  *  child inscriptions reference this parent to establish on-chain provenance. */

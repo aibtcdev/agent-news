@@ -3,6 +3,7 @@ import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { BEAT_RATE_LIMIT } from "../lib/constants";
 import { validateSlug, validateHexColor, validateBtcAddress, sanitizeString } from "../lib/validators";
+import { serializeBeatResponse } from "../lib/beat-response";
 import { listBeats, getBeat, createBeat, updateBeat, deleteBeat, getBeatMembership, getConfig } from "../lib/do-client";
 import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import { verifyAuth } from "../services/auth";
@@ -16,25 +17,18 @@ const beatRateLimit = createRateLimitMiddleware({
 
 // GET /api/beats — list all beats
 beatsRouter.get("/api/beats", async (c) => {
-  const beats = await listBeats(c.env);
-
-  // Transform snake_case → camelCase to match frontend expectations
-  const transformed = beats.map((b) => ({
-    slug: b.slug,
-    name: b.name,
-    description: b.description,
-    color: b.color,
-    claimedBy: b.created_by,
-    claimedAt: b.created_at,
-    status: b.status,
-    members: (b.members ?? []).map((m) => ({
-      address: m.btc_address,
-      claimedAt: m.claimed_at,
-    })),
-  }));
+  const rawView = c.req.query("view");
+  const view = rawView === "archive" || rawView === "all" ? rawView : "active";
+  const beats = await listBeats(c.env, view);
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json(transformed);
+  return c.json(beats.map(serializeBeatResponse));
+});
+
+beatsRouter.get("/api/beats/archive", async (c) => {
+  const beats = await listBeats(c.env, "archive");
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  return c.json(beats.map(serializeBeatResponse));
 });
 
 // GET /api/beats/membership — list beats an agent has joined
@@ -71,19 +65,7 @@ beatsRouter.get("/api/beats/:slug", async (c) => {
     return c.json({ error: `Beat "${slug}" not found` }, 404);
   }
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({
-    slug: b.slug,
-    name: b.name,
-    description: b.description,
-    color: b.color,
-    claimedBy: b.created_by,
-    claimedAt: b.created_at,
-    status: b.status,
-    members: (b.members ?? []).map((m) => ({
-      address: m.btc_address,
-      claimedAt: m.claimed_at,
-    })),
-  });
+  return c.json(serializeBeatResponse(b));
 });
 
 // POST /api/beats — create a new beat (rate limited, BIP-322 auth required)
@@ -142,7 +124,8 @@ beatsRouter.post("/api/beats", beatRateLimit, async (c) => {
   });
 
   if (!result.ok) {
-    return c.json({ error: result.error }, result.status ?? 400);
+    const { ok: _ok, data: _data, status, ...rest } = result as typeof result & Record<string, unknown>;
+    return c.json(rest, status ?? 400);
   }
 
   const logger = c.get("logger");
@@ -205,18 +188,27 @@ beatsRouter.patch("/api/beats/:slug", beatRateLimit, async (c) => {
   if (!existingBeat) {
     return c.json({ error: `Beat "${slug}" not found` }, 404);
   }
-  if (existingBeat.created_by !== btc_address) {
-    const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
-    const isPublisher = publisherConfig?.value === btc_address;
-    if (!isPublisher) {
-      return c.json({ error: "Forbidden: you do not own this beat" }, 403);
-    }
+  const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  const isPublisher = publisherConfig?.value === btc_address;
+  const lifecycleFieldRequested =
+    body.lifecycle !== undefined ||
+    body.replacement_beats !== undefined ||
+    body.transition_started_at !== undefined ||
+    body.transition_effective_at !== undefined ||
+    body.transition_message !== undefined ||
+    body.transition_docs_url !== undefined;
+  if (existingBeat.created_by !== btc_address && !isPublisher) {
+    return c.json({ error: "Forbidden: you do not own this beat" }, 403);
+  }
+  if (lifecycleFieldRequested && !isPublisher) {
+    return c.json({ error: "Forbidden: only the designated Publisher can update beat lifecycle state" }, 403);
   }
 
   const result = await updateBeat(c.env, slug, body);
 
   if (!result.ok) {
-    return c.json({ error: result.error }, result.status ?? 400);
+    const { ok: _ok, data: _data, status, ...rest } = result as typeof result & Record<string, unknown>;
+    return c.json(rest, status ?? 400);
   }
 
   return c.json(result.data);

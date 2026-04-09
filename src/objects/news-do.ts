@@ -4,8 +4,9 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL } from "./schema";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, BEAT_TRANSITION_DOCS_URL } from "../lib/constants";
+import { buildGraceTransition, deriveBeatLifecycleFlags, getDefaultBeatLifecycle, getDefaultReplacementBeats, parseReplacementBeats, serializeReplacementBeats, type BeatLifecycle } from "../lib/beat-lifecycle";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_LIFECYCLE_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -52,6 +53,146 @@ interface RawSignalRow {
 interface RawCompiledSignalRow extends CompiledSignalRow {
   reviewed_at: string | null;
   position?: number | null;
+}
+
+interface RawBeatRow {
+  slug: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  daily_approved_limit: number | null;
+  editor_review_rate_sats: number | null;
+  lifecycle?: string | null;
+  replacement_beats?: string | null;
+  transition_started_at?: string | null;
+  transition_effective_at?: string | null;
+  transition_message?: string | null;
+  transition_docs_url?: string | null;
+  last_signal_at?: string | null;
+}
+
+function normalizeBeatLifecycle(value: unknown, slug: string): BeatLifecycle {
+  if (value === "active" || value === "grace" || value === "retired") {
+    return value;
+  }
+  return getDefaultBeatLifecycle(slug);
+}
+
+function computeBeatActivityStatus(lastSignalAt: string | null | undefined, nowMs = Date.now()): "active" | "inactive" {
+  const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+  return lastSignalAt && nowMs - new Date(lastSignalAt).getTime() < expiryMs
+    ? "active"
+    : "inactive";
+}
+
+function normalizeIsoDateTime(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+}
+
+function normalizeNullableIsoDateTime(value: string | null | undefined): string | null {
+  return value ? normalizeIsoDateTime(value) : null;
+}
+
+function rowToBeat(
+  row: Record<string, unknown>,
+  members: Beat["members"] = [],
+  nowMs = Date.now()
+): Beat {
+  const raw = row as unknown as RawBeatRow;
+  const lifecycle = normalizeBeatLifecycle(raw.lifecycle, raw.slug);
+  const flags = deriveBeatLifecycleFlags(lifecycle);
+  return {
+    slug: raw.slug,
+    name: raw.name,
+    description: raw.description ?? null,
+    color: raw.color ?? null,
+    created_by: raw.created_by,
+    created_at: normalizeIsoDateTime(raw.created_at),
+    updated_at: normalizeIsoDateTime(raw.updated_at),
+    daily_approved_limit: raw.daily_approved_limit ?? null,
+    editor_review_rate_sats: raw.editor_review_rate_sats ?? null,
+    status: computeBeatActivityStatus(raw.last_signal_at, nowMs),
+    lifecycle,
+    is_fileable: flags.is_fileable,
+    is_listed_active: flags.is_listed_active,
+    is_assignable_editor: flags.is_assignable_editor,
+    archive_only: flags.archive_only,
+    replacement_beats: parseReplacementBeats(raw.replacement_beats, raw.slug),
+    transition_started_at: normalizeNullableIsoDateTime(raw.transition_started_at),
+    transition_effective_at: normalizeNullableIsoDateTime(raw.transition_effective_at),
+    transition_message: raw.transition_message ?? null,
+    transition_docs_url: raw.transition_docs_url ?? BEAT_TRANSITION_DOCS_URL,
+    members,
+  };
+}
+
+function buildGraceBeatConflict(
+  beat: Beat,
+  action: "join" | "assign_editor"
+): DOResult<never> {
+  const actionLabel =
+    action === "join" ? "new memberships" : "editor assignments";
+  return {
+    ok: false,
+    error: `Beat "${beat.slug}" is in grace and no longer accepts ${actionLabel}`,
+    status: 409,
+  };
+}
+
+function buildRetiredBeatError(
+  beat: Beat,
+  action: "file" | "join" | "assign_editor"
+): DOResult<never> {
+  const replacementBeats = beat.replacement_beats ?? getDefaultReplacementBeats(beat.slug);
+  const docsUrl = beat.transition_docs_url ?? BEAT_TRANSITION_DOCS_URL;
+  return {
+    ok: false,
+    error: `Beat "${beat.slug}" is retired and no longer accepts new ${
+      action === "assign_editor"
+        ? "editor assignments"
+        : action === "join"
+          ? "memberships"
+          : "filings"
+    }`,
+    status: 409,
+    code: "beat_retired",
+    beat_lifecycle: "retired",
+    archive_only: true,
+    replacement_beats: replacementBeats,
+    transition_started_at: beat.transition_started_at ?? null,
+    transition_effective_at: beat.transition_effective_at ?? null,
+    docs_url: docsUrl,
+    message_for_agent:
+      beat.transition_message ??
+      "This beat is archive-only. Choose an active beat and retry.",
+  };
+}
+
+function getBeatBySlug(
+  sql: DurableObjectState["storage"]["sql"],
+  slug: string
+): Beat | null {
+  const rows = sql
+    .exec(
+      `SELECT b.*, MAX(s.created_at) as last_signal_at
+       FROM beats b
+       LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
+       LEFT JOIN signals s ON bc.btc_address = s.btc_address
+         AND s.beat_slug = b.slug
+         AND s.correction_of IS NULL
+       WHERE b.slug = ?
+       GROUP BY b.slug`,
+      slug
+    )
+    .toArray();
+  if (rows.length === 0) {
+    return null;
+  }
+  return rowToBeat(rows[0] as Record<string, unknown>);
 }
 
 /**
@@ -225,6 +366,15 @@ function verifyEditorOrPublisher(
     }
   }
 
+  const beat = getBeatBySlug(sql, beatSlug);
+  if (!beat || !beat.is_assignable_editor) {
+    return {
+      ok: false,
+      error: "Access denied: editor workflow is only available on active beats",
+      status: 403,
+    };
+  }
+
   // Check active editor for the specified beat
   const editorRows = sql
     .exec(
@@ -286,7 +436,8 @@ export class NewsDO extends DurableObject<Env> {
     // 19 = Editor review rate — editor_review_rate_sats column on beats table
     // 20 = Curation cleanup — fix Mar 28-29 inscription IDs + void 312 orphaned earnings (#339)
     // 21 = Leaderboard composite indexes — accelerate 30-day rolling window queries (#319)
-    const CURRENT_MIGRATION_VERSION = 21;
+    // 22 = Beat lifecycle contract — active/grace/retired soft-retire cutover
+    const CURRENT_MIGRATION_VERSION = 22;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -572,6 +723,19 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      if (appliedVersion < 22) {
+        for (const stmt of MIGRATION_BEAT_LIFECYCLE_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
+              console.error("Beat lifecycle migration failed:", e);
+            }
+          }
+        }
+      }
+
       // Record current migration version so future cold starts skip all of the above.
       this.ctx.storage.sql.exec(
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
@@ -654,12 +818,15 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: pubCheck.error } satisfies DOResult<unknown>, pubCheck.status);
       }
 
-      // Verify beat exists
-      const beatRows = this.ctx.storage.sql
-        .exec("SELECT slug FROM beats WHERE slug = ?", beat_slug as string)
-        .toArray();
-      if (beatRows.length === 0) {
+      const beat = getBeatBySlug(this.ctx.storage.sql, beat_slug as string);
+      if (!beat) {
         return c.json({ ok: false, error: `Beat "${beat_slug as string}" not found` } satisfies DOResult<unknown>, 404);
+      }
+      if (!beat.is_assignable_editor) {
+        const lifecycleError = beat.lifecycle === "retired"
+          ? buildRetiredBeatError(beat, "assign_editor")
+          : buildGraceBeatConflict(beat, "assign_editor");
+        return c.json(lifecycleError, lifecycleError.status);
       }
 
       const now = new Date().toISOString();
@@ -733,6 +900,10 @@ export class NewsDO extends DurableObject<Env> {
     // GET /beat-editors/:slug — List active editors for a beat
     this.router.get("/beat-editors/:slug", (c) => {
       const slug = c.req.param("slug");
+      const beat = getBeatBySlug(this.ctx.storage.sql, slug);
+      if (!beat || !beat.is_assignable_editor) {
+        return c.json({ ok: true, data: { beat_slug: slug, editors: [] } } satisfies DOResult<unknown>);
+      }
       const rows = this.ctx.storage.sql
         .exec(
           "SELECT * FROM beat_editors WHERE beat_slug = ? AND status = 'active' ORDER BY registered_at ASC",
@@ -747,7 +918,13 @@ export class NewsDO extends DurableObject<Env> {
       const address = c.req.param("address");
       const rows = this.ctx.storage.sql
         .exec(
-          "SELECT * FROM beat_editors WHERE btc_address = ? AND status = 'active' ORDER BY registered_at ASC",
+          `SELECT be.*
+           FROM beat_editors be
+           JOIN beats b ON be.beat_slug = b.slug
+           WHERE be.btc_address = ?
+             AND be.status = 'active'
+             AND b.lifecycle = 'active'
+           ORDER BY be.registered_at ASC`,
           address
         )
         .toArray();
@@ -1130,8 +1307,15 @@ export class NewsDO extends DurableObject<Env> {
     // Beats CRUD
     // -------------------------------------------------------------------------
 
-    // GET /beats — list all beats ordered by name, with computed status
+    // GET /beats — list beats by lifecycle view
     this.router.get("/beats", (c) => {
+      const view = c.req.query("view") ?? "active";
+      const lifecycleWhere =
+        view === "archive"
+          ? "WHERE b.lifecycle IN ('grace', 'retired')"
+          : view === "all"
+            ? ""
+            : "WHERE b.lifecycle = 'active'";
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT b.*, MAX(s.created_at) as last_signal_at
@@ -1140,6 +1324,7 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN signals s ON bc.btc_address = s.btc_address
              AND s.beat_slug = b.slug
              AND s.correction_of IS NULL
+           ${lifecycleWhere}
            GROUP BY b.slug
            ORDER BY b.name`
         )
@@ -1153,7 +1338,7 @@ export class NewsDO extends DurableObject<Env> {
            ORDER BY claimed_at`
         )
         .toArray();
-      const claimsByBeat = new Map<string, Array<{ btc_address: string; claimed_at: string; status: string }>>();
+      const claimsByBeat = new Map<string, NonNullable<Beat["members"]>>();
       for (const cr of claimRows) {
         const claim = cr as Record<string, unknown>;
         const slug = claim.beat_slug as string;
@@ -1161,32 +1346,22 @@ export class NewsDO extends DurableObject<Env> {
         claimsByBeat.get(slug)!.push({
           btc_address: claim.btc_address as string,
           claimed_at: claim.claimed_at as string,
-          status: claim.status as string,
+          status: claim.status as "active" | "inactive",
         });
       }
 
-      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
       const now = Date.now();
-      const beats = rows.map((r) => {
-        const row = r as Record<string, unknown>;
-        const lastSignalAt = row.last_signal_at as string | null;
-        const status: "active" | "inactive" =
-          lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
-            ? "active"
-            : "inactive";
-        return {
-          slug: row.slug,
-          name: row.name,
-          description: row.description,
-          color: row.color,
-          created_by: row.created_by,
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          status,
-          members: claimsByBeat.get(row.slug as string) ?? [],
-        } as Beat;
-      });
+      const beats = rows.map((r) =>
+        rowToBeat(r as Record<string, unknown>, claimsByBeat.get((r as Record<string, unknown>).slug as string) ?? [], now)
+      );
       return c.json({ ok: true, data: beats } satisfies DOResult<Beat[]>);
+    });
+
+    this.router.get("/beats/archive", (c) => {
+      const url = new URL(c.req.url);
+      url.pathname = "/beats";
+      url.searchParams.set("view", "archive");
+      return this.router.fetch(new Request(url, c.req.raw));
     });
 
     // GET /beats/membership — query beats joined by a specific agent
@@ -1202,12 +1377,13 @@ export class NewsDO extends DurableObject<Env> {
       // Single JOIN: all beats with membership info for this agent
       const rows = this.ctx.storage.sql
         .exec(
-          `SELECT b.slug, bc.claimed_at, bc.status
+          `SELECT b.slug, b.lifecycle, bc.claimed_at, bc.status
            FROM beats b
            LEFT JOIN beat_claims bc
              ON bc.beat_slug = b.slug
             AND bc.btc_address = ?
             AND bc.status = 'active'
+           WHERE b.lifecycle = 'active'
            ORDER BY b.slug`,
           btcAddress
         )
@@ -1234,32 +1410,13 @@ export class NewsDO extends DurableObject<Env> {
     // GET /beats/:slug — get a single beat by slug, with computed status
     this.router.get("/beats/:slug", (c) => {
       const slug = c.req.param("slug");
-      const rows = this.ctx.storage.sql
-        .exec(
-          `SELECT b.*, MAX(s.created_at) as last_signal_at
-           FROM beats b
-           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
-           LEFT JOIN signals s ON bc.btc_address = s.btc_address
-             AND s.beat_slug = b.slug
-             AND s.correction_of IS NULL
-           WHERE b.slug = ?
-           GROUP BY b.slug`,
-          slug
-        )
-        .toArray();
-      if (rows.length === 0) {
+      const beat = getBeatBySlug(this.ctx.storage.sql, slug);
+      if (!beat) {
         return c.json(
           { ok: false, error: `Beat "${slug}" not found` } satisfies DOResult<Beat>,
           404
         );
       }
-      const row = rows[0] as Record<string, unknown>;
-      const lastSignalAt = row.last_signal_at as string | null;
-      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
-      const status: "active" | "inactive" =
-        lastSignalAt && Date.now() - new Date(lastSignalAt).getTime() < expiryMs
-          ? "active"
-          : "inactive";
 
       // Fetch members for this beat
       const memberRows = this.ctx.storage.sql
@@ -1272,27 +1429,20 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      const beat: Beat = {
-        slug: row.slug as string,
-        name: row.name as string,
-        description: row.description as string | null,
-        color: row.color as string | null,
-        created_by: row.created_by as string,
-        created_at: row.created_at as string,
-        updated_at: row.updated_at as string,
-        daily_approved_limit: row.daily_approved_limit as number | null,
-        editor_review_rate_sats: row.editor_review_rate_sats as number | null,
-        status,
-        members: memberRows.map((r) => {
-          const mr = r as Record<string, unknown>;
-          return {
-            btc_address: mr.btc_address as string,
-            claimed_at: mr.claimed_at as string,
-            status: mr.status as "active" | "inactive",
-          };
-        }),
-      };
-      return c.json({ ok: true, data: beat } satisfies DOResult<Beat>);
+      return c.json({
+        ok: true,
+        data: {
+          ...beat,
+          members: memberRows.map((r) => {
+            const mr = r as Record<string, unknown>;
+            return {
+              btc_address: mr.btc_address as string,
+              claimed_at: mr.claimed_at as string,
+              status: mr.status as "active" | "inactive",
+            };
+          }),
+        },
+      } satisfies DOResult<Beat>);
     });
 
     // POST /beats — create a new beat
@@ -1338,24 +1488,14 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       // Check for existing beat — allow join if active, reclaim if inactive
-      const existing = this.ctx.storage.sql
-        .exec(
-          `SELECT b.*, MAX(s.created_at) as last_signal_at
-           FROM beats b
-           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
-           LEFT JOIN signals s ON bc.btc_address = s.btc_address
-             AND s.beat_slug = b.slug
-             AND s.correction_of IS NULL
-           WHERE b.slug = ?
-           GROUP BY b.slug`,
-          slug as string
-        )
-        .toArray();
-      if (existing.length > 0) {
-        const row = existing[0] as Record<string, unknown>;
-        const lastSignalAt = row.last_signal_at as string | null;
-        const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
-        const isActive = lastSignalAt && Date.now() - new Date(lastSignalAt).getTime() < expiryMs;
+      const existingBeat = getBeatBySlug(this.ctx.storage.sql, slug as string);
+      if (existingBeat) {
+        if (existingBeat.lifecycle !== "active") {
+          const lifecycleError = existingBeat.lifecycle === "retired"
+            ? buildRetiredBeatError(existingBeat, "join")
+            : buildGraceBeatConflict(existingBeat, "join");
+          return c.json(lifecycleError, lifecycleError.status);
+        }
 
         // Check if agent already has an active claim
         const existingClaim = this.ctx.storage.sql
@@ -1375,7 +1515,6 @@ export class NewsDO extends DurableObject<Env> {
           );
         }
 
-        // Active or inactive — agent can join via beat_claims
         const now = new Date().toISOString();
         this.ctx.storage.sql.exec(
           `INSERT INTO beat_claims (beat_slug, btc_address, claimed_at, status)
@@ -1386,8 +1525,7 @@ export class NewsDO extends DurableObject<Env> {
           now
         );
 
-        // If beat was inactive (no active members with recent signals), update updated_at
-        if (!isActive) {
+        if (existingBeat.status !== "active") {
           this.ctx.storage.sql.exec(
             "UPDATE beats SET updated_at = ? WHERE slug = ?",
             now,
@@ -1395,11 +1533,8 @@ export class NewsDO extends DurableObject<Env> {
           );
         }
 
-        const reclaimed = this.ctx.storage.sql
-          .exec("SELECT * FROM beats WHERE slug = ?", slug as string)
-          .toArray();
-        const beat = reclaimed[0] as unknown as Beat;
-        return c.json({ ok: true, data: { ...beat, status: isActive ? "active" as const : "inactive" as const } } satisfies DOResult<Beat>, 200);
+        const refreshed = getBeatBySlug(this.ctx.storage.sql, slug as string);
+        return c.json({ ok: true, data: refreshed! } satisfies DOResult<Beat>, 200);
       }
 
       // Only the Publisher can create new beats
@@ -1421,15 +1556,16 @@ export class NewsDO extends DurableObject<Env> {
       const beatCreatedBy = created_by as string;
 
       this.ctx.storage.sql.exec(
-        `INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at, lifecycle, replacement_beats, transition_docs_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'active', '[]', ?)`,
         beatSlug,
         beatName,
         beatDescription,
         beatColor,
         beatCreatedBy,
         now,
-        now
+        now,
+        BEAT_TRANSITION_DOCS_URL
       );
 
       // Also create the initial beat_claims entry for the creator
@@ -1441,12 +1577,7 @@ export class NewsDO extends DurableObject<Env> {
         now
       );
 
-      const rows = this.ctx.storage.sql
-        .exec("SELECT * FROM beats WHERE slug = ?", beatSlug)
-        .toArray();
-      const beat = rows[0] as unknown as Beat;
-
-      return c.json({ ok: true, data: beat } satisfies DOResult<Beat>, 201);
+      return c.json({ ok: true, data: getBeatBySlug(this.ctx.storage.sql, beatSlug)! } satisfies DOResult<Beat>, 201);
     });
 
     // DELETE /beats/:slug — delete a beat (Publisher-only)
@@ -1617,12 +1748,86 @@ export class NewsDO extends DurableObject<Env> {
         params.push(reviewRate ?? null);
       }
 
+      if (body.lifecycle !== undefined) {
+        const lifecycle = body.lifecycle as string | null;
+        if (lifecycle !== "active" && lifecycle !== "grace" && lifecycle !== "retired") {
+          return c.json(
+            {
+              ok: false,
+              error: "lifecycle must be one of: active, grace, retired",
+            } satisfies DOResult<Beat>,
+            400
+          );
+        }
+        setClauses.push("lifecycle = ?");
+        params.push(lifecycle);
+      }
+
+      if (body.replacement_beats !== undefined) {
+        const replacementBeats = body.replacement_beats;
+        if (
+          !Array.isArray(replacementBeats) ||
+          replacementBeats.some((slug) => typeof slug !== "string" || !validateSlug(slug))
+        ) {
+          return c.json(
+            {
+              ok: false,
+              error: "replacement_beats must be an array of beat slugs",
+            } satisfies DOResult<Beat>,
+            400
+          );
+        }
+        setClauses.push("replacement_beats = ?");
+        params.push(serializeReplacementBeats(replacementBeats as string[], slug));
+      }
+
+      if (body.transition_started_at !== undefined) {
+        const value = body.transition_started_at as string | null;
+        if (value !== null && Number.isNaN(new Date(value).getTime())) {
+          return c.json(
+            { ok: false, error: "transition_started_at must be a valid ISO-8601 timestamp or null" } satisfies DOResult<Beat>,
+            400
+          );
+        }
+        setClauses.push("transition_started_at = ?");
+        params.push(value);
+      }
+
+      if (body.transition_effective_at !== undefined) {
+        const value = body.transition_effective_at as string | null;
+        if (value !== null && Number.isNaN(new Date(value).getTime())) {
+          return c.json(
+            { ok: false, error: "transition_effective_at must be a valid ISO-8601 timestamp or null" } satisfies DOResult<Beat>,
+            400
+          );
+        }
+        setClauses.push("transition_effective_at = ?");
+        params.push(value);
+      }
+
+      if (body.transition_message !== undefined) {
+        setClauses.push("transition_message = ?");
+        params.push(body.transition_message ? sanitizeString(body.transition_message, 280) : null);
+      }
+
+      if (body.transition_docs_url !== undefined) {
+        const docsUrl = body.transition_docs_url;
+        if (docsUrl !== null && typeof docsUrl !== "string") {
+          return c.json(
+            { ok: false, error: "transition_docs_url must be a string or null" } satisfies DOResult<Beat>,
+            400
+          );
+        }
+        setClauses.push("transition_docs_url = ?");
+        params.push(docsUrl ? sanitizeString(docsUrl, 500) : null);
+      }
+
       if (setClauses.length === 0) {
         return c.json(
           {
             ok: false,
             error:
-              "No updatable fields provided (name, description, color, daily_approved_limit, editor_review_rate_sats)",
+              "No updatable fields provided (name, description, color, daily_approved_limit, editor_review_rate_sats, lifecycle, replacement_beats, transition_started_at, transition_effective_at, transition_message, transition_docs_url)",
           } satisfies DOResult<Beat>,
           400
         );
@@ -1638,12 +1843,7 @@ export class NewsDO extends DurableObject<Env> {
         ...params
       );
 
-      const rows = this.ctx.storage.sql
-        .exec("SELECT * FROM beats WHERE slug = ?", slug)
-        .toArray();
-      const beat = rows[0] as unknown as Beat;
-
-      return c.json({ ok: true, data: beat } satisfies DOResult<Beat>);
+      return c.json({ ok: true, data: getBeatBySlug(this.ctx.storage.sql, slug)! } satisfies DOResult<Beat>);
     });
 
     // -------------------------------------------------------------------------
@@ -1899,15 +2099,16 @@ export class NewsDO extends DurableObject<Env> {
 
       const { beat_slug, btc_address, headline, body: signalBody, sources, tags } = body;
 
-      // Validate beat exists
-      const beatRows = this.ctx.storage.sql
-        .exec("SELECT 1 FROM beats WHERE slug = ?", beat_slug as string)
-        .toArray();
-      if (beatRows.length === 0) {
+      const beat = getBeatBySlug(this.ctx.storage.sql, beat_slug as string);
+      if (!beat) {
         return c.json(
           { ok: false, error: `Beat "${beat_slug as string}" not found` } satisfies DOResult<Signal>,
           404
         );
+      }
+      if (beat.lifecycle === "retired") {
+        const lifecycleError = buildRetiredBeatError(beat, "file");
+        return c.json(lifecycleError, lifecycleError.status);
       }
 
       // Verify agent is a member of this beat
@@ -1919,6 +2120,10 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
       if (claimRows.length === 0) {
+        if (beat.lifecycle === "grace") {
+          const lifecycleError = buildGraceBeatConflict(beat, "join");
+          return c.json(lifecycleError, lifecycleError.status);
+        }
         return c.json(
           { ok: false, error: `You must claim beat "${beat_slug as string}" before filing signals on it` } satisfies DOResult<Signal>,
           403
@@ -2093,7 +2298,11 @@ export class NewsDO extends DurableObject<Env> {
 
       const signal = rowToSignal(created[0] as Record<string, unknown>);
 
-      return c.json({ ok: true, data: signal } satisfies DOResult<Signal>, 201);
+      return c.json({
+        ok: true,
+        data: signal,
+        transition: buildGraceTransition(beat),
+      } satisfies DOResult<Signal>, 201);
     });
 
     // PATCH /signals/:id — correction: create new signal with correction_of pointing to original
@@ -2767,31 +2976,26 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN signals s ON bc_all.btc_address = s.btc_address
              AND s.beat_slug = b.slug
              AND s.correction_of IS NULL
-           WHERE bc.btc_address = ? AND bc.status = 'active'
+           WHERE bc.btc_address = ? AND bc.status = 'active' AND b.lifecycle = 'active'
            GROUP BY b.slug
            ORDER BY bc.claimed_at`,
           address
         )
         .toArray();
 
-      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
       const agentBeats: Array<Record<string, unknown> & { beatStatus: "active" | "inactive" }> = [];
       for (const r of beatRows) {
-        const row = r as Record<string, unknown>;
-        const lastSignalAt = row.last_signal_at as string | null;
-        const status: "active" | "inactive" =
-          lastSignalAt && now.getTime() - new Date(lastSignalAt).getTime() < expiryMs
-            ? "active"
-            : "inactive";
+        const beatRecord = rowToBeat(r as Record<string, unknown>, [], now.getTime());
         agentBeats.push({
-          slug: row.slug,
-          name: row.name,
-          description: row.description,
-          color: row.color,
-          created_by: row.created_by,
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          beatStatus: status,
+          slug: beatRecord.slug,
+          name: beatRecord.name,
+          description: beatRecord.description,
+          color: beatRecord.color,
+          created_by: beatRecord.created_by,
+          created_at: beatRecord.created_at,
+          updated_at: beatRecord.updated_at,
+          lifecycle: beatRecord.lifecycle,
+          beatStatus: beatRecord.status ?? "inactive",
         });
       }
 
@@ -2958,9 +3162,15 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      // Total beats
+      // Beat counts
       const beatsRows = this.ctx.storage.sql
         .exec("SELECT COUNT(*) as count FROM beats")
+        .toArray();
+      const activeBeatsRows = this.ctx.storage.sql
+        .exec("SELECT COUNT(*) as count FROM beats WHERE lifecycle = 'active'")
+        .toArray();
+      const retiredBeatsRows = this.ctx.storage.sql
+        .exec("SELECT COUNT(*) as count FROM beats WHERE lifecycle = 'retired'")
         .toArray();
 
       // Total signals all time (excluding corrections)
@@ -2989,7 +3199,9 @@ export class NewsDO extends DurableObject<Env> {
         .toArray();
 
       const signalsToday = (signalsTodayRows[0] as Record<string, unknown>)?.count ?? 0;
-      const totalBeats = (beatsRows[0] as Record<string, unknown>)?.count ?? 0;
+      const preservedBeats = (beatsRows[0] as Record<string, unknown>)?.count ?? 0;
+      const totalBeats = (activeBeatsRows[0] as Record<string, unknown>)?.count ?? 0;
+      const retiredBeats = (retiredBeatsRows[0] as Record<string, unknown>)?.count ?? 0;
       const totalSignals = (totalSignalsRows[0] as Record<string, unknown>)?.count ?? 0;
       const activeCorrespondents = (activeRows[0] as Record<string, unknown>)?.count ?? 0;
 
@@ -3001,6 +3213,8 @@ export class NewsDO extends DurableObject<Env> {
           signalsToday,
           totalSignals,
           totalBeats,
+          preservedBeats,
+          retiredBeats,
           activeCorrespondents,
           latestBrief: briefRows[0] ?? null,
           topAgents: topAgentsRows,
@@ -4101,10 +4315,12 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN signals s ON bc.btc_address = s.btc_address
              AND s.beat_slug = b.slug
              AND s.correction_of IS NULL
+           WHERE b.lifecycle = 'active'
            GROUP BY b.slug
            ORDER BY b.name`
         )
-        .toArray();
+        .toArray()
+        .map((row) => rowToBeat(row as Record<string, unknown>));
 
       // Fetch active claims for buildBeatsByAddress
       const claims = this.ctx.storage.sql
@@ -4143,7 +4359,7 @@ export class NewsDO extends DurableObject<Env> {
         .toArray();
       const briefDates = briefDateRows.map((r) => (r as { date: string }).date);
 
-      // Beats (with status computation via beat_claims)
+      // Active beats only for live surfaces
       const beatRows = this.ctx.storage.sql
         .exec(
           `SELECT b.*, MAX(s.created_at) as last_signal_at
@@ -4152,6 +4368,7 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN signals s ON bc.btc_address = s.btc_address
              AND s.beat_slug = b.slug
              AND s.correction_of IS NULL
+           WHERE b.lifecycle = 'active'
            GROUP BY b.slug
            ORDER BY b.name`
         )
@@ -4164,26 +4381,7 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
-      const now = Date.now();
-      const beats = beatRows.map((r) => {
-        const row = r as Record<string, unknown>;
-        const lastSignalAt = row.last_signal_at as string | null;
-        const status: "active" | "inactive" =
-          lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
-            ? "active"
-            : "inactive";
-        return {
-          slug: row.slug,
-          name: row.name,
-          description: row.description,
-          color: row.color,
-          created_by: row.created_by,
-          created_at: row.created_at,
-          updated_at: row.updated_at,
-          status,
-        } as Beat;
-      });
+      const beats = beatRows.map((r) => rowToBeat(r as Record<string, unknown>));
 
       // Classifieds (active approved only)
       const classifiedRows = this.ctx.storage.sql
@@ -4456,6 +4654,8 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const inserted: Record<string, number> = {
+        beats: 0,
+        beat_claims: 0,
         signals: 0,
         signal_tags: 0,
         brief_signals: 0,
@@ -4464,6 +4664,55 @@ export class NewsDO extends DurableObject<Env> {
         streaks: 0,
         leaderboard_snapshots: 0,
       };
+
+      if (Array.isArray(body.beats)) {
+        for (const row of body.beats as Array<Record<string, unknown>>) {
+          try {
+            const slug = row.slug as string;
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO beats
+               (slug, name, description, color, created_by, created_at, updated_at, lifecycle, replacement_beats, transition_started_at, transition_effective_at, transition_message, transition_docs_url, daily_approved_limit, editor_review_rate_sats)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              slug,
+              row.name as string,
+              (row.description as string | null) ?? null,
+              (row.color as string | null) ?? null,
+              (row.created_by as string) ?? "system",
+              (row.created_at as string) ?? new Date().toISOString(),
+              (row.updated_at as string) ?? (row.created_at as string) ?? new Date().toISOString(),
+              normalizeBeatLifecycle(row.lifecycle, slug),
+              serializeReplacementBeats(row.replacement_beats as string[] | undefined, slug),
+              (row.transition_started_at as string | null) ?? null,
+              (row.transition_effective_at as string | null) ?? null,
+              (row.transition_message as string | null) ?? null,
+              (row.transition_docs_url as string | null) ?? BEAT_TRANSITION_DOCS_URL,
+              (row.daily_approved_limit as number | null) ?? null,
+              (row.editor_review_rate_sats as number | null) ?? null
+            );
+            inserted.beats++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      if (Array.isArray(body.beat_claims)) {
+        for (const row of body.beat_claims as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO beat_claims (beat_slug, btc_address, claimed_at, status)
+               VALUES (?, ?, ?, ?)`,
+              row.beat_slug as string,
+              row.btc_address as string,
+              (row.claimed_at as string) ?? new Date().toISOString(),
+              (row.status as string) ?? "active"
+            );
+            inserted.beat_claims++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
 
       // Seed signals
       if (Array.isArray(body.signals)) {
