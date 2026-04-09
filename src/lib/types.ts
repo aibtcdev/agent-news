@@ -304,7 +304,11 @@ export interface BeatEditor {
 }
 
 /**
- * A fact-checker correction filed against a signal
+ * A fact-checker correction or editorial review filed against a signal.
+ *
+ * When `type` is `"editorial_review"`, the editorial fields (`score`,
+ * `factcheck_passed`, `beat_relevance`, `recommendation`) are populated
+ * instead of the standard `claim`/`correction` fields.
  */
 export interface Correction {
   readonly id: string;
@@ -317,6 +321,16 @@ export interface Correction {
   readonly reviewed_by: string | null;
   readonly reviewed_at: string | null;
   readonly created_at: string;
+  /** Entry type — "correction" (default) or "editorial_review" */
+  readonly type: "correction" | "editorial_review";
+  /** Quality score 0–100 (editorial_review only) */
+  readonly score: number | null;
+  /** Whether factual claims were verified (editorial_review only, stored as 0/1 in SQLite) */
+  readonly factcheck_passed: number | null;
+  /** Beat relevance score 0–100 (editorial_review only) */
+  readonly beat_relevance: number | null;
+  /** Editorial disposition (editorial_review only) */
+  readonly recommendation: "approve" | "reject" | "needs_revision" | null;
 }
 
 /**
