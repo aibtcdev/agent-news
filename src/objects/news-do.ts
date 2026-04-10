@@ -574,23 +574,34 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       // Beat consolidation — 12 → 3 beats: create aibtc-network, retire old beats (#423).
+      // Tracks success so version only bumps if all statements pass.
+      let migration22Ok = appliedVersion >= 22; // already done
       if (appliedVersion < 22) {
+        migration22Ok = true;
         for (const stmt of MIGRATION_BEAT_CONSOLIDATION_SQL) {
           try {
             this.ctx.storage.sql.exec(stmt);
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            if (!msg.includes("duplicate column")) {
+            if (msg.includes("duplicate column")) {
+              // Phase A already applied — expected on re-run
+            } else {
               console.error("Beat consolidation migration statement failed:", e);
+              migration22Ok = false;
             }
           }
+        }
+        if (!migration22Ok) {
+          console.error("Beat consolidation migration incomplete — will retry on next cold start");
         }
       }
 
       // Record current migration version so future cold starts skip all of the above.
+      // If migration 22 failed, cap at 21 so it retries on next cold start.
+      const versionToWrite = migration22Ok ? CURRENT_MIGRATION_VERSION : CURRENT_MIGRATION_VERSION - 1;
       this.ctx.storage.sql.exec(
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
-        String(CURRENT_MIGRATION_VERSION)
+        String(versionToWrite)
       );
     }
 
@@ -1034,50 +1045,6 @@ export class NewsDO extends DurableObject<Env> {
         const globalRaw = (globalCountRows[0] as Record<string, unknown> | undefined)?.count;
         const globalApprovedToday = Number.isFinite(Number(globalRaw)) ? Number(globalRaw) : 0;
 
-        if (globalApprovedToday >= MAX_APPROVED_SIGNALS_PER_DAY) {
-          const displaceId = body.displace_signal_id as string | undefined;
-
-          if (!displaceId) {
-            return c.json({
-              ok: false,
-              error: `Global daily approval cap reached (${MAX_APPROVED_SIGNALS_PER_DAY}). Provide displace_signal_id to swap.`,
-              approval_cap: {
-                limit: MAX_APPROVED_SIGNALS_PER_DAY,
-                approved_today: globalApprovedToday,
-                remaining: 0,
-                reset_at: dayEnd,
-              },
-            } satisfies DOResult<Signal>, 409);
-          }
-
-          // Validate displacement target
-          const displaceRows = this.ctx.storage.sql
-            .exec("SELECT id, status, reviewed_at FROM signals WHERE id = ?", displaceId)
-            .toArray();
-          if (displaceRows.length === 0) {
-            return c.json({ ok: false, error: `Displace target "${displaceId}" not found` } satisfies DOResult<Signal>, 404);
-          }
-          const displaceRow = displaceRows[0] as { id: string; status: string; reviewed_at: string | null };
-          if (displaceRow.status !== "approved") {
-            return c.json({
-              ok: false,
-              error: `Displace target must have status "approved", got "${displaceRow.status}". Only "approved" signals can be displaced (not "brief_included" or other statuses).`,
-            } satisfies DOResult<Signal>, 400);
-          }
-          if (!displaceRow.reviewed_at || displaceRow.reviewed_at < dayStart || displaceRow.reviewed_at >= dayEnd) {
-            return c.json({
-              ok: false,
-              error: `Displace target was not approved today. Only today's approved signals can be displaced.`,
-            } satisfies DOResult<Signal>, 400);
-          }
-
-          // Atomically displace: set old signal to 'replaced'
-          this.ctx.storage.sql.exec(
-            `UPDATE signals SET status = 'replaced', updated_at = ? WHERE id = ?`,
-            nowDate.toISOString(), displaceId
-          );
-        }
-
         // ── Per-beat cap (daily_approved_limit, only when set) ──
         // Skip per-beat cap enforcement when daily_approved_limit is NULL (unlimited)
         const enforceCapCheck = beatCap !== null;
@@ -1095,46 +1062,59 @@ export class NewsDO extends DurableObject<Env> {
           approvedToday = Number.isFinite(Number(rawCount)) ? Number(rawCount) : 0;
         }
 
-        if (enforceCapCheck && approvedToday >= beatCap) {
-          const displaceId = body.displace_signal_id as string | undefined;
+        // ── Determine if displacement is needed and validate upfront ──
+        // Both caps are checked before any mutation so the operation is all-or-nothing.
+        const globalCapHit = globalApprovedToday >= MAX_APPROVED_SIGNALS_PER_DAY;
+        const beatCapHit = enforceCapCheck && approvedToday >= beatCap;
+        let displaceId: string | undefined;
+
+        if (globalCapHit || beatCapHit) {
+          displaceId = body.displace_signal_id as string | undefined;
+          const capLabel = globalCapHit
+            ? `Global daily approval cap reached (${MAX_APPROVED_SIGNALS_PER_DAY})`
+            : `Daily approval cap reached (${beatCap} for beat "${signalRow.beat_slug}")`;
 
           if (!displaceId) {
             return c.json({
               ok: false,
-              error: `Daily approval cap reached (${beatCap} for beat "${signalRow.beat_slug}"). Provide displace_signal_id to swap.`,
-              approval_cap: {
-                limit: beatCap,
-                approved_today: approvedToday,
-                remaining: 0,
-                reset_at: dayEnd,
-              },
+              error: `${capLabel}. Provide displace_signal_id to swap.`,
+              approval_cap: globalCapHit
+                ? { limit: MAX_APPROVED_SIGNALS_PER_DAY, approved_today: globalApprovedToday, remaining: 0, reset_at: dayEnd }
+                : { limit: beatCap!, approved_today: approvedToday, remaining: 0, reset_at: dayEnd },
             } satisfies DOResult<Signal>, 409);
           }
 
           // Validate displacement target
           const displaceRows = this.ctx.storage.sql
-            .exec("SELECT id, status, reviewed_at FROM signals WHERE id = ?", displaceId)
+            .exec("SELECT id, status, reviewed_at, beat_slug FROM signals WHERE id = ?", displaceId)
             .toArray();
           if (displaceRows.length === 0) {
             return c.json({ ok: false, error: `Displace target "${displaceId}" not found` } satisfies DOResult<Signal>, 404);
           }
-          const displaceRow = displaceRows[0] as { id: string; status: string; reviewed_at: string | null };
+          const displaceRow = displaceRows[0] as { id: string; status: string; reviewed_at: string | null; beat_slug: string };
           if (displaceRow.status !== "approved") {
             return c.json({
               ok: false,
               error: `Displace target must have status "approved", got "${displaceRow.status}". Only "approved" signals can be displaced (not "brief_included" or other statuses).`,
             } satisfies DOResult<Signal>, 400);
           }
-          // Displacement target must have a reviewed_at timestamp and be from
-          // today (same Pacific day) — displacing older signals wouldn't free a slot.
           if (!displaceRow.reviewed_at || displaceRow.reviewed_at < dayStart || displaceRow.reviewed_at >= dayEnd) {
             return c.json({
               ok: false,
               error: `Displace target was not approved today. Only today's approved signals can be displaced.`,
             } satisfies DOResult<Signal>, 400);
           }
+          // When per-beat cap triggered the displacement, target must be on the same beat
+          if (beatCapHit && displaceRow.beat_slug !== signalRow.beat_slug) {
+            return c.json({
+              ok: false,
+              error: `Displace target is on beat "${displaceRow.beat_slug}" but this signal is on "${signalRow.beat_slug}". Per-beat displacement requires a target on the same beat.`,
+            } satisfies DOResult<Signal>, 400);
+          }
+        }
 
-          // Atomically displace: set old signal to 'replaced'
+        // All validations passed — now perform displacement if needed
+        if (displaceId) {
           this.ctx.storage.sql.exec(
             `UPDATE signals SET status = 'replaced', updated_at = ? WHERE id = ?`,
             nowDate.toISOString(), displaceId
