@@ -1213,7 +1213,7 @@ export class NewsDO extends DurableObject<Env> {
     // Beats CRUD
     // -------------------------------------------------------------------------
 
-    // GET /beats — list all beats ordered by name, with computed status
+    // GET /beats — list all beats ordered by name; retired status from DB, active/inactive computed from signal activity
     this.router.get("/beats", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
@@ -1320,7 +1320,7 @@ export class NewsDO extends DurableObject<Env> {
       } satisfies DOResult<{ agent: string; beats: Array<{ slug: string; joined_at: string; status: "active" }>; available_beats: string[] }>);
     });
 
-    // GET /beats/:slug — get a single beat by slug, with computed status
+    // GET /beats/:slug — get a single beat by slug; retired status from DB, active/inactive computed from signal activity
     this.router.get("/beats/:slug", (c) => {
       const slug = c.req.param("slug");
       const rows = this.ctx.storage.sql

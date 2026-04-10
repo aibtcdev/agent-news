@@ -630,7 +630,9 @@ export const MIGRATION_LEADERBOARD_INDEXES_SQL = [
  * network-focused beats. Historical signals stay on their original beat_slug
  * (no remapping). New signals can only be filed to the 3 surviving beats.
  *
- * Phase A: Add stored status column to beats table (replaces computed status).
+ * Phase A: Add stored status column to beats table as a retirement marker;
+ *   active/inactive status continues to be computed at runtime from recent
+ *   signal activity, while stored status is used to force "retired".
  * Phase B: Create aibtc-network beat.
  * Phase C: Retire the 10 old beats.
  *
