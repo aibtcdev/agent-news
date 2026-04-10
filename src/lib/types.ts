@@ -138,8 +138,8 @@ export interface Beat {
   readonly daily_approved_limit?: number | null;
   /** Per-review payment rate for the beat editor in satoshis (null = not configured). Added in migration 19. */
   readonly editor_review_rate_sats?: number | null;
-  /** Computed on read — not stored in DB */
-  readonly status?: "active" | "inactive";
+  /** Stored in DB (migration 22+) or computed on read for legacy DBs */
+  readonly status?: "active" | "inactive" | "retired";
   /** Active members from beat_claims — populated when joined */
   readonly members?: BeatMember[];
 }

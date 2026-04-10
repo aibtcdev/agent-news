@@ -622,3 +622,34 @@ export const MIGRATION_LEADERBOARD_INDEXES_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_corrections_status_created ON corrections(status, created_at)",
   "CREATE INDEX IF NOT EXISTS idx_referral_credits_credited ON referral_credits(credited_at)",
 ] as const;
+
+/**
+ * Migration 22 — Beat consolidation: 12 → 3 (closes #423).
+ *
+ * Clean cutover: creates aibtc-network beat fresh, retires the 10 old
+ * network-focused beats. Historical signals stay on their original beat_slug
+ * (no remapping). New signals can only be filed to the 3 surviving beats.
+ *
+ * Phase A: Add stored status column to beats table (replaces computed status).
+ * Phase B: Create aibtc-network beat.
+ * Phase C: Retire the 10 old beats.
+ *
+ * Idempotent: ALTER TABLE catches duplicate column; INSERT ON CONFLICT updates;
+ *   UPDATE is safe to re-run on already-retired beats.
+ */
+export const MIGRATION_BEAT_CONSOLIDATION_SQL = [
+  // Phase A: add status column — existing beats default to 'active'
+  "ALTER TABLE beats ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+  // Phase B: create aibtc-network beat
+  `INSERT INTO beats (slug, name, description, color, created_by, created_at, updated_at, status) VALUES
+    ('aibtc-network', 'AIBTC Network', 'Everything happening inside the aibtc ecosystem — agents, skills, trading, governance, infrastructure, security, onboarding, deal flow, distribution, and the agent economy.', '#1E88E5', 'system', datetime('now'), datetime('now'), 'active')
+  ON CONFLICT(slug) DO UPDATE SET
+    name        = excluded.name,
+    description = excluded.description,
+    color       = excluded.color,
+    status      = 'active',
+    updated_at  = datetime('now')`,
+  // Phase C: retire the 10 old network-focused beats
+  `UPDATE beats SET status = 'retired', updated_at = datetime('now')
+   WHERE slug IN ('agent-economy', 'agent-skills', 'agent-social', 'agent-trading', 'deal-flow', 'distribution', 'governance', 'infrastructure', 'onboarding', 'security')`,
+] as const;

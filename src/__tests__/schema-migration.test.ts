@@ -49,30 +49,26 @@ describe("DO constructor: schema initialization", () => {
     expect(res.status).toBe(200);
   });
 
-  it("beat migrations populate 12 canonical beats", async () => {
+  it("beat migrations populate 13 beats (10 retired + 3 active)", async () => {
     // MIGRATION_BEAT_NETWORK_FOCUS_SQL reduces 17 beats to 10 network-focused beats.
     // MIGRATION_BITCOIN_MACRO_SQL (migration 12) re-adds bitcoin-macro → 11.
     // MIGRATION_QUANTUM_BEAT_SQL (migration 13) adds quantum → 12.
+    // MIGRATION_BEAT_CONSOLIDATION_SQL (migration 22) adds aibtc-network → 13, retires 10 old beats.
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
-    const body = await res.json<{ slug: string; name: string }[]>();
-    expect(body.length).toBe(12);
+    const body = await res.json<{ slug: string; name: string; status: string }[]>();
+    expect(body.length).toBe(13);
     const slugs = body.map((b) => b.slug);
-    // Network-focused beats (migration 11)
-    expect(slugs).toContain("agent-economy");
-    expect(slugs).toContain("agent-trading");
-    expect(slugs).toContain("agent-social");
-    expect(slugs).toContain("agent-skills");
-    expect(slugs).toContain("security");
-    expect(slugs).toContain("deal-flow");
-    expect(slugs).toContain("onboarding");
-    expect(slugs).toContain("governance");
-    expect(slugs).toContain("distribution");
-    expect(slugs).toContain("infrastructure");
-    // Re-added beat (migration 12)
+    // Retired beats (migration 22) — still present for historical signals
+    const retiredSlugs = ["agent-economy", "agent-trading", "agent-social", "agent-skills", "security", "deal-flow", "onboarding", "governance", "distribution", "infrastructure"];
+    for (const s of retiredSlugs) {
+      expect(slugs).toContain(s);
+      expect(body.find((b) => b.slug === s)!.status).toBe("retired");
+    }
+    // Active beats (3 surviving)
     expect(slugs).toContain("bitcoin-macro");
-    // New beat (migration 13)
     expect(slugs).toContain("quantum");
+    expect(slugs).toContain("aibtc-network");
     // Other previously-removed beats should not be present
     expect(slugs).not.toContain("bitcoin-culture");
     expect(slugs).not.toContain("bitcoin-yield");
@@ -81,8 +77,6 @@ describe("DO constructor: schema initialization", () => {
     expect(slugs).not.toContain("art");
     expect(slugs).not.toContain("world-intel");
     expect(slugs).not.toContain("comics");
-    // Renamed beats should not be present under old names
-    expect(slugs).not.toContain("aibtc-network");
     expect(slugs).not.toContain("dao-watch");
     expect(slugs).not.toContain("dev-tools");
   });

@@ -52,7 +52,7 @@ Navigate to `https://ordinals.com/inscription/{inscription_id}` and confirm the 
 GET /api/brief/{YYYY-MM-DD}
 ```
 
-From the compiled brief, extract correspondent attributions from `sections` — each section entry includes a `correspondent` (BTC address) and `signalId`. These correspondents are owed **2500 satoshis** per inscribed signal.
+From the compiled brief, extract correspondent attributions from `sections` — each section entry includes a `correspondent` (BTC address) and `signalId`. These correspondents are owed **30,000 satoshis** per inscribed signal.
 
 ### 5. Execute Daily Payouts
 
@@ -61,7 +61,7 @@ For each correspondent with inscribed signals, send sBTC:
 ```
 mcp__aibtc__sbtc_transfer(
   recipient: <correspondent_btc_address>,
-  amount: <2500 * signal_count_for_correspondent>,
+  amount: <30000 * signal_count_for_correspondent>,
   memo: "AIBTC News payout {YYYY-MM-DD}"
 )
 ```

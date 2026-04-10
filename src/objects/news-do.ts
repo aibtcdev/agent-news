@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getPacificDate, getPacificYesterday, getPacificDayStartUTC, getPacificDayEndUTC, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL } from "./schema";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -286,7 +286,8 @@ export class NewsDO extends DurableObject<Env> {
     // 19 = Editor review rate — editor_review_rate_sats column on beats table
     // 20 = Curation cleanup — fix Mar 28-29 inscription IDs + void 312 orphaned earnings (#339)
     // 21 = Leaderboard composite indexes — accelerate 30-day rolling window queries (#319)
-    const CURRENT_MIGRATION_VERSION = 21;
+    // 22 = Beat consolidation — 12 → 3 beats, retire old beats, create aibtc-network (#423)
+    const CURRENT_MIGRATION_VERSION = 22;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -567,6 +568,20 @@ export class NewsDO extends DurableObject<Env> {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes("already exists")) {
               console.error("Leaderboard indexes migration statement failed:", e);
+            }
+          }
+        }
+      }
+
+      // Beat consolidation — 12 → 3 beats: create aibtc-network, retire old beats (#423).
+      if (appliedVersion < 22) {
+        for (const stmt of MIGRATION_BEAT_CONSOLIDATION_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column")) {
+              console.error("Beat consolidation migration statement failed:", e);
             }
           }
         }
@@ -1237,11 +1252,17 @@ export class NewsDO extends DurableObject<Env> {
       const now = Date.now();
       const beats = rows.map((r) => {
         const row = r as Record<string, unknown>;
-        const lastSignalAt = row.last_signal_at as string | null;
-        const status: "active" | "inactive" =
-          lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
-            ? "active"
-            : "inactive";
+        const storedStatus = row.status as string | null;
+        // Retired beats keep their stored status; others compute from activity
+        const status: "active" | "inactive" | "retired" =
+          storedStatus === "retired"
+            ? "retired"
+            : (() => {
+                const lastSignalAt = row.last_signal_at as string | null;
+                return lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
+                  ? "active"
+                  : "inactive";
+              })();
         return {
           slug: row.slug,
           name: row.name,
@@ -1322,12 +1343,17 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
       const row = rows[0] as Record<string, unknown>;
-      const lastSignalAt = row.last_signal_at as string | null;
-      const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
-      const status: "active" | "inactive" =
-        lastSignalAt && Date.now() - new Date(lastSignalAt).getTime() < expiryMs
-          ? "active"
-          : "inactive";
+      const storedStatus = row.status as string | null;
+      const status: "active" | "inactive" | "retired" =
+        storedStatus === "retired"
+          ? "retired"
+          : (() => {
+              const lastSignalAt = row.last_signal_at as string | null;
+              const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
+              return lastSignalAt && Date.now() - new Date(lastSignalAt).getTime() < expiryMs
+                ? "active"
+                : "inactive";
+            })();
 
       // Fetch members for this beat
       const memberRows = this.ctx.storage.sql
@@ -1419,6 +1445,12 @@ export class NewsDO extends DurableObject<Env> {
           slug as string
         )
         .toArray();
+      if (existing.length > 0 && (existing[0] as Record<string, unknown>).status === "retired") {
+        return c.json(
+          { ok: false, error: `Beat "${slug as string}" is retired and no longer accepts new members` } satisfies DOResult<Beat>,
+          410
+        );
+      }
       if (existing.length > 0) {
         const row = existing[0] as Record<string, unknown>;
         const lastSignalAt = row.last_signal_at as string | null;
@@ -1967,14 +1999,20 @@ export class NewsDO extends DurableObject<Env> {
 
       const { beat_slug, btc_address, headline, body: signalBody, sources, tags } = body;
 
-      // Validate beat exists
+      // Validate beat exists and is not retired
       const beatRows = this.ctx.storage.sql
-        .exec("SELECT 1 FROM beats WHERE slug = ?", beat_slug as string)
+        .exec("SELECT status FROM beats WHERE slug = ?", beat_slug as string)
         .toArray();
       if (beatRows.length === 0) {
         return c.json(
           { ok: false, error: `Beat "${beat_slug as string}" not found` } satisfies DOResult<Signal>,
           404
+        );
+      }
+      if ((beatRows[0] as Record<string, unknown>).status === "retired") {
+        return c.json(
+          { ok: false, error: `Beat "${beat_slug as string}" is retired and no longer accepts new signals` } satisfies DOResult<Signal>,
+          410
         );
       }
 
