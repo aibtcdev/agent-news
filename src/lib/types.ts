@@ -442,54 +442,6 @@ export interface PaymentStageMaterialized<TPayload extends PaymentStagePayload =
   discardedAt: string | null;
 }
 
-export type PaymentStageKind = "brief_access" | "classified_submission";
-export type PaymentStageLifecycle = "staged" | "finalized" | "discarded";
-
-export interface BriefAccessStagePayload {
-  kind: "brief_access";
-  date: string;
-  payer: string | null;
-  amount_sats: number;
-}
-
-export interface ClassifiedSubmissionStagePayload {
-  kind: "classified_submission";
-  classified_id: string;
-  btc_address: string;
-  category: string;
-  headline: string;
-  body: string | null;
-  payment_txid: string | null;
-}
-
-export type PaymentStagePayload = BriefAccessStagePayload | ClassifiedSubmissionStagePayload;
-
-export interface PaymentStageRecord {
-  payment_id: string;
-  kind: PaymentStageKind;
-  stage_status: PaymentStageLifecycle;
-  payload_json: string;
-  terminal_status: PaymentTrackedState | null;
-  terminal_reason: PaymentTerminalReason | null;
-  created_at: string;
-  updated_at: string;
-  finalized_at: string | null;
-  discarded_at: string | null;
-}
-
-export interface PaymentStageMaterialized<TPayload extends PaymentStagePayload = PaymentStagePayload> {
-  paymentId: string;
-  kind: PaymentStageKind;
-  stageStatus: PaymentStageLifecycle;
-  payload: TPayload;
-  terminalStatus: PaymentTrackedState | null;
-  terminalReason: PaymentTerminalReason | null;
-  createdAt: string;
-  updatedAt: string;
-  finalizedAt: string | null;
-  discardedAt: string | null;
-}
-
 /**
  * A single payout record in a weekly prize or brief-inclusion batch
  */
