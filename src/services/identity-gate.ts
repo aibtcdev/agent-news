@@ -9,6 +9,8 @@
 const CACHE_TTL_SECONDS = 3600; // 1 hour
 const CACHE_KEY_PREFIX = "agent-level:";
 const AGENT_API_BASE = "https://aibtc.com/api/agents";
+/** Abort the external identity fetch after this many ms to prevent hanging signal submissions. */
+const FETCH_TIMEOUT_MS = 5000;
 
 export interface IdentityCheckResult {
   registered: boolean;
@@ -38,9 +40,17 @@ export async function checkAgentIdentity(
   }
 
   try {
-    const res = await fetch(`${AGENT_API_BASE}/${encodeURIComponent(btcAddress)}`, {
-      headers: { Accept: "application/json" },
-    });
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${AGENT_API_BASE}/${encodeURIComponent(btcAddress)}`, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (res.ok) {
       const data = (await res.json()) as Record<string, unknown>;
@@ -59,7 +69,7 @@ export async function checkAgentIdentity(
       return result;
     }
   } catch {
-    // Network error — don't cache, allow through (fail open to avoid blocking real agents)
+    // Network error or timeout — don't cache, fail open to avoid blocking real agents
   }
 
   // On API failure, return unknown state — fail open
