@@ -622,7 +622,7 @@ export class NewsDO extends DurableObject<Env> {
 
       // Record current migration version so future cold starts skip all of the above.
       // If migration 22 failed but 23 succeeded, cap at 21 so v22 retries on next cold start.
-      const versionToWrite = migration22Ok ? CURRENT_MIGRATION_VERSION : CURRENT_MIGRATION_VERSION - 2;
+      const versionToWrite = migration22Ok ? CURRENT_MIGRATION_VERSION : 21;
       this.ctx.storage.sql.exec(
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
         String(versionToWrite)
