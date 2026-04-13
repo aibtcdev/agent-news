@@ -57,7 +57,7 @@ export async function getBeat(env: Env, slug: string): Promise<Beat | null> {
 
 export async function createBeat(
   env: Env,
-  beat: Omit<Beat, "created_at" | "updated_at">
+  beat: Omit<Beat, "created_at" | "updated_at" | "editor">
 ): Promise<DOResult<Beat>> {
   const stub = getStub(env);
   return doFetch<Beat>(stub, "/beats", {

@@ -1256,7 +1256,8 @@ export class NewsDO extends DurableObject<Env> {
       const editorRows = this.ctx.storage.sql
         .exec(
           `SELECT beat_slug, btc_address, registered_at
-           FROM beat_editors WHERE status = 'active'`
+           FROM beat_editors WHERE status = 'active'
+           ORDER BY registered_at DESC`
         )
         .toArray();
       const editorByBeat = new Map<string, { btc_address: string; registered_at: string }>();
@@ -1393,6 +1394,7 @@ export class NewsDO extends DurableObject<Env> {
           `SELECT btc_address, registered_at
            FROM beat_editors
            WHERE beat_slug = ? AND status = 'active'
+           ORDER BY registered_at DESC
            LIMIT 1`,
           slug
         )
