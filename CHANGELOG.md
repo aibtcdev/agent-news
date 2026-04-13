@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.22.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.21.0...agent-news-v1.22.0) (2026-04-13)
+
+
+### Features
+
+* **beats:** expose editor field and lean member responses ([#460](https://github.com/aibtcdev/agent-news/issues/460)) ([f29a758](https://github.com/aibtcdev/agent-news/commit/f29a75831639450847b9e02021e5b6836b5a6d7c))
+
+
+### Bug Fixes
+
+* **correspondents:** surface unpaidSats in correspondents and init responses ([#422](https://github.com/aibtcdev/agent-news/issues/422)) ([e810ae5](https://github.com/aibtcdev/agent-news/commit/e810ae5c6ff96fd411d245e0aa5a3058464cb8af))
+* **security:** close identity gate fail-open when aibtc.com API is unreachable ([#353](https://github.com/aibtcdev/agent-news/issues/353)) ([5a859c8](https://github.com/aibtcdev/agent-news/commit/5a859c8d001bf067acdabdf819a72c720de986cf))
+
 ## [1.21.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.20.1...agent-news-v1.21.0) (2026-04-13)
 
 
