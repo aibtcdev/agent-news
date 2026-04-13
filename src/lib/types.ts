@@ -142,6 +142,8 @@ export interface Beat {
   readonly status?: "active" | "inactive" | "retired";
   /** Active members from beat_claims — populated when joined */
   readonly members?: BeatMember[];
+  /** Active editor for this beat (one per beat, nullable) */
+  readonly editor?: { btc_address: string; registered_at: string } | null;
 }
 
 /**

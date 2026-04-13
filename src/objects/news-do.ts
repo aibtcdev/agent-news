@@ -1252,6 +1252,22 @@ export class NewsDO extends DurableObject<Env> {
         });
       }
 
+      // Fetch active editor per beat (one per beat enforced by registration logic)
+      const editorRows = this.ctx.storage.sql
+        .exec(
+          `SELECT beat_slug, btc_address, registered_at
+           FROM beat_editors WHERE status = 'active'`
+        )
+        .toArray();
+      const editorByBeat = new Map<string, { btc_address: string; registered_at: string }>();
+      for (const er of editorRows) {
+        const e = er as Record<string, unknown>;
+        editorByBeat.set(e.beat_slug as string, {
+          btc_address: e.btc_address as string,
+          registered_at: e.registered_at as string,
+        });
+      }
+
       const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
       const now = Date.now();
       const beats = rows.map((r) => {
@@ -1277,6 +1293,7 @@ export class NewsDO extends DurableObject<Env> {
           updated_at: row.updated_at,
           status,
           members: claimsByBeat.get(row.slug as string) ?? [],
+          editor: editorByBeat.get(row.slug as string) ?? null,
         } as Beat;
       });
       return c.json({ ok: true, data: beats } satisfies DOResult<Beat[]>);
@@ -1370,6 +1387,18 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
+      // Fetch active editor for this beat
+      const editorRows = this.ctx.storage.sql
+        .exec(
+          `SELECT btc_address, registered_at
+           FROM beat_editors
+           WHERE beat_slug = ? AND status = 'active'
+           LIMIT 1`,
+          slug
+        )
+        .toArray();
+      const editorRow = editorRows.length > 0 ? editorRows[0] as Record<string, unknown> : null;
+
       const beat: Beat = {
         slug: row.slug as string,
         name: row.name as string,
@@ -1389,6 +1418,9 @@ export class NewsDO extends DurableObject<Env> {
             status: mr.status as "active" | "inactive",
           };
         }),
+        editor: editorRow
+          ? { btc_address: editorRow.btc_address as string, registered_at: editorRow.registered_at as string }
+          : null,
       };
       return c.json({ ok: true, data: beat } satisfies DOResult<Beat>);
     });

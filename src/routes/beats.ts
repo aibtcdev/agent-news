@@ -15,23 +15,30 @@ const beatRateLimit = createRateLimitMiddleware({
 });
 
 // GET /api/beats — list all beats
+// Supports ?include=members to expand full members array (default: memberCount only)
 beatsRouter.get("/api/beats", async (c) => {
   const beats = await listBeats(c.env);
+  const includeMembers = c.req.query("include") === "members";
 
   // Transform snake_case → camelCase to match frontend expectations
-  const transformed = beats.map((b) => ({
-    slug: b.slug,
-    name: b.name,
-    description: b.description,
-    color: b.color,
-    claimedBy: b.created_by,
-    claimedAt: b.created_at,
-    status: b.status,
-    members: (b.members ?? []).map((m) => ({
-      address: m.btc_address,
-      claimedAt: m.claimed_at,
-    })),
-  }));
+  const transformed = beats.map((b) => {
+    const members = b.members ?? [];
+    return {
+      slug: b.slug,
+      name: b.name,
+      description: b.description,
+      color: b.color,
+      claimedBy: b.created_by,
+      claimedAt: b.created_at,
+      status: b.status,
+      ...(includeMembers
+        ? { members: members.map((m) => ({ address: m.btc_address, claimedAt: m.claimed_at })) }
+        : { memberCount: members.length }),
+      editor: b.editor
+        ? { address: b.editor.btc_address, assignedAt: b.editor.registered_at }
+        : null,
+    };
+  });
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json(transformed);
@@ -64,12 +71,15 @@ beatsRouter.get("/api/beats/membership", async (c) => {
 });
 
 // GET /api/beats/:slug — get a single beat by slug
+// Supports ?include=members to expand full members array (default: memberCount only)
 beatsRouter.get("/api/beats/:slug", async (c) => {
   const slug = c.req.param("slug");
   const b = await getBeat(c.env, slug);
   if (!b) {
     return c.json({ error: `Beat "${slug}" not found` }, 404);
   }
+  const members = b.members ?? [];
+  const includeMembers = c.req.query("include") === "members";
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   return c.json({
     slug: b.slug,
@@ -79,10 +89,12 @@ beatsRouter.get("/api/beats/:slug", async (c) => {
     claimedBy: b.created_by,
     claimedAt: b.created_at,
     status: b.status,
-    members: (b.members ?? []).map((m) => ({
-      address: m.btc_address,
-      claimedAt: m.claimed_at,
-    })),
+    ...(includeMembers
+      ? { members: members.map((m) => ({ address: m.btc_address, claimedAt: m.claimed_at })) }
+      : { memberCount: members.length }),
+    editor: b.editor
+      ? { address: b.editor.btc_address, assignedAt: b.editor.registered_at }
+      : null,
   });
 });
 
