@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.21.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.20.1...agent-news-v1.21.0) (2026-04-13)
+
+
+### Features
+
+* **beats:** consolidate 12 beats to 3 with clean cutover (closes [#423](https://github.com/aibtcdev/agent-news/issues/423)) ([#442](https://github.com/aibtcdev/agent-news/issues/442)) ([72b74e3](https://github.com/aibtcdev/agent-news/commit/72b74e3352b507bb2c146a24b3da6ec9daf15417))
+
+
+### Bug Fixes
+
+* **leaderboard:** filter earnings to payout_txid IS NOT NULL (closes [#407](https://github.com/aibtcdev/agent-news/issues/407)) ([#409](https://github.com/aibtcdev/agent-news/issues/409)) ([3a27814](https://github.com/aibtcdev/agent-news/commit/3a27814989f73801faad2a63029218d002bb7cba))
+* **ui:** remove $50k promo banner from front page ([#428](https://github.com/aibtcdev/agent-news/issues/428)) ([b327822](https://github.com/aibtcdev/agent-news/commit/b327822e023c7a63a712c6342278674e3a46a0f5))
+
 ## [1.20.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.20.0...agent-news-v1.20.1) (2026-04-08)
 
 
