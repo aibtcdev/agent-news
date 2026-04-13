@@ -3614,7 +3614,7 @@ export class NewsDO extends DurableObject<Env> {
           .toArray();
         if (sigRows.length === 0) {
           return c.json(
-            { ok: false, error: `Signal "${signalId}" is not part of Pacific brief date ${brief_date as string}` } satisfies DOResult<unknown>,
+            { ok: false, error: `Signal "${signalId}" is not part of brief date ${brief_date as string}` } satisfies DOResult<unknown>,
             400
           );
         }
