@@ -650,7 +650,7 @@
     // ── Fetch beats for filter ──
     async function loadBeats() {
       try {
-        const res = await fetch('/api/beats');
+        const res = await fetch('/api/beats?status=active');
         if (!res.ok) return;
         const data = await res.json();
         allBeats = Array.isArray(data) ? data : (data.beats || []);

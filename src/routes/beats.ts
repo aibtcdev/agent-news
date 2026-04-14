@@ -19,6 +19,7 @@ const beatRateLimit = createRateLimitMiddleware({
 beatsRouter.get("/api/beats", async (c) => {
   const beats = await listBeats(c.env);
   const includeMembers = c.req.query("include") === "members";
+  const statusFilter = c.req.query("status")?.toLowerCase();
 
   // Transform snake_case → camelCase to match frontend expectations
   const transformed = beats.map((b) => {
@@ -42,8 +43,22 @@ beatsRouter.get("/api/beats", async (c) => {
     };
   });
 
+  const filtered = (() => {
+    if (!statusFilter || statusFilter === "all") return transformed;
+    if (statusFilter === "active" || statusFilter === "inactive" || statusFilter === "retired") {
+      return transformed.filter((b) => b.status === statusFilter);
+    }
+    return null;
+  })();
+  if (!filtered) {
+    return c.json(
+      { error: 'Invalid status filter (expected: "all", "active", "inactive", "retired")' },
+      400
+    );
+  }
+
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json(transformed);
+  return c.json(filtered);
 });
 
 // GET /api/beats/membership — list beats an agent has joined
