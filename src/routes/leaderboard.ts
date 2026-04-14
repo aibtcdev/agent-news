@@ -8,7 +8,7 @@
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getLeaderboard, listBeats, recordWeeklyPayouts, getConfig, verifyLeaderboardScore, listLeaderboardSnapshots, getLeaderboardSnapshot, resetLeaderboard } from "../lib/do-client";
+import { getLeaderboard, listBeats, recordWeeklyPayouts, getConfig, verifyLeaderboardScore, listLeaderboardSnapshots, getLeaderboardSnapshot, resetLeaderboard, getWeeklyPayouts } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { CONFIG_PUBLISHER_ADDRESS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS } from "../lib/constants";
 import { validateBtcAddress } from "../lib/validators";
@@ -212,6 +212,20 @@ leaderboardRouter.post("/api/leaderboard/payout", async (c) => {
     },
     201
   );
+});
+
+// GET /api/leaderboard/payouts/:week — public: list weekly prize earnings for a given ISO week.
+// Used by the Correspondent Guild reconciler (issue #454) to match recorded prizes against on-chain txids.
+// Response shape: { week, payouts: [{ rank, btc_address, amount_sats, reason, payout_txid, voided_at, ... }], summary }
+leaderboardRouter.get("/api/leaderboard/payouts/:week", async (c) => {
+  const week = c.req.param("week");
+  const result = await getWeeklyPayouts(c.env, week);
+  if (!result.ok) {
+    const status = typeof result.status === "number" ? result.status : 400;
+    return c.json({ error: result.error ?? "Failed to fetch weekly payouts" }, status);
+  }
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  return c.json(result.data);
 });
 
 // GET /api/leaderboard/breakdown — Publisher-only: full component breakdown for all scouts

@@ -967,6 +967,38 @@ export async function recordWeeklyPayouts(
   });
 }
 
+/** A single weekly-prize earning row, as returned by GET /leaderboard/payouts/:week. */
+export interface WeeklyPayoutRow {
+  id: string;
+  rank: number;
+  btc_address: string;
+  amount_sats: number;
+  reason: string;
+  week: string;
+  created_at: string;
+  payout_txid: string | null;
+  voided_at: string | null;
+}
+
+export interface WeeklyPayoutsByWeek {
+  week: string;
+  payouts: WeeklyPayoutRow[];
+  summary: {
+    total: number;
+    paid: number;
+    unpaid: number;
+  };
+}
+
+/** Public — list weekly prize earnings for a given ISO week. Used by Guild reconciliation tooling. */
+export async function getWeeklyPayouts(
+  env: Env,
+  week: string
+): Promise<DOResult<WeeklyPayoutsByWeek>> {
+  const stub = getStub(env);
+  return doFetch<WeeklyPayoutsByWeek>(stub, `/leaderboard/payouts/${encodeURIComponent(week)}`);
+}
+
 // ---------------------------------------------------------------------------
 // Leaderboard v2 (weighted scoring)
 // ---------------------------------------------------------------------------

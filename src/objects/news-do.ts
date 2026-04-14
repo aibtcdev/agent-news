@@ -3599,6 +3599,85 @@ export class NewsDO extends DurableObject<Env> {
       );
     });
 
+    // GET /leaderboard/payouts/:week — list weekly prize earnings for the given ISO week.
+    // Public — supports Correspondent Guild reconciliation of recorded prizes against on-chain txids.
+    // Rows are keyed by (reason='weekly_prize_Nst', reference_id=week). Ranks derive from the reason.
+    this.router.get("/leaderboard/payouts/:week", (c) => {
+      const week = c.req.param("week");
+      if (!/^\d{4}-W\d{2}$/.test(week)) {
+        return c.json(
+          { ok: false, error: "Invalid week format — use YYYY-WNN (e.g. '2026-W14')" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const weekNum = parseInt(week.slice(-2), 10);
+      if (weekNum < 1 || weekNum > 53) {
+        return c.json(
+          { ok: false, error: "Invalid ISO week number — must be between 01 and 53" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT id, btc_address, amount_sats, reason, reference_id, created_at, payout_txid, voided_at
+           FROM earnings
+           WHERE reference_id = ?
+             AND reason IN ('weekly_prize_1st', 'weekly_prize_2nd', 'weekly_prize_3rd')
+           ORDER BY reason ASC`,
+          week
+        )
+        .toArray();
+
+      const rankByReason: Record<string, number> = {
+        weekly_prize_1st: 1,
+        weekly_prize_2nd: 2,
+        weekly_prize_3rd: 3,
+      };
+
+      const payouts = rows.map((r) => {
+        const row = r as {
+          id: string;
+          btc_address: string;
+          amount_sats: number;
+          reason: string;
+          reference_id: string;
+          created_at: string;
+          payout_txid: string | null;
+          voided_at: string | null;
+        };
+        return {
+          id: row.id,
+          rank: rankByReason[row.reason] ?? 0,
+          btc_address: row.btc_address,
+          amount_sats: Number(row.amount_sats),
+          reason: row.reason,
+          week: row.reference_id,
+          created_at: row.created_at,
+          payout_txid: row.payout_txid,
+          voided_at: row.voided_at,
+        };
+      });
+
+      const paidCount = payouts.filter((p) => p.payout_txid !== null).length;
+      const unpaidCount = payouts.length - paidCount;
+
+      return c.json(
+        {
+          ok: true,
+          data: {
+            week,
+            payouts,
+            summary: {
+              total: payouts.length,
+              paid: paidCount,
+              unpaid: unpaidCount,
+            },
+          },
+        } satisfies DOResult<unknown>
+      );
+    });
+
     // -------------------------------------------------------------------------
     // Brief Signals — track which signals are included in each brief
     // -------------------------------------------------------------------------
