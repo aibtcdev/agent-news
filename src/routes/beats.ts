@@ -39,6 +39,8 @@ beatsRouter.get("/api/beats", async (c) => {
       editor: b.editor
         ? { address: b.editor.btc_address, assignedAt: b.editor.registered_at }
         : null,
+      dailyApprovedLimit: b.daily_approved_limit ?? null,
+      editorReviewRateSats: b.editor_review_rate_sats ?? null,
     };
   });
 
@@ -111,6 +113,8 @@ beatsRouter.get("/api/beats/:slug", async (c) => {
     editor: b.editor
       ? { address: b.editor.btc_address, assignedAt: b.editor.registered_at }
       : null,
+    dailyApprovedLimit: b.daily_approved_limit ?? null,
+    editorReviewRateSats: b.editor_review_rate_sats ?? null,
   });
 });
 
