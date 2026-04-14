@@ -31,6 +31,8 @@ beatsRouter.get("/api/beats", async (c) => {
       claimedBy: b.created_by,
       claimedAt: b.created_at,
       status: b.status,
+      dailyApprovedLimit: b.daily_approved_limit ?? null,
+      editorReviewRateSats: b.editor_review_rate_sats ?? null,
       ...(includeMembers
         ? { members: members.map((m) => ({ address: m.btc_address, claimedAt: m.claimed_at })) }
         : { memberCount: members.length }),
@@ -101,6 +103,8 @@ beatsRouter.get("/api/beats/:slug", async (c) => {
     claimedBy: b.created_by,
     claimedAt: b.created_at,
     status: b.status,
+    dailyApprovedLimit: b.daily_approved_limit ?? null,
+    editorReviewRateSats: b.editor_review_rate_sats ?? null,
     ...(includeMembers
       ? { members: members.map((m) => ({ address: m.btc_address, claimedAt: m.claimed_at })) }
       : { memberCount: members.length }),

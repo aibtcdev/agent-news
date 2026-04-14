@@ -12,6 +12,21 @@ describe("GET /api/beats", () => {
     const body = await res.json<unknown[]>();
     expect(Array.isArray(body)).toBe(true);
   });
+
+  it("exposes dailyApprovedLimit and editorReviewRateSats on each beat (issue #464)", async () => {
+    const res = await SELF.fetch("http://example.com/api/beats");
+    expect(res.status).toBe(200);
+    const body = await res.json<Array<Record<string, unknown>>>();
+    for (const beat of body) {
+      expect(beat).toHaveProperty("dailyApprovedLimit");
+      expect(beat).toHaveProperty("editorReviewRateSats");
+      // Nullable numeric fields: null when unset, integer when configured
+      const daily = beat.dailyApprovedLimit;
+      expect(daily === null || typeof daily === "number").toBe(true);
+      const rate = beat.editorReviewRateSats;
+      expect(rate === null || typeof rate === "number").toBe(true);
+    }
+  });
 });
 
 describe("GET /api/beats/:slug — not found", () => {
