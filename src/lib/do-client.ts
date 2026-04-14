@@ -862,7 +862,7 @@ export interface CreateCorrectionInput {
   /** Relevance score 0–100 for how well the signal fits the beat (editorial_review only) */
   beat_relevance?: number;
   /** Editorial disposition: "approve", "reject", or "needs_revision" (editorial_review only) */
-  recommendation?: string;
+  recommendation?: "approve" | "reject" | "needs_revision";
   /** Free-text reviewer notes for the correspondent (editorial_review only) */
   feedback?: string;
 }

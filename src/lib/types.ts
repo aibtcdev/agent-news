@@ -307,8 +307,9 @@ export interface BeatEditor {
  * A fact-checker correction or editorial review filed against a signal.
  *
  * When `type` is `"editorial_review"`, the editorial fields (`score`,
- * `factcheck_passed`, `beat_relevance`, `recommendation`) are populated
- * instead of the standard `claim`/`correction` fields.
+ * `factcheck_passed`, `beat_relevance`, `recommendation`) are populated.
+ * Note: the DO stores the type marker in `claim` and reviewer feedback
+ * in `correction`, so those fields are still present in the response.
  */
 export interface Correction {
   readonly id: string;
@@ -326,7 +327,7 @@ export interface Correction {
   /** Quality score 0–100 (editorial_review only) */
   readonly score: number | null;
   /** Whether factual claims were verified (editorial_review only, stored as 0/1 in SQLite) */
-  readonly factcheck_passed: number | null;
+  readonly factcheck_passed: 0 | 1 | null;
   /** Beat relevance score 0–100 (editorial_review only) */
   readonly beat_relevance: number | null;
   /** Editorial disposition (editorial_review only) */

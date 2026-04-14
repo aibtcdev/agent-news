@@ -84,6 +84,36 @@ correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, asyn
     if (typeof correction !== "string" || correction.trim().length === 0) {
       return c.json({ error: "correction must be a non-empty string" }, 400);
     }
+  } else {
+    // Editorial review fields — validate at route level before forwarding to DO
+    const { score, factcheck_passed, beat_relevance, recommendation, feedback } = body;
+
+    if (score !== undefined) {
+      if (typeof score !== "number" || !Number.isInteger(score) || score < 0 || score > 100) {
+        return c.json({ error: "score must be an integer between 0 and 100" }, 400);
+      }
+    }
+    if (factcheck_passed !== undefined) {
+      if (typeof factcheck_passed !== "boolean") {
+        return c.json({ error: "factcheck_passed must be a boolean" }, 400);
+      }
+    }
+    if (beat_relevance !== undefined) {
+      if (typeof beat_relevance !== "number" || !Number.isInteger(beat_relevance) || beat_relevance < 0 || beat_relevance > 100) {
+        return c.json({ error: "beat_relevance must be an integer between 0 and 100" }, 400);
+      }
+    }
+    if (recommendation !== undefined) {
+      const validRecs = ["approve", "reject", "needs_revision"] as const;
+      if (typeof recommendation !== "string" || !validRecs.includes(recommendation as typeof validRecs[number])) {
+        return c.json({ error: `recommendation must be one of: ${validRecs.join(", ")}` }, 400);
+      }
+    }
+    if (feedback !== undefined) {
+      if (typeof feedback !== "string") {
+        return c.json({ error: "feedback must be a string" }, 400);
+      }
+    }
   }
 
   // BIP-322 auth
@@ -109,40 +139,12 @@ correctionsRouter.post("/api/signals/:id/corrections", correctionRateLimit, asyn
     input.correction = body.correction as string;
     input.sources = body.sources ? String(body.sources) : null;
   } else {
-    // Editorial review fields — validate at route level before forwarding to DO
-    const { score, factcheck_passed, beat_relevance, recommendation, feedback } = body;
-
-    if (score !== undefined) {
-      if (typeof score !== "number" || !Number.isInteger(score) || score < 0 || score > 100) {
-        return c.json({ error: "score must be an integer between 0 and 100" }, 400);
-      }
-      input.score = score;
-    }
-    if (factcheck_passed !== undefined) {
-      if (typeof factcheck_passed !== "boolean") {
-        return c.json({ error: "factcheck_passed must be a boolean" }, 400);
-      }
-      input.factcheck_passed = factcheck_passed;
-    }
-    if (beat_relevance !== undefined) {
-      if (typeof beat_relevance !== "number" || !Number.isInteger(beat_relevance) || beat_relevance < 0 || beat_relevance > 100) {
-        return c.json({ error: "beat_relevance must be an integer between 0 and 100" }, 400);
-      }
-      input.beat_relevance = beat_relevance;
-    }
-    if (recommendation !== undefined) {
-      const validRecs = ["approve", "reject", "needs_revision"];
-      if (typeof recommendation !== "string" || !validRecs.includes(recommendation)) {
-        return c.json({ error: `recommendation must be one of: ${validRecs.join(", ")}` }, 400);
-      }
-      input.recommendation = recommendation;
-    }
-    if (feedback !== undefined) {
-      if (typeof feedback !== "string") {
-        return c.json({ error: "feedback must be a string" }, 400);
-      }
-      input.feedback = feedback;
-    }
+    // Assign validated editorial fields to input
+    if (body.score !== undefined) input.score = body.score as number;
+    if (body.factcheck_passed !== undefined) input.factcheck_passed = body.factcheck_passed as boolean;
+    if (body.beat_relevance !== undefined) input.beat_relevance = body.beat_relevance as number;
+    if (body.recommendation !== undefined) input.recommendation = body.recommendation as "approve" | "reject" | "needs_revision";
+    if (body.feedback !== undefined) input.feedback = body.feedback as string;
   }
 
   const result = await createCorrection(c.env, input);
