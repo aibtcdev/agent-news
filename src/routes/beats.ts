@@ -78,6 +78,21 @@ beatsRouter.get("/api/beats/:slug", async (c) => {
   if (!b) {
     return c.json({ error: `Beat "${slug}" not found` }, 404);
   }
+
+  if (b.status === "retired") {
+    const allBeats = await listBeats(c.env);
+    const activeBeats = allBeats
+      .filter((beat) => beat.status !== "retired")
+      .map((beat) => beat.slug);
+    return c.json(
+      {
+        error: `Beat "${slug}" is retired and no longer accepts signals.`,
+        active_beats: activeBeats,
+      },
+      410
+    );
+  }
+
   const members = b.members ?? [];
   const includeMembers = c.req.query("include") === "members";
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");

@@ -15,6 +15,8 @@ import {
   getSignal,
   createSignal,
   correctSignal,
+  getBeat,
+  listBeats,
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
@@ -221,6 +223,25 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return c.json(
       { error: "Invalid tags (array of lowercase slugs, 1-10 items, 2-30 chars each)" },
       400
+    );
+  }
+
+  // Reject signals filed against retired beats with 410 Gone
+  const beat = await getBeat(c.env, beat_slug as string);
+  if (!beat) {
+    return c.json({ error: `Beat "${beat_slug}" not found` }, 404);
+  }
+  if (beat.status === "retired") {
+    const allBeats = await listBeats(c.env);
+    const activeBeats = allBeats
+      .filter((b) => b.status !== "retired")
+      .map((b) => b.slug);
+    return c.json(
+      {
+        error: `Beat "${beat_slug}" is retired and no longer accepts signals.`,
+        active_beats: activeBeats,
+      },
+      410
     );
   }
 
