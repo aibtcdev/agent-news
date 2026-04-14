@@ -1292,6 +1292,8 @@ export class NewsDO extends DurableObject<Env> {
           created_by: row.created_by,
           created_at: row.created_at,
           updated_at: row.updated_at,
+          daily_approved_limit: row.daily_approved_limit as number | null,
+          editor_review_rate_sats: row.editor_review_rate_sats as number | null,
           status,
           members: claimsByBeat.get(row.slug as string) ?? [],
           editor: editorByBeat.get(row.slug as string) ?? null,
