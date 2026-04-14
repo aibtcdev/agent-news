@@ -55,11 +55,6 @@ interface RawCompiledSignalRow extends CompiledSignalRow {
   position?: number | null;
 }
 
-interface RawCompiledSignalRow extends CompiledSignalRow {
-  reviewed_at: string | null;
-  position?: number | null;
-}
-
 /**
  * Convert a raw SQL row (with tags_csv from GROUP_CONCAT) into a Signal object.
  * Casting via RawSignalRow gives TypeScript visibility into the row shape and
@@ -295,7 +290,8 @@ export class NewsDO extends DurableObject<Env> {
     // 21 = Leaderboard composite indexes — accelerate 30-day rolling window queries (#319)
     // 22 = Beat consolidation — 12 → 3 beats, retire old beats, create aibtc-network (#423)
     // 23 = Streak UTC migration (backfill last_signal_date from actual signal timestamps)
-    const CURRENT_MIGRATION_VERSION = 23;
+    // 24 = Agent name on signals (store display name at filing time, closes #369)
+    const CURRENT_MIGRATION_VERSION = 24;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -509,14 +505,6 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(stmt);
           } catch (e) {
             console.error("Approval cap index migration failed:", e);
-      // Migration 16: add agent_name column to signals table (closes #369)
-      if (appliedVersion < 16) {
-        try {
-          this.ctx.storage.sql.exec(MIGRATION_AGENT_NAME_SQL);
-        } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          if (!msg.includes("duplicate column")) {
-            console.error("Agent name migration failed:", e);
           }
         }
       }
@@ -2188,8 +2176,8 @@ export class NewsDO extends DurableObject<Env> {
       // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
       // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
       this.ctx.storage.sql.exec(
-        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, agent_name)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?, ?)`,
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -2198,8 +2186,7 @@ export class NewsDO extends DurableObject<Env> {
         sourcesJson,
         nowIso,
         nowIso,
-        disclosure,
-        body.agent_name ?? null
+        disclosure
       );
 
       for (const t of signalTags) {
