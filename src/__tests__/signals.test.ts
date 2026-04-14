@@ -144,7 +144,7 @@ describe("POST /api/signals — validation errors", () => {
     expect(body.error).toContain("tags");
   });
 
-  it("returns 401 when auth headers are missing (all fields valid)", async () => {
+  it("returns 404 for a nonexistent beat before reaching auth", async () => {
     const res = await SELF.fetch("http://example.com/api/signals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -156,8 +156,8 @@ describe("POST /api/signals — validation errors", () => {
         tags: ["bitcoin"],
       }),
     });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(404);
     const body = await res.json<{ error: string }>();
-    expect(body.error).toBeTruthy();
+    expect(body.error).toContain("not found");
   });
 });

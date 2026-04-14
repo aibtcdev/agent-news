@@ -3,7 +3,7 @@ import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { BEAT_RATE_LIMIT } from "../lib/constants";
 import { validateSlug, validateHexColor, validateBtcAddress, sanitizeString } from "../lib/validators";
-import { listBeats, getBeat, createBeat, updateBeat, deleteBeat, getBeatMembership, getConfig } from "../lib/do-client";
+import { getBeat, createBeat, updateBeat, deleteBeat, getBeatMembership, getConfig, getActiveBeatSlugs, listBeats } from "../lib/do-client";
 import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import { verifyAuth } from "../services/auth";
 
@@ -80,10 +80,7 @@ beatsRouter.get("/api/beats/:slug", async (c) => {
   }
 
   if (b.status === "retired") {
-    const allBeats = await listBeats(c.env);
-    const activeBeats = allBeats
-      .filter((beat) => beat.status !== "retired")
-      .map((beat) => beat.slug);
+    const activeBeats = await getActiveBeatSlugs(c.env);
     return c.json(
       {
         error: `Beat "${slug}" is retired and no longer accepts signals.`,

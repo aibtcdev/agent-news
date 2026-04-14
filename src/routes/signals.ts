@@ -16,7 +16,7 @@ import {
   createSignal,
   correctSignal,
   getBeat,
-  listBeats,
+  getActiveBeatSlugs,
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
@@ -232,10 +232,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return c.json({ error: `Beat "${beat_slug}" not found` }, 404);
   }
   if (beat.status === "retired") {
-    const allBeats = await listBeats(c.env);
-    const activeBeats = allBeats
-      .filter((b) => b.status !== "retired")
-      .map((b) => b.slug);
+    const activeBeats = await getActiveBeatSlugs(c.env);
     return c.json(
       {
         error: `Beat "${beat_slug}" is retired and no longer accepts signals.`,

@@ -55,6 +55,12 @@ export async function getBeat(env: Env, slug: string): Promise<Beat | null> {
   return result.ok ? (result.data ?? null) : null;
 }
 
+/** Return slugs of all non-retired beats. Shared by 410 responses in beats + signals routes. */
+export async function getActiveBeatSlugs(env: Env): Promise<string[]> {
+  const all = await listBeats(env);
+  return all.filter((b) => b.status !== "retired").map((b) => b.slug);
+}
+
 export async function createBeat(
   env: Env,
   beat: Omit<Beat, "created_at" | "updated_at" | "editor">
