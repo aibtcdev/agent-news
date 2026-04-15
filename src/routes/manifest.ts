@@ -42,7 +42,7 @@ manifestRouter.get("/api", (c) => {
       },
       "GET /api/beats": {
         description:
-          "List all registered beats ordered by name, with members and activity status",
+          'List beats ordered by name, with members and computed status. Optional query: `?include=members` and `?status=all|active|inactive|retired` (default: all).',
         returns:
           "Array of beat objects with members: [{ address, claimedAt }]",
       },
