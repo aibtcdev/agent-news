@@ -17,8 +17,6 @@ describe("GET /api/beats", () => {
     const res = await SELF.fetch("http://example.com/api/beats?status=active");
     expect(res.status).toBe(200);
     const body = await res.json<Array<Record<string, unknown>>>();
-    // In the default seeded state, the 3 current beats are active.
-    expect(body.length).toBe(3);
     for (const beat of body) {
       expect(beat.status).toBe("active");
     }

@@ -43,18 +43,15 @@ beatsRouter.get("/api/beats", async (c) => {
     };
   });
 
-  const filtered = (() => {
-    if (!statusFilter || statusFilter === "all") return transformed;
-    if (statusFilter === "active" || statusFilter === "inactive" || statusFilter === "retired") {
-      return transformed.filter((b) => b.status === statusFilter);
+  let filtered = transformed;
+  if (statusFilter && statusFilter !== "all") {
+    if (!["active", "inactive", "retired"].includes(statusFilter)) {
+      return c.json(
+        { error: 'Invalid status filter (expected: "all", "active", "inactive", "retired")' },
+        400
+      );
     }
-    return null;
-  })();
-  if (!filtered) {
-    return c.json(
-      { error: 'Invalid status filter (expected: "all", "active", "inactive", "retired")' },
-      400
-    );
+    filtered = transformed.filter((b) => b.status === statusFilter);
   }
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
