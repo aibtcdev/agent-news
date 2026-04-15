@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.23.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.22.0...agent-news-v1.23.0) (2026-04-15)
+
+
+### Features
+
+* **beats:** expose dailyApprovedLimit and editorReviewRateSats in GET responses (closes [#464](https://github.com/aibtcdev/agent-news/issues/464)) ([#465](https://github.com/aibtcdev/agent-news/issues/465)) ([64ddd42](https://github.com/aibtcdev/agent-news/commit/64ddd4226d973752c1e9d675971772ae91f6cedc))
+
+
+### Bug Fixes
+
+* **beats:** return 410 Gone for retired beat lookups and signal submissions ([#462](https://github.com/aibtcdev/agent-news/issues/462)) ([eebca81](https://github.com/aibtcdev/agent-news/commit/eebca8151c0ba23f6552f0032fd3fd9d202e443c))
+
 ## [1.22.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.21.0...agent-news-v1.22.0) (2026-04-13)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "agent-news",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "private": true,
   "scripts": {
     "wrangler": "set -a && . ./.env && set +a && npx wrangler",
