@@ -2420,6 +2420,9 @@ export class NewsDO extends DurableObject<Env> {
       // Simplified compile: the roster IS the set of approved signals for the day.
       // All curation happened at review time via cap-enforced approval.
       // Include both 'approved' (new) and 'brief_included' (recompile) signals.
+      // ORDER BY uses reviewed_at DESC intentionally: bucketing is on created_at
+      // (which day's brief a signal belongs to), but position within a brief is
+      // driven by editorial recency — most recently reviewed signal ranks highest.
       const candidateSignals = this.ctx.storage.sql
         .exec(
           `SELECT s.id, s.beat_slug, s.btc_address, s.headline, s.body, s.sources,
@@ -2446,7 +2449,7 @@ export class NewsDO extends DurableObject<Env> {
       if (candidateSignals.length > MAX_INCLUDED_SIGNALS_PER_BRIEF) {
         return c.json({
           ok: false,
-          error: `Brief compilation invariant violated: ${candidateSignals.length} approved signals for ${date} exceeds MAX_INCLUDED_SIGNALS_PER_BRIEF (${MAX_INCLUDED_SIGNALS_PER_BRIEF}). This indicates a cap-enforcement gap in the review path. Retract ${candidateSignals.length - MAX_INCLUDED_SIGNALS_PER_BRIEF} excess approval(s) before compiling.`,
+          error: `Brief compilation invariant violated: ${candidateSignals.length} approved/brief_included signals for ${date} exceeds MAX_INCLUDED_SIGNALS_PER_BRIEF (${MAX_INCLUDED_SIGNALS_PER_BRIEF}). This indicates a cap-enforcement gap in the review path. Retract ${candidateSignals.length - MAX_INCLUDED_SIGNALS_PER_BRIEF} excess approval(s) before compiling.`,
         } satisfies DOResult<CompiledBriefData>, 409);
       }
 
@@ -2460,6 +2463,8 @@ export class NewsDO extends DurableObject<Env> {
         included_signal_ids: includedSignals.map((signal) => signal.signal_id),
         included_signals: includedSignals,
         candidate_count: candidateSignals.length,
+        // Invariant: review-time cap enforcement (aligned on created_at) prevents
+        // overflow from reaching compile. The guard above rejects if violated.
         overflow_count: 0,
       };
 
