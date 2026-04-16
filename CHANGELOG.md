@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.23.0...agent-news-v1.23.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* **review:** align approval cap bucketing with compile on created_at ([#500](https://github.com/aibtcdev/agent-news/issues/500)) ([f3ae136](https://github.com/aibtcdev/agent-news/commit/f3ae13664a2528ceeaaef3f35bc32c0a01ccb55f))
+
 ## [1.23.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.22.0...agent-news-v1.23.0) (2026-04-15)
 
 
