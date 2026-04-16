@@ -97,10 +97,9 @@ describe("brief compile reconciliation", () => {
     expect(includedBody.signals).toHaveLength(3);
   });
 
-  it("enforces the 30-signal cap and reconciles replaced status, brief_signals, and payouts on recompile", async () => {
+  it("rejects compilation when approved signals exceed the brief cap (invariant violation)", async () => {
     const date = "2026-04-11";
     const signals = [];
-    const briefSignals = [];
     for (let i = 0; i < 31; i++) {
       const id = `over-cap-${i.toString().padStart(2, "0")}`;
       signals.push({
@@ -110,95 +109,21 @@ describe("brief compile reconciliation", () => {
         headline: `Overflow candidate ${i}`,
         sources: "[]",
         created_at: `2026-04-11T12:${i.toString().padStart(2, "0")}:00Z`,
-        status: "brief_included",
+        status: "approved",
         reviewed_at: `2026-04-11T23:${i.toString().padStart(2, "0")}:00Z`,
-      });
-      briefSignals.push({
-        brief_date: date,
-        signal_id: id,
-        btc_address: i % 2 === 0 ? REPORTER_A : REPORTER_B,
-        position: i,
-        created_at: "2026-04-11T23:59:00Z",
       });
     }
 
-    await seed({
-      signals,
-      brief_signals: briefSignals,
-      earnings: [
-        {
-          id: "earning-overflow-00",
-          btc_address: REPORTER_A,
-          amount_sats: 30000,
-          reason: "brief_inclusion",
-          reference_id: "over-cap-00",
-          created_at: "2026-04-11T23:59:30Z",
-        },
-      ],
-    });
+    await seed({ signals });
 
-    const firstCompileRes = await compile(date);
-    expect(firstCompileRes.status).toBe(201);
-    const firstCompile = await firstCompileRes.json<{
-      brief: {
-        included_signal_ids: string[];
-        included_signals: Array<{ signal_id: string; position: number }>;
-        roster: { candidate_count: number; selected_count: number; overflow_count: number };
-      };
-      payouts: { paid: number; skipped: number; revived: number; voided: number };
-    }>();
-
-    // Simplified compile orders by reviewed_at DESC — most recently reviewed first.
-    // With 31 signals (reviewed_at 23:00-23:30), signal 30 (latest) is first,
-    // signal 00 (earliest) is the overflow candidate dropped at the 30-signal cap.
-    expect(firstCompile.brief.included_signal_ids).toHaveLength(30);
-    expect(firstCompile.brief.included_signal_ids[0]).toBe("over-cap-30");
-    expect(firstCompile.brief.included_signal_ids[29]).toBe("over-cap-01");
-    expect(firstCompile.brief.roster).toEqual(expect.objectContaining({
-      candidate_count: 31,
-      selected_count: 30,
-      overflow_count: 1,
-    }));
-    expect(firstCompile.payouts).toEqual({
-      paid: 30,
-      skipped: 0,
-      revived: 0,
-      voided: 1,
-    });
-
-    const briefSignalsRes = await SELF.fetch(`http://example.com/api/test/brief-signals/${date}`);
-    expect(briefSignalsRes.status).toBe(200);
-    const briefSignalsBody = await briefSignalsRes.json<{ ok: true; data: Array<{ signal_id: string }> }>();
-    expect(briefSignalsBody.data).toHaveLength(30);
-    expect(briefSignalsBody.data.some((row) => row.signal_id === "over-cap-00")).toBe(false);
-
-    const replacedRes = await SELF.fetch(`http://example.com/api/signals?date=${date}&status=replaced`);
-    expect(replacedRes.status).toBe(200);
-    const replacedBody = await replacedRes.json<{ signals: Array<{ id: string }> }>();
-    expect(replacedBody.signals.map((signal) => signal.id)).toContain("over-cap-00");
-
-    const curatedRes = await SELF.fetch("http://example.com/api/front-page");
-    expect(curatedRes.status).toBe(200);
-    const curatedBody = await curatedRes.json<{ signals: Array<{ id: string }> }>();
-    expect(curatedBody.signals.some((signal) => signal.id === "over-cap-00")).toBe(false);
-
-    const secondCompileRes = await compile(date);
-    expect(secondCompileRes.status).toBe(201);
-    const secondCompile = await secondCompileRes.json<{
-      brief: { included_signal_ids: string[]; roster: { candidate_count: number; overflow_count: number } };
-      payouts: { paid: number; skipped: number; revived: number; voided: number };
-    }>();
-    expect(secondCompile.brief.included_signal_ids).toEqual(firstCompile.brief.included_signal_ids);
-    expect(secondCompile.brief.roster).toEqual(expect.objectContaining({
-      candidate_count: 30,
-      overflow_count: 0,
-    }));
-    expect(secondCompile.payouts).toEqual({
-      paid: 0,
-      skipped: 30,
-      revived: 0,
-      voided: 0,
-    });
+    // Compile should reject: 31 approved signals exceeds MAX_INCLUDED_SIGNALS_PER_BRIEF (30).
+    // After review-time caps were aligned to created_at, this overflow should be unreachable
+    // in normal operation — this test verifies the compile-time safety net surfaces the error.
+    const compileRes = await compile(date);
+    expect(compileRes.status).toBe(409);
+    const body = await compileRes.json<{ error: string }>();
+    expect(body.error).toContain("invariant violated");
+    expect(body.error).toContain("31");
   }, 40000);
 
   it("blocks subtractive recompile after inscription", async () => {

@@ -79,7 +79,7 @@ async function handleBriefCompile(
   // Compile raw signal + beat + streak data from the Durable Object
   const compileResult = await compileBriefData(c.env, date);
   if (!compileResult.ok || !compileResult.data) {
-    return c.json({ error: compileResult.error ?? "Failed to compile brief data" }, 500);
+    return c.json({ error: compileResult.error ?? "Failed to compile brief data" }, compileResult.status ?? 500);
   }
 
   const { signals, compiled_at, included_signal_ids, included_signals, candidate_count, overflow_count } = compileResult.data;
