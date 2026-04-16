@@ -980,14 +980,14 @@ export class NewsDO extends DurableObject<Env> {
 
       // Verify signal exists first so we know its beat_slug and author for auth check
       const signalRows = this.ctx.storage.sql
-        .exec("SELECT id, status, beat_slug, btc_address FROM signals WHERE id = ?", id)
+        .exec("SELECT id, status, beat_slug, btc_address, created_at FROM signals WHERE id = ?", id)
         .toArray();
       if (signalRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
       }
 
       // State machine: prevent editorial regressions
-      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string; btc_address: string };
+      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string; btc_address: string; created_at: string };
       const currentStatus = signalRow.status;
       const newStatus = status as SignalStatus; // validated above against SIGNAL_STATUSES
       const allowed = SIGNAL_VALID_TRANSITIONS[currentStatus] ?? [];
@@ -1036,6 +1036,23 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // ── Inscription guard for approvals ─────────────────────────────
+      // Prevent approving a signal whose brief day is already inscribed on-chain.
+      // The retract path has a mirror guard (brief_included → replaced/rejected).
+      if (newStatus === "approved") {
+        const signalDate = getUTCDate(new Date(signalRow.created_at));
+        const briefRows = this.ctx.storage.sql
+          .exec("SELECT inscription_id FROM briefs WHERE date = ?", signalDate)
+          .toArray();
+        const inscription = briefRows[0] as { inscription_id: string | null } | undefined;
+        if (inscription?.inscription_id) {
+          return c.json({
+            ok: false,
+            error: `Cannot approve a signal whose brief (${signalDate}) is already inscribed on-chain. The brief is immutable; submit a correction signal for a future brief instead.`,
+          } satisfies DOResult<Signal>, 409);
+        }
+      }
+
       // ── Daily approval cap ────────────────────────────────────────────
       // When approving, enforce MAX_APPROVED_SIGNALS_PER_DAY. If at cap,
       // require displace_signal_id to atomically swap one out.
@@ -1043,9 +1060,12 @@ export class NewsDO extends DurableObject<Env> {
       const nowDate = new Date();
 
       if (newStatus === "approved") {
-        const today = getUTCDate(nowDate);
-        const dayStart = getUTCDayStart(today);
-        const dayEnd = getUTCDayEnd(today);
+        // Bucket by the signal's created_at day to match brief compilation
+        // (POST /briefs/compile). reviewed_at is updated on every status change,
+        // which would mis-count historical re-approvals against the wrong day.
+        const signalDay = getUTCDate(new Date(signalRow.created_at));
+        const dayStart = getUTCDayStart(signalDay);
+        const dayEnd = getUTCDayEnd(signalDay);
 
         // Determine the effective cap: use beat's daily_approved_limit if set.
         // NULL = no per-beat cap (unlimited). The global MAX_APPROVED_SIGNALS_PER_DAY
@@ -1062,7 +1082,7 @@ export class NewsDO extends DurableObject<Env> {
           .exec(
             `SELECT COUNT(*) as count FROM signals
              WHERE status IN ('approved', 'brief_included')
-               AND reviewed_at >= ? AND reviewed_at < ?`,
+               AND created_at >= ? AND created_at < ?`,
             dayStart, dayEnd
           )
           .toArray();
@@ -1078,7 +1098,7 @@ export class NewsDO extends DurableObject<Env> {
             .exec(
               `SELECT COUNT(*) as count FROM signals
                WHERE beat_slug = ? AND status IN ('approved', 'brief_included')
-                 AND reviewed_at >= ? AND reviewed_at < ?`,
+                 AND created_at >= ? AND created_at < ?`,
               signalRow.beat_slug, dayStart, dayEnd
             )
             .toArray();
@@ -1110,22 +1130,22 @@ export class NewsDO extends DurableObject<Env> {
 
           // Validate displacement target
           const displaceRows = this.ctx.storage.sql
-            .exec("SELECT id, status, reviewed_at, beat_slug FROM signals WHERE id = ?", displaceId)
+            .exec("SELECT id, status, created_at, beat_slug FROM signals WHERE id = ?", displaceId)
             .toArray();
           if (displaceRows.length === 0) {
             return c.json({ ok: false, error: `Displace target "${displaceId}" not found` } satisfies DOResult<Signal>, 404);
           }
-          const displaceRow = displaceRows[0] as { id: string; status: string; reviewed_at: string | null; beat_slug: string };
+          const displaceRow = displaceRows[0] as { id: string; status: string; created_at: string; beat_slug: string };
           if (displaceRow.status !== "approved") {
             return c.json({
               ok: false,
               error: `Displace target must have status "approved", got "${displaceRow.status}". Only "approved" signals can be displaced (not "brief_included" or other statuses).`,
             } satisfies DOResult<Signal>, 400);
           }
-          if (!displaceRow.reviewed_at || displaceRow.reviewed_at < dayStart || displaceRow.reviewed_at >= dayEnd) {
+          if (displaceRow.created_at < dayStart || displaceRow.created_at >= dayEnd) {
             return c.json({
               ok: false,
-              error: `Displace target was not approved today. Only today's approved signals can be displaced.`,
+              error: `Displace target was not created on the same day as this signal (${signalDay}). Only same-bucket approved signals can be displaced.`,
             } satisfies DOResult<Signal>, 400);
           }
           // When per-beat cap triggered the displacement, target must be on the same beat
@@ -2419,24 +2439,28 @@ export class NewsDO extends DurableObject<Env> {
         .toArray()
         .map((row) => rowToCompiledSignal(row as Record<string, unknown>));
 
-      // Safety cap at MAX_INCLUDED_SIGNALS_PER_BRIEF. Candidates are already ordered by
-      // reviewed_at DESC, created_at DESC, id ASC above, so compilation deterministically
-      // includes the first N approved candidates for the day. This is the effective
-      // selection behavior whenever approvals exceed the brief limit.
-      // Note: fetches all candidates to preserve candidate_count accuracy; revisit
-      // with SQL LIMIT + separate COUNT if daily volumes grow significantly.
-      const selectedSignals = candidateSignals.slice(0, MAX_INCLUDED_SIGNALS_PER_BRIEF);
-      const includedSignals = buildIncludedSignalMetadata(selectedSignals);
+      // Enforce MAX_INCLUDED_SIGNALS_PER_BRIEF as an invariant. Review-time caps
+      // (aligned on created_at) should prevent exceeding this. If we get more
+      // candidates than the cap, a cap-enforcement gap exists — surface it loudly
+      // rather than silently dropping signals that would never appear in any brief.
+      if (candidateSignals.length > MAX_INCLUDED_SIGNALS_PER_BRIEF) {
+        return c.json({
+          ok: false,
+          error: `Brief compilation invariant violated: ${candidateSignals.length} approved signals for ${date} exceeds MAX_INCLUDED_SIGNALS_PER_BRIEF (${MAX_INCLUDED_SIGNALS_PER_BRIEF}). This indicates a cap-enforcement gap in the review path. Retract ${candidateSignals.length - MAX_INCLUDED_SIGNALS_PER_BRIEF} excess approval(s) before compiling.`,
+        } satisfies DOResult<CompiledBriefData>, 409);
+      }
+
+      const includedSignals = buildIncludedSignalMetadata(candidateSignals);
 
       const compiledAt = now.toISOString();
       const data: CompiledBriefData = {
         date,
         compiled_at: compiledAt,
-        signals: selectedSignals,
+        signals: candidateSignals,
         included_signal_ids: includedSignals.map((signal) => signal.signal_id),
         included_signals: includedSignals,
         candidate_count: candidateSignals.length,
-        overflow_count: Math.max(0, candidateSignals.length - MAX_INCLUDED_SIGNALS_PER_BRIEF),
+        overflow_count: 0,
       };
 
       return c.json({ ok: true, data } satisfies DOResult<CompiledBriefData>);
