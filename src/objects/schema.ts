@@ -655,3 +655,71 @@ export const MIGRATION_BEAT_CONSOLIDATION_SQL = [
   `UPDATE beats SET status = 'retired', updated_at = datetime('now')
    WHERE slug IN ('agent-economy', 'agent-skills', 'agent-social', 'agent-trading', 'deal-flow', 'distribution', 'governance', 'infrastructure', 'onboarding', 'security')`,
 ] as const;
+
+/**
+ * Migration 24 — Apr 7 brief amendment: align earnings with inscribed content.
+ *
+ * The 2026-04-07 brief was inscribed as
+ *   2d999d7fdcca97b36594f35be9ab98656c2c350a525c3a45062320a274016403i0
+ * using the original pre-void content (30 signals committed in the Apr 14
+ * child-inscription witness). Platform re-curated to a different 30 after
+ * the 2026-04-14 wholesale void, then re-compiled. Net result: on-chain
+ * content and platform `brief_signals` diverge on 14 of 30 signals.
+ *
+ * This migration aligns earnings with the on-chain record so payouts match
+ * what was inscribed:
+ *   - Void `brief_inclusion` earnings for the 14 re-curated signals not on-chain
+ *   - Un-void `brief_inclusion` earnings for the 14 witness signals on-chain
+ *
+ * Platform `brief_signals` + `signals.status` are left as-is (PR #500 has
+ * made them immutable after inscription). API callers continue to see the
+ * re-curated set at /api/brief/2026-04-07 — a known display asymmetry noted
+ * in the inscription ledger. The canonical editorial + payout record is the
+ * on-chain inscription.
+ *
+ * Pattern mirrors Migration 20 (Mar 28-29 amendment, #385).
+ * Guards: UPDATE-only, WHERE voided_at + payout_txid constraints make it
+ * idempotent and a no-op on anything already paid or already in the target state.
+ */
+export const MIGRATION_APR7_EARNINGS_SQL = [
+  // Void earnings for the 14 re-curated signals NOT on-chain
+  `UPDATE earnings SET voided_at = '2026-04-17T03:30:00Z'
+   WHERE reason = 'brief_inclusion'
+     AND voided_at IS NULL AND payout_txid IS NULL
+     AND reference_id IN (
+       '7461c677-4787-4443-9912-8aff059242e7',
+       'b98c19e7-ddbc-405a-8e22-b9f8c963d3fa',
+       'aa980f39-f937-4746-8361-06b95b6f0682',
+       '31ef1c93-38cb-4c22-a662-f1718171a801',
+       '45255856-3789-44d6-aaa9-5d2fbd93594a',
+       '7e3f593f-5bae-4ac3-8cd1-04ec6aa5e24f',
+       'add238d7-e236-47ad-aeb3-33115bbbd3bf',
+       '08f7f137-4659-48fc-b08f-1a20fac51175',
+       'f68acab8-6e37-4fb5-b940-31cb02c515d2',
+       '327a8d94-cdb6-4468-acd0-5b282bc93df0',
+       'e0476a19-e641-41c5-afea-f1d2fced4ef5',
+       '884a2ba5-0265-469e-a96e-373eab071e3a',
+       'e4bfa2c7-835d-4739-b67f-78147b10650e',
+       '9eba3aa2-04bb-4843-ab8e-e6a941c10e1e'
+     )`,
+  // Un-void earnings for the 14 witness signals that ARE on-chain
+  `UPDATE earnings SET voided_at = NULL
+   WHERE reason = 'brief_inclusion'
+     AND voided_at IS NOT NULL AND payout_txid IS NULL
+     AND reference_id IN (
+       '5ddd909b-6b33-43e8-97fe-045ee37689cd',
+       '4ad7834f-cb86-4f3e-ad5d-50532841d9b3',
+       'dcdb84f1-e1cb-4e73-b957-446807979521',
+       '3fce8150-8e5d-49b7-bc99-22a9211e9807',
+       'ca265e19-9715-4144-9efa-a270a399960a',
+       '26c81b2d-13af-4e27-abef-a9dfd6e40c69',
+       '7697182b-ef83-4ad6-97f1-d8703cd91665',
+       '9273780f-65b0-431f-9a74-66ca297504ae',
+       'bab2e5bc-8eaf-44c6-b186-ec7b9a7d9ff2',
+       '4f9593da-5b92-407b-92d6-7efb31daa21a',
+       '22d67962-bc69-4a7b-a5b8-57dc19be06be',
+       'f7043524-f77d-44af-811c-f93a46fa299e',
+       'd48a472f-fe11-4435-9eec-c9305e0f1795',
+       'bdb55bfd-f6f1-4db7-9424-42e23a8dc01d'
+     )`,
+] as const;
