@@ -626,7 +626,10 @@ export class NewsDO extends DurableObject<Env> {
       //       that differs from platform re-curated brief_signals by 14 of 30 signals.
       //   (b) Clear 8 dropped-mempool RBF payout_txid values (7 Mar 25 + 1 Mar 31)
       //       so curated-payout.ts can resend the victimized transfers.
-      // Both are UPDATE-only + idempotent, mirroring Migration 20 (#385).
+      //   (c) Mar 31 over-cap void — void 98 brief_inclusion earnings not in the curated
+      //       30 (from amended-2026-03-31.html); 29 already-paid stay untouched; 1
+      //       canonical unpaid becomes payable.
+      // All are UPDATE-only + idempotent, mirroring Migration 20 (#385).
       if (appliedVersion < 24) {
         for (const stmt of MIGRATION_APR7_EARNINGS_SQL) {
           try {

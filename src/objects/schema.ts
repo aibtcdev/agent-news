@@ -659,7 +659,7 @@ export const MIGRATION_BEAT_CONSOLIDATION_SQL = [
 /**
  * Migration 24 — Publisher payout reconciliation (Mar 25 → Apr 9 window).
  *
- * Two parts, both UPDATE-only + idempotent, mirroring the Mar 28-29 migration
+ * Three parts, all UPDATE-only + idempotent, mirroring the Mar 28-29 migration
  * pattern from #385:
  *
  * 1. Apr 7 brief amendment. Apr 7 was inscribed as
@@ -687,9 +687,19 @@ export const MIGRATION_BEAT_CONSOLIDATION_SQL = [
  *    in the operator's manifest (`db/payouts/track-b-payouts-manifest-*.md`)
  *    for the audit trail.
  *
+ * 3. Mar 31 over-cap void. The Mar 31 brief was inscribed with 120+ signals
+ *    (platform now shows 128 `brief_included`); policy honors the 30/day soft
+ *    promise, consistent with the Mar 28/29 amended-brief precedent. The
+ *    canonical 30 is derived from `db/briefs/amended-2026-03-31.html`. Voids
+ *    all `brief_inclusion` earnings for 2026-03-31 signals NOT in the curated
+ *    30. The 29 already-paid earnings stay untouched (WHERE payout_txid IS
+ *    NULL filter skips them). The 1 remaining canonical signal that is
+ *    currently unpaid stays both un-voided and unpaid — payable for the next
+ *    `curated-payout.ts` run, bringing the total to the canonical 30.
+ *
  * Guards: WHERE `voided_at IS NULL`, `payout_txid IS [NOT] NULL`, and explicit
- * txid match lists keep each UPDATE idempotent and a no-op once the target
- * state is reached.
+ * id / txid match lists keep each UPDATE idempotent and a no-op once the
+ * target state is reached.
  */
 export const MIGRATION_APR7_EARNINGS_SQL = [
   // Void earnings for the 14 re-curated signals NOT on-chain
@@ -749,5 +759,43 @@ export const MIGRATION_APR7_EARNINGS_SQL = [
        '5110050b6890ce056c4a43eefdcf1038067036337beee6537fe00d1b56c43d46',
        '11c95cb9c837d4e8da76dd0f23e03b13cf9c7b4590ffd42e2c36f176e0a4feea',
        'a6ad84d4a261448752256259ae9693db8b9e264537628b3fe1d242dedf1d233b'
+     )`,
+  // Void 98 Mar 31 over-cap brief_inclusion earnings (Part C).
+  // The Mar 31 brief was inscribed with 120+ signals (platform now shows 128
+  // brief_included); policy honors the 30/day soft promise, consistent with
+  // the Mar 28/29 amended-brief precedent (#385). Voids all brief_inclusion
+  // earnings for 2026-03-31 brief that are NOT in the curated 30 from
+  // `db/briefs/amended-2026-03-31.html`. The 29 already-paid stay untouched
+  // (payout_txid IS NULL filter skips them); the 1 unpaid canonical signal
+  // stays payable for the next payout run.
+  `UPDATE earnings SET voided_at = '2026-04-17T06:30:00Z'
+   WHERE reason = 'brief_inclusion'
+     AND voided_at IS NULL AND payout_txid IS NULL
+     AND reference_id IN (
+       'bb7366cc-93bb-4a8d-97a7-f3b5e10ff618','7d24fd64-3fb2-4491-a456-bcbb976f8427','288ffe90-3b4b-49f0-970d-8bdc3c58a067','7e635163-46ca-4cb2-9328-206b45aec249',
+       'c80a6e6b-9a21-421e-9fdc-de9e3ea32434','0d63b2db-9d69-4c13-bbd1-d0de53c8c0df','d8efa636-bcd3-4189-887c-f427273430eb','0a439b18-9912-4417-8774-3de399d59786',
+       '1c6d3572-ce80-46e1-8f08-2ab5873f9170','30f3e900-2657-49c6-ad7c-31461307b4ee','3284f64d-9542-47a9-a6e0-58a6bcba40dc','68ba30e2-4d5d-4b85-8a1f-4cfeba8dffa7',
+       '9c1bbafe-eb17-4789-bfec-d986ea8cfebb','bb2bc02c-01bb-4aab-9294-90b4758f6cca','a2a70776-1a11-4c69-b946-45794a15b5eb','c6afc91d-d7c4-427d-b079-c8cf3d138654',
+       '0d366df7-b8b6-493e-9870-fc5f53432aff','e7f5dbd3-5a2b-4686-8e0c-4316396d2a29','bf0f4f85-c182-4b90-b95e-e6e1e55703d5','2cf16a7d-dbba-4e84-82e9-86174b398538',
+       'd5c96d7a-85c2-44fd-9d1e-4ca709470cc9','68d03b6b-1d00-4937-ab77-88ccb39f8911','d06d7f3a-eff5-448a-ab23-335731c1e9d4','496a8085-31c9-4fbb-981f-d3c84a6253dc',
+       '560b41d1-ec99-487b-a866-915e471a232a','40d677fc-dbf0-4169-ace2-338da3de5c77','cb201da8-3997-468a-9fb7-f3eda03b44fa','8d4a28bb-4024-4c95-8d5c-07de8e253018',
+       'b3681ea3-e0e8-4b22-953f-adc44d3888a7','f1310ec0-c2eb-426e-be31-fc0554324086','bff43a87-3138-4d31-ba7f-1d338fe2ceeb','a9236c33-ce42-468a-bfe7-ebb98335acdd',
+       '16f51aec-c11c-4c21-970b-ea9d197276eb','2c46bde8-e2ae-4dea-8bd4-1ae3924dce61','7e594145-4179-437b-aec6-9e50c22ad525','5e224373-948b-45a4-96c5-2c4973ef2564',
+       '859f492f-151a-4873-856c-9eaee2f7fe9c','a4803c5d-ecac-4720-9991-8638d7ddc666','1c97e525-1adf-4812-a91a-77b14ce286cc','105e4a7e-df63-4162-aab4-8fcfa5e181d4',
+       'f0425184-3621-4539-910e-a4405b744699','764592a8-c329-416b-a75e-0f3975bd3c7e','2a4f7acf-42fd-4c13-b018-082c2183e503','d91e1559-74d4-4b0e-8b16-ff8fad82d736',
+       'a460dff2-c5f9-4cb2-ac8f-61e80b7c1816','12885211-b8f4-45c6-9475-279ee2acb463','d0109b20-336c-45a5-9deb-88a476df2459','7cb596a5-6e7c-47ea-b8a3-a61d245c0f8b',
+       '6d3eb6ba-dbd0-47bc-aee6-9e0a891f6cae','711e1515-e0c6-408e-bdc4-09149e4322ad','7fae725a-a69e-4d43-b410-8334fcd2b6b2','69e1be7b-c24e-4970-a961-d49919c8baf3',
+       '36c61379-2964-4529-92b9-5abc5f4cf974','1c96a5b8-326c-4d74-ae7f-afe82d8ab236','8bc6434d-5f6c-4a9f-b4f7-1291a85c0f0a','f1a03ae0-88fd-4b47-96d2-15c673bca231',
+       '67f060a7-239e-40d4-9be4-d64c0fbdd487','091081ba-405b-42e9-992c-e8fa4ec7770b','ac8d0298-18c3-491a-bbe0-635d24b1d360','98095128-4174-46b7-a998-d044533db0c7',
+       'e9cb3dc9-23f4-46cf-b301-c8a6bcd63ba6','9255ffca-61d2-400a-8a10-4b3131ae7d6c','afb81e36-68dd-40ec-b8b9-f6e9977992d4','60ece995-2ef2-439a-811f-3e66baf72bf8',
+       '02a11068-7942-44da-80c7-6497ab5c8e68','4c47addc-34d9-4886-9d25-dc062923833f','367085ed-cc37-439f-bf69-beca6fb274c8','9ebdd204-e7b7-4442-ad5d-16efdf93da24',
+       'cfa6715a-7cc3-4b37-b6d4-16279dc12de5','ff0e0144-15ef-41e6-ab43-8ef8cb8cc189','0caed800-c52d-4c8a-8235-38d8a9f75999','f67ceeb6-4819-42f3-b6fa-c3accb815e5d',
+       '707ed2ff-cabd-42a7-8b15-60e8bdc9e76c','2ce53718-3519-483d-b391-7e97bcc89e10','72a0b305-8930-4dae-b472-ebb0c3607d84','954b704e-a889-410c-8ef2-c57f93535c8b',
+       '74a33282-fdee-41e7-aefa-b5f8125c61ad','69d7b3dc-4b1a-4b51-a161-6ab6cae4341c','e1305d60-5766-40f8-aeee-ea89ab8c57dd','daa94b06-2cfe-4405-892d-4e298d3eee22',
+       'd7ec0243-beb8-40b0-8814-89035e1f89f4','98f0b6c4-1989-4d47-b78f-e24be3ad6cb4','b8c8b7d4-1635-4502-ba00-eccc0daac84a','513300b2-7e40-4e77-95b3-0f38fd145d69',
+       '333d915d-93f1-44b6-a029-61eba3f83db4','8e807e3d-3689-46f2-a51b-5ac0d7b6a679','ee0a869e-4e02-4d24-8b59-358360d30dfa','2edbaa0c-396c-44f9-8f3f-c75822fe8261',
+       'deebae64-7a5d-40af-ae8f-6ce95d3227bd','afc87700-cd1a-4f4e-9d37-2b4e2f23fc94','aff965cd-50ca-419d-9560-4d7627189cbd','d2a82cc5-7b9d-4ebc-ac30-4c98b1ae969a',
+       '7ffa429e-55a4-4d4d-8904-1f0ad791f403','fe21253c-af18-4bc5-a9b8-f52bc1f0ea31','c9381a31-5663-4035-b93e-9198e830d63e','08c103ba-4dcb-4e98-ad62-12376391671e',
+       'f96dc58f-7ea5-4932-91e4-9281334b0ea5','27664756-162d-4573-af46-3960f2f0e21f'
      )`,
 ] as const;
