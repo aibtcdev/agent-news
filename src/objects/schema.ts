@@ -657,29 +657,39 @@ export const MIGRATION_BEAT_CONSOLIDATION_SQL = [
 ] as const;
 
 /**
- * Migration 24 — Apr 7 brief amendment: align earnings with inscribed content.
+ * Migration 24 — Publisher payout reconciliation (Mar 25 → Apr 9 window).
  *
- * The 2026-04-07 brief was inscribed as
- *   2d999d7fdcca97b36594f35be9ab98656c2c350a525c3a45062320a274016403i0
- * using the original pre-void content (30 signals committed in the Apr 14
- * child-inscription witness). Platform re-curated to a different 30 after
- * the 2026-04-14 wholesale void, then re-compiled. Net result: on-chain
- * content and platform `brief_signals` diverge on 14 of 30 signals.
+ * Two parts, both UPDATE-only + idempotent, mirroring the Mar 28-29 migration
+ * pattern from #385:
  *
- * This migration aligns earnings with the on-chain record so payouts match
- * what was inscribed:
- *   - Void `brief_inclusion` earnings for the 14 re-curated signals not on-chain
- *   - Un-void `brief_inclusion` earnings for the 14 witness signals on-chain
+ * 1. Apr 7 brief amendment. Apr 7 was inscribed as
+ *      2d999d7fdcca97b36594f35be9ab98656c2c350a525c3a45062320a274016403i0
+ *    using the original pre-void content (30 signals committed in the Apr 14
+ *    child-inscription witness). Platform re-curated to a different 30 after
+ *    the 2026-04-14 wholesale void, then re-compiled. Net result: on-chain
+ *    content and platform `brief_signals` diverge on 14 of 30 signals.
  *
- * Platform `brief_signals` + `signals.status` are left as-is (PR #500 has
- * made them immutable after inscription). API callers continue to see the
- * re-curated set at /api/brief/2026-04-07 — a known display asymmetry noted
- * in the inscription ledger. The canonical editorial + payout record is the
- * on-chain inscription.
+ *    Reconcile earnings with the on-chain record:
+ *      - Void `brief_inclusion` earnings for the 14 re-curated signals not on-chain
+ *      - Un-void `brief_inclusion` earnings for the 14 witness signals on-chain
  *
- * Pattern mirrors Migration 20 (Mar 28-29 amendment, #385).
- * Guards: UPDATE-only, WHERE voided_at + payout_txid constraints make it
- * idempotent and a no-op on anything already paid or already in the target state.
+ *    Platform `brief_signals` + `signals.status` are left as-is (PR #500 has
+ *    made them immutable after inscription). API callers continue to see the
+ *    re-curated set at /api/brief/2026-04-07 — a known display asymmetry noted
+ *    in the inscription ledger. Canonical editorial + payout record = on-chain.
+ *
+ * 2. RBF victim `payout_txid` clear. 8 sBTC transfers were evicted from the
+ *    mempool during nonce cleanup (7 on Mar 25, 1 on Mar 31). Their earnings
+ *    still carry the dropped `payout_txid`, which blocks `curated-payout.ts`
+ *    from re-sending (the script treats non-null txid as "already paid").
+ *    Clear those 8 txids so the next payout run can resend; new valid txids
+ *    will PATCH over the cleared rows after send. Dropped txids are preserved
+ *    in the operator's manifest (`db/payouts/track-b-payouts-manifest-*.md`)
+ *    for the audit trail.
+ *
+ * Guards: WHERE `voided_at IS NULL`, `payout_txid IS [NOT] NULL`, and explicit
+ * txid match lists keep each UPDATE idempotent and a no-op once the target
+ * state is reached.
  */
 export const MIGRATION_APR7_EARNINGS_SQL = [
   // Void earnings for the 14 re-curated signals NOT on-chain
@@ -721,5 +731,23 @@ export const MIGRATION_APR7_EARNINGS_SQL = [
        'f7043524-f77d-44af-811c-f93a46fa299e',
        'd48a472f-fe11-4435-9eec-c9305e0f1795',
        'bdb55bfd-f6f1-4db7-9424-42e23a8dc01d'
+     )`,
+  // Clear 8 dropped-mempool RBF payout_txid values so curated-payout.ts can
+  // resend. 7 from Mar 25 (nonces 22-28) + 1 from Mar 31 (nonce 589).
+  // Each txid may back multiple earning rows (a single transfer paid that
+  // correspondent's full daily batch); the WHERE clause matches by exact txid
+  // so the update is safe regardless of row fan-out.
+  `UPDATE earnings SET payout_txid = NULL
+   WHERE reason = 'brief_inclusion'
+     AND voided_at IS NULL
+     AND payout_txid IN (
+       'f2b6730486e888d3d3bfdad11716f84ddf7f2b938c2a39422c4e7fdfbb9bfad2',
+       'b2aa583eac81c0d4053b673e8f914b0a7caa271f19a6ce7e3e385af5afaefd17',
+       '2fb330f230b4e6e5dc384f084228002499c2615fe0822bc96f7fcb76235842fb',
+       '0a43bde0f675ea37bb19f6a7b5b6bd9e0044213e63332044dbdfde8c3421df31',
+       '3105014935d0b133856207e37241d4afbda7d1b9586c8e45400e928836013ffd',
+       '5110050b6890ce056c4a43eefdcf1038067036337beee6537fe00d1b56c43d46',
+       '11c95cb9c837d4e8da76dd0f23e03b13cf9c7b4590ffd42e2c36f176e0a4feea',
+       'a6ad84d4a261448752256259ae9693db8b9e264537628b3fe1d242dedf1d233b'
      )`,
 ] as const;

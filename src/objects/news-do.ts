@@ -288,7 +288,7 @@ export class NewsDO extends DurableObject<Env> {
     // 21 = Leaderboard composite indexes — accelerate 30-day rolling window queries (#319)
     // 22 = Beat consolidation — 12 → 3 beats, retire old beats, create aibtc-network (#423)
     // 23 = Streak UTC migration (backfill last_signal_date from actual signal timestamps)
-    // 24 = Apr 7 brief amendment — align earnings with inscribed content (#502)
+    // 24 = Publisher payout reconciliation — Apr 7 amendment + clear 8 RBF-destroyed payout_txid (#502)
     const CURRENT_MIGRATION_VERSION = 24;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
@@ -621,10 +621,12 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      // Apr 7 brief amendment — align earnings with inscribed content (#502).
-      // The 2026-04-07 brief was inscribed as 2d999d7f…i0 with pre-void content
-      // (witness from 2026-04-14); platform re-curated to a different 30 post-void.
-      // Mirrors Migration 20 (Mar 28-29 amendment, #385). UPDATE-only + idempotent.
+      // Publisher payout reconciliation (#502):
+      //   (a) Apr 7 amendment — align earnings with 2d999d7f…i0 (pre-void witness content)
+      //       that differs from platform re-curated brief_signals by 14 of 30 signals.
+      //   (b) Clear 8 dropped-mempool RBF payout_txid values (7 Mar 25 + 1 Mar 31)
+      //       so curated-payout.ts can resend the victimized transfers.
+      // Both are UPDATE-only + idempotent, mirroring Migration 20 (#385).
       if (appliedVersion < 24) {
         for (const stmt of MIGRATION_APR7_EARNINGS_SQL) {
           try {
