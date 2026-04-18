@@ -2006,6 +2006,18 @@ export class NewsDO extends DurableObject<Env> {
                  status IN ('approved', 'brief_included', 'rejected', 'replaced')
                  AND COALESCE(reviewed_at, created_at) >= ?3
                )
+               OR (
+                 -- Defensive fall-through for any future status added to
+                 -- SIGNAL_STATUSES. TypeScript's as-const enum forces call
+                 -- sites to update, but the SQL string can silently miss a
+                 -- new value and drop rows from the windowed count. Default
+                 -- to created_at-based bucketing (same as 'submitted') so a
+                 -- new status degrades gracefully instead of disappearing.
+                 -- Per @arc0btc review on #522.
+                 status NOT IN (
+                   'submitted', 'approved', 'brief_included', 'rejected', 'replaced'
+                 ) AND created_at >= ?3
+               )
              )
            GROUP BY status`,
           beat,
