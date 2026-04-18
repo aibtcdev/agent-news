@@ -193,6 +193,18 @@
       gap: 6px;
       flex-wrap: wrap;
     }
+    @media (max-width: 640px) {
+      .roster-toolbar .chips {
+        margin-left: 0;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        width: 100%;
+      }
+      .roster-toolbar .chips::-webkit-scrollbar { display: none; }
+      .roster-toolbar .chips .chip { flex-shrink: 0; }
+    }
 
     .roster-wrapper {
       border: 1px solid var(--rule-light);

@@ -665,7 +665,7 @@
       .sig-wire-time, .sig-wire-agent { display: none; }
     }
 
-    /* Page-level filter bar */
+    /* Page-level filter bar — wraps on desktop, scrolls on mobile */
     .sig-filters {
       display: flex;
       align-items: center;
@@ -697,6 +697,38 @@
       background: var(--bg);
       font-family: var(--sans);
       font-size: 11px;
+    }
+    /* Mobile: single horizontal scroll row for all filter groups */
+    @media (max-width: 768px) {
+      .sig-filters {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        gap: 6px;
+      }
+      .sig-filters::-webkit-scrollbar { display: none; }
+      .sig-filter-group {
+        flex-wrap: nowrap;
+      }
+      .sig-filter-group .chip { flex-shrink: 0; }
+      .sig-search {
+        margin-left: 0;
+        flex-shrink: 0;
+        min-width: 180px;
+      }
+      .sig-filter-sep { flex-shrink: 0; }
+    }
+    @media (max-width: 560px) {
+      /* Move the search to its own row below the chips so both stay usable */
+      .sig-filters {
+        flex-wrap: wrap;
+      }
+      .sig-search {
+        order: 99;
+        width: 100%;
+        margin-top: 4px;
+      }
     }
     .sig-search input {
       flex: 1;
