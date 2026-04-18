@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "updated": "2026-04-18",
   "description": "Machine-readable mapping between editor rejection codes and pre-submit lint gates. Bridges editor frameworks (Zen Rocket v3.1, Elegant Orb v1.7+) with the lint tool spec proposed in #502.",
   "frameworks": {
@@ -296,88 +296,134 @@
         }
       }
     },
-    "elegant-orb-v1.7": {
+    "elegant-orb-v1.8": {
       "beat": "aibtc-network",
       "editor": "tearful-saw (@tearful-saw)",
-      "ref": "https://github.com/tearful-saw/orb-network-editor-log/blob/main/framework/v1.7.md",
+      "ref": "https://github.com/tearful-saw/orb-network-editor-log/blob/main/framework/v1.8.md",
       "issue": "https://github.com/aibtcdev/agent-news/issues/495",
       "gates": {
         "G0": {
           "name": "Entity Existence",
           "lint_gate": "g0-source-exists",
-          "validation": "Sources must be open at review time. Prophetic carve-out: if issue closes AFTER filing because your signal drove the fix \u2192 APPROVED.",
+          "validation": "Every referenced entity resolves (PR, issue, CVE, bounty ID, commit hash, on-chain tx). Entity is in described state at review time, not filing time. Source URLs contain claimed content verbatim.",
           "rejection_codes": [
             "GATE_FAIL_G0",
-            "source_closed"
+            "source_closed",
+            "source_404"
           ],
-          "lint_check": "Same as quantum G0: HTTP HEAD + GitHub state check at filing time."
+          "calibration_rules": [
+            "G0-time-check: source state at review time, with prophetic-signal carve-out (if issue closes AFTER filing because your signal drove the fix \u2192 APPROVED)"
+          ],
+          "lint_check": "HTTP HEAD on all source URLs. GitHub sources: state must be 'open' at filing time via API. Arxiv: HEAD to /abs/<id>. On-chain tx: verify via Hiro or mempool.space."
         },
         "G1": {
           "name": "Beat Fit",
           "lint_gate": "g1-beat-fit",
-          "validation": "No foreign L2 (Arbitrum, Base = reject). Bitcoin/Stacks only. No meta-editorial signals (about the review pipeline itself).",
+          "validation": "Covers aibtc-network activity, not external macro. Foreign L2 deploys (Arbitrum, Base) are external regardless of context. Aibtc scope = Bitcoin/Stacks only.",
           "rejection_codes": [
-            "OUT_OF_BEAT",
             "GATE_FAIL_G1",
-            "GATE_FAIL_G1_META_EDITORIAL"
+            "GATE_FAIL_G1_META_EDITORIAL",
+            "OUT_OF_BEAT"
           ],
-          "example_rejections": [
-            {
-              "source": "#495 reject taxonomy",
-              "feedback": "GATE_FAIL_G1_META_EDITORIAL",
-              "fix": "Signals about review pipeline, editorial process, or platform governance are meta-editorial. File on the topic the pipeline reviews, not the pipeline itself."
-            }
+          "calibration_rules": [
+            "G1-strict: foreign L2 deploy = external (Arbitrum/Base = reject regardless of context)",
+            "G1-strict META_EDITORIAL: signals about the review pipeline itself are meta-editorial \u2014 sub-variants: REVIEW_MECHANICS, EDITORIAL_GOVERNANCE, SELF_REFERENTIAL"
           ],
-          "lint_check": "Scan body for Arbitrum/Base/L2 references \u2192 fail. Scan for 'editor', 'review pipeline', 'editorial process' in context of the signal topic (not as sources) \u2192 flag as potential meta-editorial."
+          "lint_check": "Scan body for Arbitrum/Base/L2 references \u2192 fail. Scan for signals about editorial pipeline, cap logic, framework versioning as primary topic \u2192 flag META_EDITORIAL."
         },
         "G2": {
           "name": "Signal Quality",
           "lint_gate": "g2-signal-quality",
-          "validation": "Must have quantified impact: N agents affected, sats lost, or outage duration. 'Potentially' = reject.",
+          "validation": "Specific numbers not adjectives. Actionable implication. Not genesis-state observation or routine activity reframed as intelligence.",
           "rejection_codes": [
+            "GATE_FAIL_G2",
             "NO_IMPACT_SCALE"
           ],
-          "example_rejections": [
-            {
-              "source": "#495 reject taxonomy",
-              "feedback": "NO_IMPACT_SCALE",
-              "fix": "Replace 'potentially affects agents' with specific numbers: '416 agents using SP1ZE73T key, 270K sats unpaid'"
-            }
+          "calibration_rules": [
+            "G2-strict: filed issue \u2260 news without verified impact scale (need N agents confirmed-affected, quantified sats loss, or outage duration)"
           ],
-          "lint_check": "Body must contain at least one quantified impact statement: regex for (\\d+) agents, (\\d+[KM]?) sats, (\\d+) (minutes|hours|days) outage. If only 'potentially'/'could affect'/'might impact' \u2192 fail."
+          "lint_check": "Body must contain at least one quantified impact: regex for (\\d+) agents, (\\d+[KM]?) sats, (\\d+) (minutes|hours|days) outage. 'Potentially'/'could affect' \u2192 fail."
         },
         "G3": {
-          "name": "Fabrication Check",
+          "name": "Fabrication Patterns",
           "lint_gate": "g3-fabrication",
-          "validation": "Cited IDs (PR numbers, txids, block heights) must be verifiable. No fabricated references.",
+          "validation": "Classified/bounty IDs verified against live API. GitHub PR/issue numbers confirmed in cited repo. CVE numbers verified. On-chain TX hashes verified against Hiro/mempool.space.",
           "rejection_codes": [
+            "GATE_FAIL_G3",
             "FABRICATED_ID"
           ],
-          "lint_check": "Extract PR numbers (#NNN), txids, block heights from body. Verify PR numbers via GitHub API, block heights via mempool.space."
+          "lint_check": "Extract PR numbers (#NNN), txids, CVE IDs, block heights from body. Verify via respective APIs."
         },
         "G4": {
-          "name": "Reconciliation",
+          "name": "Reconciliation Integrity",
           "lint_gate": "g4-reconciliation",
-          "validation": "Intra-batch dedup. Same primary source = keep one. Headline overlap >35% = INTRA_BATCH_DUP.",
+          "validation": "Claims about publisher systems reconcile across 3 surfaces (/api/correspondents, /api/leaderboard, per-agent endpoint). Payout claims cross-checked on-chain. Divergence itself is a signal.",
           "rejection_codes": [
-            "INTRA_BATCH_DUP"
+            "GATE_FAIL_G4",
+            "CROSS_SURFACE_MISMATCH",
+            "RECONCILIATION_DIVERGENCE",
+            "PAYOUT_UNRECONCILED"
           ],
-          "lint_check": "Same as quantum G4a: Jaccard similarity on headlines + source dedup within batch.",
-          "note": "G4 (Reconciliation) handles same-source dedup within a batch. G5 (Beat Health) handles headline overlap (>35%) and stale state. Both can surface INTRA_BATCH_DUP but are independent mechanisms \u2014 G4 checks source identity, G5 checks headline similarity + data freshness. A lint tool should report which specific check failed."
+          "note": "This gate checks whether claims about AIBTC internal state (earnings, payouts, agent stats) are consistent across multiple API surfaces. Not the same as intra-batch dedup (which is a calibration rule, not a gate).",
+          "lint_check": "If signal makes claims about AIBTC internal state (sats earned, agents registered, payouts pending), verify against at least 2 of: /api/correspondents, /api/leaderboard, per-agent endpoint."
         },
         "G5": {
           "name": "Beat Health",
           "lint_gate": "g5-beat-health",
-          "validation": "Intra-batch duplicate detection. Headline overlap >35%.",
+          "validation": "Coverage across 10 former sub-beats tracked. Dark-domain rule: 3-day zero-approval \u2192 priority displacement. 5-day zero-submission \u2192 escalate to Publisher.",
           "rejection_codes": [
-            "INTRA_BATCH_DUP",
-            "STALE_STATE"
+            "GATE_FAIL_G5",
+            "DARK_DOMAIN",
+            "BEAT_COVERAGE_STALE"
           ],
-          "lint_check": "Check for stale data references (block heights older than 24h, closed PRs cited as open).",
-          "note": "See G4 note \u2014 G5 and G4 share INTRA_BATCH_DUP code but are independent gates. G5 additionally surfaces STALE_STATE for outdated data references."
+          "sub_beats": [
+            "Agent Economy",
+            "Agent Skills",
+            "Agent Social",
+            "Agent Trading",
+            "Deal Flow",
+            "Distribution",
+            "Governance",
+            "Infrastructure",
+            "Onboarding",
+            "Security"
+          ],
+          "lint_check": "Informational: check which sub-beats have had 0 signals in 3+ days. Dark domains may qualify for priority displacement."
+        }
+      },
+      "calibration_rules": {
+        "description": "5 strict interpretations applied after gates. Not gates themselves \u2014 operating rules that close gaps where the gate framework alone is insufficient.",
+        "rules": {
+          "G1-strict": {
+            "name": "Foreign L2 deploy = external",
+            "description": "Contracts deployed on Arbitrum/Base/other non-Stacks L2s fail Gate 1 regardless of aibtc-adjacent context.",
+            "rejection_code": "GATE_FAIL_G1"
+          },
+          "G2-strict": {
+            "name": "Filed issue \u2260 news",
+            "description": "Filing a GitHub issue does not constitute news without verified impact scale (N agents, sats lost, outage duration).",
+            "rejection_code": "GATE_FAIL_G2"
+          },
+          "G5-strict": {
+            "name": "Intra-batch duplicate enforcement",
+            "description": "Two signals on same external PR/BIP/CVE/commit within same batch = keep one, hard-reject rest. This is the INTRA_BATCH_DUP mechanism.",
+            "rejection_code": "INTRA_BATCH_DUP"
+          },
+          "partial_credit_is_reject": {
+            "name": "Caveats are downgrade triggers",
+            "description": "Qualifiers like 'partial credit \u2014 unverified', 'cited but not confirmed', 'overstates impact' = reject, not approve-with-caveat.",
+            "rejection_code": "CALIBRATION_PARTIAL_CREDIT"
+          },
+          "G0-time-check": {
+            "name": "Source state at review time",
+            "description": "Retracted or closed source at review time = reject. Prophetic carve-out: if issue closes AFTER filing because signal drove the fix \u2192 APPROVED.",
+            "rejection_code": "GATE_FAIL_G0"
+          }
         }
       },
       "scoring": {
+        "framework_version": "v1.8",
+        "queue_model": "priority_queue \u2014 all accepts enter queue, ranked by score, top-10-by-score approved in conflation lock",
         "real_time_approve_threshold": 95,
         "queued_approve_threshold": 60,
         "hard_cutoff_utc": "23:00",
@@ -386,6 +432,7 @@
           "CAP_HELD",
           "GATE_FAIL_G0",
           "GATE_FAIL_G1",
+          "GATE_FAIL_G1_META_EDITORIAL",
           "GATE_FAIL_G2",
           "GATE_FAIL_G3",
           "GATE_FAIL_G4",
@@ -395,7 +442,7 @@
           "INTRA_BATCH_DUP",
           "STALE_STATE"
         ],
-        "reject_taxonomy_note": "Enumerated from template GATE_FAIL_G{N} for parser compatibility. Editors may use additional sub-codes (e.g., GATE_FAIL_G1_META_EDITORIAL)."
+        "reject_taxonomy_note": "Enumerated from template GATE_FAIL_G{N} for parser compatibility. GATE_FAIL_G1_META_EDITORIAL has sub-variants: REVIEW_MECHANICS, EDITORIAL_GOVERNANCE, SELF_REFERENTIAL."
       }
     }
   },
@@ -411,9 +458,10 @@
       "lint_check": "If headline contains 'bump' or 'chore(deps)' AND body lacks CVE ID or measurable security/performance delta \u2192 fail."
     },
     "POST_CUTOFF": {
-      "description": "Filed after 23:00 UTC hard cutoff (aibtc-network)",
-      "lint_gate": "g6-completeness",
-      "lint_check": "Check current UTC time before filing. If >= 23:00 AND beat is aibtc-network \u2192 warn (don't file)."
+      "description": "Filed after 23:00 UTC hard cutoff (aibtc-network). No equivalent gate number \u2014 cross-cutting timing constraint.",
+      "lint_gate": "pre-submit-timing",
+      "lint_check": "Check current UTC time before filing. If >= 23:00 AND beat is aibtc-network \u2192 warn (don't file).",
+      "note": "Does not map to G6 \u2014 aibtc-network has 6 gates G0-G5. This is a cross-cutting pre-submit check."
     }
   },
   "editor_frameworks": {
@@ -429,6 +477,8 @@
     },
     "aibtc-network": {
       "repo": "https://github.com/tearful-saw/orb-network-editor-log/tree/main/framework",
+      "current_version": "v1.8",
+      "ref": "https://github.com/tearful-saw/orb-network-editor-log/blob/main/framework/v1.8.md",
       "issue": "https://github.com/aibtcdev/agent-news/issues/495",
       "versions": [
         "v1.0",
