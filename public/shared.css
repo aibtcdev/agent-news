@@ -887,20 +887,25 @@ mark, .hl {
   border-radius: 2px;
 }
 
-/* ═══ TOPNAV RESPONSIVE ═══ */
+/* ═══ TOPNAV RESPONSIVE (mobile-first) ═══ */
 @media (max-width: 768px) {
   .topnav-strip {
-    flex-wrap: wrap;
-    gap: 6px;
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow: hidden;
   }
   .topnav-strip-left,
   .topnav-strip-right {
     gap: 10px;
+    min-width: 0;
+    flex-shrink: 1;
   }
+  .topnav-strip-left { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .topnav-strip .volno { display: none; }
   .topnav-sections-inner {
     overflow-x: auto;
     scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
   }
   .topnav-sections-inner::-webkit-scrollbar { display: none; }
   .topnav-sections-inner a {
@@ -910,31 +915,61 @@ mark, .hl {
   .topnav-utility {
     gap: 6px;
     padding: 8px var(--page-padding);
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
   }
+  .topnav-utility::-webkit-scrollbar { display: none; }
+  .topnav-utility .chip { flex-shrink: 0; }
   .topnav-search {
     min-width: 140px;
+    flex-shrink: 0;
   }
-}
-
-@media (max-width: 640px) {
+  /* Masthead tightens on mobile */
+  .topnav-masthead { padding: 14px var(--page-padding) 4px; }
   .topnav-masthead-title {
-    font-size: 36px;
+    font-size: clamp(32px, 8vw, 42px);
     letter-spacing: 0.04em;
   }
   .topnav-masthead-tagline {
     font-size: 9px;
     letter-spacing: 0.14em;
   }
+}
+
+@media (max-width: 640px) {
+  .topnav-strip { font-size: 10px; padding: 5px var(--page-padding); }
+  .topnav-strip .date { letter-spacing: 0.06em; }
+  /* On very small screens drop the weather to keep the LIVE counter + date on one row */
+  .topnav-strip .weather { display: none; }
+  .topnav-wallet { display: none; }
+  .topnav-masthead-title {
+    font-size: clamp(26px, 9vw, 36px);
+    letter-spacing: 0.03em;
+  }
+  .topnav-masthead-tagline { font-size: 8px; }
   .topnav-sections-inner a {
     font-size: 10px;
-    padding: 8px 10px;
-    letter-spacing: 0.12em;
+    padding: 9px 12px;
+    letter-spacing: 0.1em;
   }
-  .topnav-strip { font-size: 9px; }
-  .topnav-strip .weather { display: none; }
   .ticker-inner { font-size: 10px; padding: 5px var(--page-padding); gap: 10px; }
   .ticker-label { font-size: 9px; letter-spacing: 0.14em; }
+  .ticker-refresh { display: none; }
 }
+
+/* Share the same scroll pattern with page-level filter bars */
+.chip-row--scrollable {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.chip-row--scrollable::-webkit-scrollbar { display: none; }
+.chip-row--scrollable .chip { flex-shrink: 0; }
 
 /* ── Signal detail modal ── */
 .signal-modal-overlay {
