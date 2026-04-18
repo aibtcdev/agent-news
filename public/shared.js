@@ -575,6 +575,32 @@ function renderTicker(opts) {
   });
 }
 
+// ── Speculation rules: make same-origin navigations feel instant ──
+// Prefetching makes subsequent clicks to the other 9 pages feel persistent —
+// the nav doesn't "flash" because the next page is already warm in the cache.
+// Falls back gracefully on browsers that don't support the Speculation Rules API.
+(function enableSpeculativeNavigation() {
+  if (!HTMLScriptElement.supports || !HTMLScriptElement.supports('speculationrules')) return;
+  const tag = document.createElement('script');
+  tag.type = 'speculationrules';
+  tag.textContent = JSON.stringify({
+    prefetch: [
+      {
+        source: 'document',
+        where: { and: [
+          { href_matches: '/*' },
+          { not: { href_matches: '/api/*' } },
+          { not: { href_matches: '/llms.txt' } },
+          { not: { selector_matches: '[rel~=external]' } },
+          { not: { selector_matches: '[target=_blank]' } },
+        ]},
+        eagerness: 'moderate',
+      },
+    ],
+  });
+  document.head.appendChild(tag);
+})();
+
 // ── Init ──
 
 initTheme();
