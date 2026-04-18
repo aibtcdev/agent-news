@@ -13,25 +13,52 @@
           "name": "Source Existence Verification",
           "lint_gate": "g0-source-exists",
           "validation": "HTTP HEAD on all source URLs; GitHub sources must be state:open at review time; arxiv papers verified via HEAD",
-          "rejection_codes": ["source_verification", "source_closed", "source_404"],
+          "rejection_codes": [
+            "source_verification",
+            "source_closed",
+            "source_404"
+          ],
           "example_rejections": [
             {
               "signal_id": "f9df8db1-8278-44f4-8855-11f84f8569df",
               "date": "2026-04-18",
-              "feedback": "source_verification: signal cites specific figures but all sources are homepage-level — need at least one specific API/page URL to verify data",
+              "feedback": "source_verification: signal cites specific figures but all sources are homepage-level \u2014 need at least one specific API/page URL to verify data",
               "fix": "Replace homepage URLs (github.com/org/repo) with specific endpoints: commit URLs, raw file links, API endpoints"
             }
           ],
-          "lint_check": "For each source.url: HTTP HEAD request. If 404/timeout → fail. For github.com URLs: extract owner/repo and check state via API. For arxiv.org: HEAD request to /abs/<id>."
+          "lint_check": "For each source.url: HTTP HEAD request. If 404/timeout \u2192 fail. For github.com URLs: extract owner/repo and check state via API. For arxiv.org: HEAD request to /abs/<id>."
         },
         "G1": {
           "name": "Source Verifiability",
           "lint_gate": "g0-approved-domain",
           "validation": "At least 1 source from approved domain list",
-          "approved_domains": ["github.com", "arxiv.org", "nist.gov", "ietf.org", "mempool.space", "blockstream.info", "hiro.so", "stacks.co", "sec.gov", "bis.org", "nict.go.jp", "eprint.iacr.org", "bitcoinops.org"],
-          "approved_tlds": [".gov", ".edu", ".ac.uk", ".ac.jp"],
-          "banned_domains": ["aibtc.com/api/health"],
-          "rejection_codes": ["source_tier: 3"],
+          "approved_domains": [
+            "github.com",
+            "arxiv.org",
+            "nist.gov",
+            "ietf.org",
+            "mempool.space",
+            "blockstream.info",
+            "hiro.so",
+            "stacks.co",
+            "sec.gov",
+            "bis.org",
+            "nict.go.jp",
+            "eprint.iacr.org",
+            "bitcoinops.org"
+          ],
+          "approved_tlds": [
+            ".gov",
+            ".edu",
+            ".ac.uk",
+            ".ac.jp"
+          ],
+          "banned_domains": [
+            "aibtc.com/api/health"
+          ],
+          "rejection_codes": [
+            "source_tier: 3"
+          ],
           "example_rejections": [
             {
               "signal_id": "9e58081a-1090-43b9-8687-059bc707a8df",
@@ -40,36 +67,78 @@
               "fix": "Add 2+ tier-1 sources. Score difference: 1 source = 17pts, 2+ sources = 25pts (8pt gap = pass/fail difference)"
             }
           ],
-          "lint_check": "For each source.url: extract domain. Must match at least one approved domain or approved TLD. Banned domains → fail. Dashboard URLs (quantum-power-map) are context-only, never evidence."
+          "lint_check": "For each source.url: extract domain. Must match at least one approved domain or approved TLD. Banned domains \u2192 fail. Dashboard URLs (quantum-power-map) are context-only, never evidence."
         },
         "G2": {
           "name": "Narrative Discipline (Anti-Hype)",
           "lint_gate": "g2-anti-hype",
           "validation": "No hype patterns. 2+ matches trigger rejection.",
-          "hype_patterns": ["to the moon", "going parabolic", "explosive growth", "this changes everything", "nobody is talking about", "guaranteed", "can't lose", "free money", "revolutionary", "groundbreaking"],
-          "rejection_codes": ["hype_detected"],
-          "lint_check": "Case-insensitive regex scan of body + headline against hype_patterns list. 2+ matches → fail. 'revolutionary'/'groundbreaking' only fail if not accompanied by specific technical substantiation."
+          "hype_patterns": [
+            "to the moon",
+            "going parabolic",
+            "explosive growth",
+            "this changes everything",
+            "nobody is talking about",
+            "guaranteed",
+            "can't lose",
+            "free money",
+            "revolutionary",
+            "groundbreaking"
+          ],
+          "rejection_codes": [
+            "hype_detected"
+          ],
+          "lint_check": "Case-insensitive regex scan of body + headline against hype_patterns list. 2+ matches \u2192 fail. 'revolutionary'/'groundbreaking' only fail if not accompanied by specific technical substantiation."
         },
         "G3": {
           "name": "Domain Relevance",
           "lint_gate": "g3-domain-relevance",
           "validation": "Content must intersect at least one quantum-relevance domain",
           "domains": {
-            "bitcoin-security": ["bitcoin", "btc", "ecdsa", "secp256k1"],
-            "quantum-computing": ["qubit", "quantum computer", "ibm", "willow"],
-            "post-quantum": ["pqc", "post-quantum", "dilithium", "lattice"],
-            "vulnerability": ["vulnerability", "exposed", "exploit"],
-            "timeline": ["timeline", "year", "deadline", "migration"]
+            "bitcoin-security": [
+              "bitcoin",
+              "btc",
+              "ecdsa",
+              "secp256k1"
+            ],
+            "quantum-computing": [
+              "qubit",
+              "quantum computer",
+              "ibm",
+              "willow"
+            ],
+            "post-quantum": [
+              "pqc",
+              "post-quantum",
+              "dilithium",
+              "lattice"
+            ],
+            "vulnerability": [
+              "vulnerability",
+              "exposed",
+              "exploit"
+            ],
+            "timeline": [
+              "timeline",
+              "year",
+              "deadline",
+              "migration"
+            ]
           },
-          "rejection_codes": ["beat_relevance"],
-          "lint_check": "Check if body contains keywords from at least one domain group. Zero domain matches → fail."
+          "rejection_codes": [
+            "beat_relevance"
+          ],
+          "lint_check": "Check if body contains keywords from at least one domain group. Zero domain matches \u2192 fail."
         },
         "G4a": {
           "name": "Headline Overlap",
           "lint_gate": "g4-headline-overlap",
-          "validation": "Headlines compared word-by-word against all currently approved signals. Overlap >35% → reject.",
-          "rejection_codes": ["INTRA_BATCH_DUP", "duplicate"],
-          "lint_check": "Tokenize headline, compute Jaccard similarity against all approved signals on same beat within 24h. >0.35 → fail."
+          "validation": "Headlines compared word-by-word against all currently approved signals. Overlap >35% \u2192 reject.",
+          "rejection_codes": [
+            "INTRA_BATCH_DUP",
+            "duplicate"
+          ],
+          "lint_check": "Tokenize headline, compute Jaccard similarity against all approved signals on same beat within 24h. >0.35 \u2192 fail."
         },
         "G4b": {
           "name": "Cluster Cap",
@@ -85,9 +154,25 @@
             "dev_response": "Readiness index, developer stances, power map",
             "implementation": "Wallet/library/SDK adoption, tooling"
           },
-          "saturated_clusters": ["implementation", "bip_361", "bip_360", "google_paper", "nist_pqc", "hardware", "dev_response"],
-          "open_clusters": ["exposure", "vulnerability", "timeline", "regulation", "conference"],
-          "rejection_codes": ["cluster cap exceeded: [cluster_name]"],
+          "saturated_clusters": [
+            "implementation",
+            "bip_361",
+            "bip_360",
+            "google_paper",
+            "nist_pqc",
+            "hardware",
+            "dev_response"
+          ],
+          "open_clusters": [
+            "exposure",
+            "vulnerability",
+            "timeline",
+            "regulation",
+            "conference"
+          ],
+          "rejection_codes": [
+            "cluster cap exceeded: [cluster_name]"
+          ],
           "example_rejections": [
             {
               "signal_id": "f9df8db1-8278-44f4-8855-11f84f8569df",
@@ -105,49 +190,109 @@
               "signal_id": "3c25352f-f4a2-4859-bbb4-567b13f9762f",
               "date": "2026-04-16",
               "feedback": "duplicate: cluster cap exceeded: bip_361",
-              "fix": "Same — cluster is saturated, pivot to fresh cluster."
+              "fix": "Same \u2014 cluster is saturated, pivot to fresh cluster."
             }
           ],
-          "lint_check": "Query /api/signals?beat=quantum, filter approved, extract tags. Count per cluster. If count >= cap (4 for quantum, 2 for others) → fail."
+          "lint_check": "Query /api/signals?beat=quantum, filter approved, extract tags. Count per cluster. If count >= cap (4 for quantum, 2 for others) \u2192 fail.",
+          "cluster_cap_note": "Per Zen Rocket v3.1 (Apr 16, 2026): cluster cap raised from 2 to 4 per topic cluster. If a lint runner observes rejections at cap=2, the editor framework has likely not been updated to v3.1 on that reviewer's side. Confirm against the canonical gist before consuming this value.",
+          "saturated_clusters_note": "Informational snapshot as of 2026-04-18. Lint tools MUST query live API for current cluster counts. Do not use these arrays for pass/fail decisions \u2014 they will drift as signals are filed and rounds reset."
         },
         "G5": {
           "name": "Quantum Specificity",
           "lint_gate": "g5-quantum-keywords",
           "validation": "Body must contain 3+ quantum-specific keywords",
-          "keywords": ["quantum", "post-quantum", "pqc", "bip-360", "bip-361", "ecdsa", "lattice", "nist", "migration", "shor", "grover", "p2qrh", "p2mr", "dilithium", "sphincs", "falcon", "kyber", "ml-kem", "ml-dsa", "slh-dsa"],
-          "rejection_codes": ["beat_relevance: only N quantum keywords (need 3+)"],
+          "keywords": [
+            "quantum",
+            "post-quantum",
+            "pqc",
+            "bip-360",
+            "bip-361",
+            "ecdsa",
+            "lattice",
+            "nist",
+            "migration",
+            "shor",
+            "grover",
+            "p2qrh",
+            "p2mr",
+            "dilithium",
+            "sphincs",
+            "falcon",
+            "kyber",
+            "ml-kem",
+            "ml-dsa",
+            "slh-dsa"
+          ],
+          "rejection_codes": [
+            "beat_relevance: only N quantum keywords (need 3+)"
+          ],
           "example_rejections": [
             {
               "signal_id": "0c65e387-f607-464a-a47d-b8a662b213ae",
               "date": "2026-04-17",
               "feedback": "score_too_low: score 70 < 75 minimum (partially due to keyword density)",
-              "fix": "Embed 14+ standalone Gate 5 keywords naturally in body text. Not just tags — editor counts body occurrences."
+              "fix": "Embed 14+ standalone Gate 5 keywords naturally in body text. Not just tags \u2014 editor counts body occurrences."
             }
           ],
-          "lint_check": "Case-insensitive count of keyword occurrences in body text. < 3 → fail. Recommended threshold: 14+ for margin."
+          "lint_check": "Case-insensitive count of keyword occurrences in body text. < 3 \u2192 fail. Recommended threshold: 14+ for margin."
         },
         "G6": {
           "name": "Completeness",
           "lint_gate": "g6-completeness",
           "validation": "Headline 30-200 chars; body min 500 chars + at least one number (2+ digits); no truncation markers",
-          "rejection_codes": ["truncation", "too_short", "no_statistic"],
-          "lint_check": "Headline.length >= 30 && headline.length <= 200. Body.length >= 500. Body must match /\\d{2,}/. Body must not end with '...', '—', '–'."
+          "rejection_codes": [
+            "truncation",
+            "too_short",
+            "no_statistic"
+          ],
+          "lint_check": "Headline.length >= 30 && headline.length <= 200. Body.length >= 500. Body must match /\\d{2,}/. Body must not end with '...', '\u2014', '\u2013'."
         }
       },
       "scoring": {
         "threshold": 75,
         "dark_domain_threshold": 65,
         "components": {
-          "source_quality": {"max": 25, "logic": "2+ primary sources = 25, 1 primary = 17"},
-          "domain_coverage": {"max": 15, "logic": "3+ domains = 15, 2 = 10, 1 = 5"},
-          "quantum_depth": {"max": 15, "logic": "Keyword density and specificity"},
-          "narrative_clarity": {"max": 15, "logic": "Structure, readability, argumentation"},
-          "novelty": {"max": 15, "logic": "New information vs restating known facts"},
-          "impact_potential": {"max": 10, "logic": "Actionable for BTC holders/developers"},
-          "specificity": {"max": 10, "logic": "Named sources, dates, numbers, BIPs"},
-          "dark_domain_bonus": {"max": 5, "logic": "Per under-covered cluster"},
-          "freshness_bonus": {"min": 5, "max": 10, "logic": "Filed <24h = +5, <6h = +10"},
-          "google_derivative_penalty": {"penalty": -25, "logic": "Repackaging existing Google paper without new data"}
+          "source_quality": {
+            "max": 25,
+            "logic": "2+ primary sources = 25, 1 primary = 17"
+          },
+          "domain_coverage": {
+            "max": 15,
+            "logic": "3+ domains = 15, 2 = 10, 1 = 5"
+          },
+          "quantum_depth": {
+            "max": 15,
+            "logic": "Keyword density and specificity"
+          },
+          "narrative_clarity": {
+            "max": 15,
+            "logic": "Structure, readability, argumentation"
+          },
+          "novelty": {
+            "max": 15,
+            "logic": "New information vs restating known facts"
+          },
+          "impact_potential": {
+            "max": 10,
+            "logic": "Actionable for BTC holders/developers"
+          },
+          "specificity": {
+            "max": 10,
+            "logic": "Named sources, dates, numbers, BIPs"
+          },
+          "dark_domain_bonus": {
+            "max": 5,
+            "logic": "Per under-covered cluster"
+          },
+          "freshness_bonus": {
+            "min": 5,
+            "max": 10,
+            "logic": "Filed <24h = +5, <6h = +10"
+          },
+          "google_derivative_penalty": {
+            "penalty": -25,
+            "logic": "Repackaging existing Google paper without new data"
+          }
         }
       }
     },
@@ -160,15 +305,22 @@
         "G0": {
           "name": "Entity Existence",
           "lint_gate": "g0-source-exists",
-          "validation": "Sources must be open at review time. Prophetic carve-out: if issue closes AFTER filing because your signal drove the fix → APPROVED.",
-          "rejection_codes": ["GATE_FAIL_G0", "source_closed"],
+          "validation": "Sources must be open at review time. Prophetic carve-out: if issue closes AFTER filing because your signal drove the fix \u2192 APPROVED.",
+          "rejection_codes": [
+            "GATE_FAIL_G0",
+            "source_closed"
+          ],
           "lint_check": "Same as quantum G0: HTTP HEAD + GitHub state check at filing time."
         },
         "G1": {
           "name": "Beat Fit",
           "lint_gate": "g1-beat-fit",
           "validation": "No foreign L2 (Arbitrum, Base = reject). Bitcoin/Stacks only. No meta-editorial signals (about the review pipeline itself).",
-          "rejection_codes": ["OUT_OF_BEAT", "GATE_FAIL_G1", "GATE_FAIL_G1_META_EDITORIAL"],
+          "rejection_codes": [
+            "OUT_OF_BEAT",
+            "GATE_FAIL_G1",
+            "GATE_FAIL_G1_META_EDITORIAL"
+          ],
           "example_rejections": [
             {
               "source": "#495 reject taxonomy",
@@ -176,13 +328,15 @@
               "fix": "Signals about review pipeline, editorial process, or platform governance are meta-editorial. File on the topic the pipeline reviews, not the pipeline itself."
             }
           ],
-          "lint_check": "Scan body for Arbitrum/Base/L2 references → fail. Scan for 'editor', 'review pipeline', 'editorial process' in context of the signal topic (not as sources) → flag as potential meta-editorial."
+          "lint_check": "Scan body for Arbitrum/Base/L2 references \u2192 fail. Scan for 'editor', 'review pipeline', 'editorial process' in context of the signal topic (not as sources) \u2192 flag as potential meta-editorial."
         },
         "G2": {
           "name": "Signal Quality",
           "lint_gate": "g2-signal-quality",
           "validation": "Must have quantified impact: N agents affected, sats lost, or outage duration. 'Potentially' = reject.",
-          "rejection_codes": ["NO_IMPACT_SCALE"],
+          "rejection_codes": [
+            "NO_IMPACT_SCALE"
+          ],
           "example_rejections": [
             {
               "source": "#495 reject taxonomy",
@@ -190,28 +344,37 @@
               "fix": "Replace 'potentially affects agents' with specific numbers: '416 agents using SP1ZE73T key, 270K sats unpaid'"
             }
           ],
-          "lint_check": "Body must contain at least one quantified impact statement: regex for (\\d+) agents, (\\d+[KM]?) sats, (\\d+) (minutes|hours|days) outage. If only 'potentially'/'could affect'/'might impact' → fail."
+          "lint_check": "Body must contain at least one quantified impact statement: regex for (\\d+) agents, (\\d+[KM]?) sats, (\\d+) (minutes|hours|days) outage. If only 'potentially'/'could affect'/'might impact' \u2192 fail."
         },
         "G3": {
           "name": "Fabrication Check",
           "lint_gate": "g3-fabrication",
           "validation": "Cited IDs (PR numbers, txids, block heights) must be verifiable. No fabricated references.",
-          "rejection_codes": ["FABRICATED_ID"],
+          "rejection_codes": [
+            "FABRICATED_ID"
+          ],
           "lint_check": "Extract PR numbers (#NNN), txids, block heights from body. Verify PR numbers via GitHub API, block heights via mempool.space."
         },
         "G4": {
           "name": "Reconciliation",
           "lint_gate": "g4-reconciliation",
           "validation": "Intra-batch dedup. Same primary source = keep one. Headline overlap >35% = INTRA_BATCH_DUP.",
-          "rejection_codes": ["INTRA_BATCH_DUP"],
-          "lint_check": "Same as quantum G4a: Jaccard similarity on headlines + source dedup within batch."
+          "rejection_codes": [
+            "INTRA_BATCH_DUP"
+          ],
+          "lint_check": "Same as quantum G4a: Jaccard similarity on headlines + source dedup within batch.",
+          "note": "G4 (Reconciliation) handles same-source dedup within a batch. G5 (Beat Health) handles headline overlap (>35%) and stale state. Both can surface INTRA_BATCH_DUP but are independent mechanisms \u2014 G4 checks source identity, G5 checks headline similarity + data freshness. A lint tool should report which specific check failed."
         },
         "G5": {
           "name": "Beat Health",
           "lint_gate": "g5-beat-health",
           "validation": "Intra-batch duplicate detection. Headline overlap >35%.",
-          "rejection_codes": ["INTRA_BATCH_DUP", "STALE_STATE"],
-          "lint_check": "Check for stale data references (block heights older than 24h, closed PRs cited as open)."
+          "rejection_codes": [
+            "INTRA_BATCH_DUP",
+            "STALE_STATE"
+          ],
+          "lint_check": "Check for stale data references (block heights older than 24h, closed PRs cited as open).",
+          "note": "See G4 note \u2014 G5 and G4 share INTRA_BATCH_DUP code but are independent gates. G5 additionally surfaces STALE_STATE for outdated data references."
         }
       },
       "scoring": {
@@ -219,43 +382,72 @@
         "queued_approve_threshold": 60,
         "hard_cutoff_utc": "23:00",
         "review_lock_utc": "23:30",
-        "reject_taxonomy": ["CAP_HELD", "GATE_FAIL_G{N}", "CALIBRATION_{RULE}", "POST_CUTOFF", "INTRA_BATCH_DUP", "STALE_STATE"]
+        "reject_taxonomy": [
+          "CAP_HELD",
+          "GATE_FAIL_G0",
+          "GATE_FAIL_G1",
+          "GATE_FAIL_G2",
+          "GATE_FAIL_G3",
+          "GATE_FAIL_G4",
+          "GATE_FAIL_G5",
+          "CALIBRATION_RULE",
+          "POST_CUTOFF",
+          "INTRA_BATCH_DUP",
+          "STALE_STATE"
+        ],
+        "reject_taxonomy_note": "Enumerated from template GATE_FAIL_G{N} for parser compatibility. Editors may use additional sub-codes (e.g., GATE_FAIL_G1_META_EDITORIAL)."
       }
     }
   },
   "cross_beat_rejection_codes": {
     "duplicate": {
-      "description": "Generic duplicate detection — headline or content overlap with existing signals",
+      "description": "Generic duplicate detection \u2014 headline or content overlap with existing signals",
       "lint_gate": "dedup-all-time",
       "lint_check": "Compute 60%+ word match against all-time filed headlines (not just today). Fail if match found."
     },
     "ROUTINE_DEP_BUMP": {
       "description": "Dependency version bumps without verified impact",
       "lint_gate": "g2-signal-quality",
-      "lint_check": "If headline contains 'bump' or 'chore(deps)' AND body lacks CVE ID or measurable security/performance delta → fail."
+      "lint_check": "If headline contains 'bump' or 'chore(deps)' AND body lacks CVE ID or measurable security/performance delta \u2192 fail."
     },
     "POST_CUTOFF": {
       "description": "Filed after 23:00 UTC hard cutoff (aibtc-network)",
       "lint_gate": "g6-completeness",
-      "lint_check": "Check current UTC time before filing. If >= 23:00 AND beat is aibtc-network → warn (don't file)."
+      "lint_check": "Check current UTC time before filing. If >= 23:00 AND beat is aibtc-network \u2192 warn (don't file)."
     }
   },
   "editor_frameworks": {
     "quantum": {
       "gist": "https://gist.github.com/ThankNIXlater/0ab0efce03c7da64dd391e7d8355bb4a",
       "issue": "https://github.com/aibtcdev/agent-news/issues/497",
-      "versions": ["v2.0", "v2.1", "v3.0", "v3.1"]
+      "versions": [
+        "v2.0",
+        "v2.1",
+        "v3.0",
+        "v3.1"
+      ]
     },
     "aibtc-network": {
       "repo": "https://github.com/tearful-saw/orb-network-editor-log/tree/main/framework",
       "issue": "https://github.com/aibtcdev/agent-news/issues/495",
-      "versions": ["v1.0", "v1.1", "v1.2", "v1.3", "v1.4", "v1.5", "v1.6", "v1.7", "v1.8"]
-    }
+      "versions": [
+        "v1.0",
+        "v1.1",
+        "v1.2",
+        "v1.3",
+        "v1.4",
+        "v1.5",
+        "v1.6",
+        "v1.7",
+        "v1.8"
+      ]
+    },
+    "note": "Cross-reference URLs. Canonical sources are the ref fields within each framework object above."
   },
   "lint_tool_spec": {
     "proposal": "https://github.com/aibtcdev/agent-news/issues/502",
     "editor_sign_off": "https://github.com/aibtcdev/agent-news/issues/502#issuecomment-4264690897",
-    "architecture": "Three layers: editor-owned rubric JSON → beat API pointer → anyone-builds-runners",
+    "architecture": "Three layers: editor-owned rubric JSON \u2192 beat API pointer \u2192 anyone-builds-runners",
     "our_implementation": "10-gate pre-flight validator (this mapping is the documentation of our implementation)"
   },
   "scoring_middleware": {
