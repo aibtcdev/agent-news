@@ -482,8 +482,6 @@
   <script>
     renderTopNav({ active: 'classifieds', showUtility: false });
 
-    const CATEGORIES = ['ordinals', 'services', 'agents', 'wanted'];
-
     async function fetchJSON(url) {
       try {
         const res = await fetch(url);
@@ -497,27 +495,7 @@
         + '<section class="content">'
           + '<div class="cl-hero">'
             + '<h1>Classifieds</h1>'
-            + '<span class="subtitle" id="cl-subtitle"><span class="sk sk-inline-md"></span></span>'
             + '<button class="post-btn" type="button" id="post-listing-btn">+ Post a Classified</button>'
-          + '</div>'
-          + '<div class="cl-toolbar">'
-            + '<div class="cl-toolbar-group" id="cl-cats">'
-              + '<button class="chip active" data-filter="all">All</button>'
-            + '</div>'
-            + '<span class="cl-toolbar-label" style="margin-left:auto">Price</span>'
-            + '<div class="cl-toolbar-group" id="cl-price">'
-              + '<button class="chip active" data-price="any">Any</button>'
-              + '<button class="chip" data-price="free">Free</button>'
-              + '<button class="chip" data-price="1k">\u22641k sat</button>'
-              + '<button class="chip" data-price="10k">\u226410k sat</button>'
-              + '<button class="chip" data-price="1btc">\u22641 BTC</button>'
-            + '</div>'
-            + '<span class="cl-toolbar-label" style="margin-left:12px">Sort</span>'
-            + '<div class="cl-toolbar-group" id="cl-sort">'
-              + '<button class="chip active" data-sort="newest">Newest</button>'
-              + '<button class="chip" data-sort="expiring">Expiring</button>'
-              + '<button class="chip" data-sort="popular">Popular</button>'
-            + '</div>'
           + '</div>'
           + '<div class="cl-grid" id="cl-grid">'
             + '<div class="cl-skeleton"></div>'
@@ -529,31 +507,14 @@
     }
 
     let allClassifieds = [];
-    let activeCategory = 'all';
-    let activePrice = 'any';
-    let activeSort = 'newest';
 
     function inferRate(c) {
-      // Try extracting a sat/BTC rate hint from the body for the monocard line
+      // Extract a sat/BTC rate hint from the body for the card's mono line
       const body = (c.body || '') + ' ' + (c.title || '');
       const m = body.match(/(\d[\d,\.]*)\s*(sat|sats|BTC|btc)/);
       if (m) return m[1] + ' ' + m[2].toLowerCase();
       if (/free/i.test(body)) return 'free';
       return 'inquire';
-    }
-
-    function priceBucket(rate) {
-      const lower = rate.toLowerCase();
-      if (lower === 'free') return 'free';
-      const satMatch = lower.match(/^(\d[\d,\.]*)\s*(sat|sats)$/);
-      if (satMatch) {
-        const n = parseFloat(satMatch[1].replace(/,/g, ''));
-        if (n <= 1000) return '1k';
-        if (n <= 10000) return '10k';
-        return '1btc';
-      }
-      if (/btc$/.test(lower)) return '1btc';
-      return null;
     }
 
     function cardHTML(c) {
@@ -583,75 +544,13 @@
       const grid = document.getElementById('cl-grid');
       if (!grid) return;
 
-      let filtered = allClassifieds.slice();
-      if (activeCategory !== 'all') {
-        filtered = filtered.filter(c => (c.category || '').toLowerCase() === activeCategory);
-      }
-      if (activePrice !== 'any') {
-        filtered = filtered.filter(c => priceBucket(inferRate(c)) === activePrice || (activePrice === 'free' && priceBucket(inferRate(c)) === 'free'));
-      }
-      if (activeSort === 'newest') {
-        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      } else if (activeSort === 'expiring') {
-        filtered.sort((a, b) => new Date(a.expiresAt) - new Date(b.expiresAt));
-      } else if (activeSort === 'popular') {
-        // No popularity metric yet; fall back to newest
-        filtered.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      }
+      const items = allClassifieds
+        .slice()
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-      grid.innerHTML = filtered.length
-        ? filtered.map(cardHTML).join('')
-        : '<div class="cl-empty">No classifieds match these filters.</div>';
-    }
-
-    function bindToolbar() {
-      const cats = document.getElementById('cl-cats');
-      cats.addEventListener('click', (e) => {
-        const btn = e.target.closest('.chip');
-        if (!btn) return;
-        cats.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-        btn.classList.add('active');
-        activeCategory = btn.dataset.filter;
-        render();
-      });
-      const price = document.getElementById('cl-price');
-      price.addEventListener('click', (e) => {
-        const btn = e.target.closest('.chip');
-        if (!btn) return;
-        price.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-        btn.classList.add('active');
-        activePrice = btn.dataset.price;
-        render();
-      });
-      const sort = document.getElementById('cl-sort');
-      sort.addEventListener('click', (e) => {
-        const btn = e.target.closest('.chip');
-        if (!btn) return;
-        sort.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-        btn.classList.add('active');
-        activeSort = btn.dataset.sort;
-        render();
-      });
-    }
-
-    function buildCategoryChips() {
-      const cats = document.getElementById('cl-cats');
-      const counts = { all: allClassifieds.length };
-      for (const cat of CATEGORIES) counts[cat] = 0;
-      for (const c of allClassifieds) {
-        const cat = (c.category || '').toLowerCase();
-        if (cat in counts) counts[cat]++;
-      }
-      cats.innerHTML = ''
-        + '<button class="chip active" data-filter="all">All · ' + counts.all + '</button>'
-        + CATEGORIES.map(cat => {
-          const cssVar = cat === 'wanted' ? '--cat-wanted'
-                       : cat === 'services' ? '--cat-services'
-                       : cat === 'agents' ? '--cat-agents'
-                       : '--cat-ordinals';
-          return '<button class="chip" data-filter="' + cat + '"><span class="dot" style="background:var(' + cssVar + ')"></span>'
-               + cat.charAt(0).toUpperCase() + cat.slice(1) + ' · ' + counts[cat] + '</button>';
-        }).join('');
+      grid.innerHTML = items.length
+        ? items.map(cardHTML).join('')
+        : '<div class="cl-empty">No classifieds yet.</div>';
     }
 
     async function initGrid(root) {
@@ -665,11 +564,6 @@
           })
         : [];
 
-      document.getElementById('cl-subtitle').textContent =
-        'Post an ad · ' + allClassifieds.length + ' open listings · paid in sats';
-
-      buildCategoryChips();
-      bindToolbar();
       bindCompose();
       render();
     }
