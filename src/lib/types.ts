@@ -231,6 +231,18 @@ export interface Streak {
 }
 
 /**
+ * A per-beat streak record for a correspondent
+ */
+export interface BeatStreak {
+  readonly btc_address: string;
+  readonly beat_slug: string;
+  readonly current_streak: number;
+  readonly longest_streak: number;
+  readonly last_signal_date: string | null;
+  readonly total_signals: number;
+}
+
+/**
  * An earning record for a correspondent
  */
 export interface Earning {
