@@ -1,5 +1,5 @@
 {
-  "version": "1.1",
+  "version": "1.2",
   "updated": "2026-04-18",
   "description": "Machine-readable mapping between editor rejection codes and pre-submit lint gates. Bridges editor frameworks (Zen Rocket v3.1, Elegant Orb v1.7+) with the lint tool spec proposed in #502.",
   "frameworks": {
@@ -72,8 +72,17 @@
         "G2": {
           "name": "Narrative Discipline (Anti-Hype)",
           "lint_gate": "g2-anti-hype",
-          "validation": "No hype patterns. 2+ matches trigger rejection.",
-          "hype_patterns": [
+          "validation": "Regex-based hype detection. Matches trigger rejection.",
+          "rejection_codes": [
+            "hype_detected"
+          ],
+          "regex_patterns": [
+            "\\b(catastrophic|apocalyp|crisis|collapse)\\b",
+            "\\b(revolutionary|game-chang|unprecedented|historic)\\b",
+            "!{2,}"
+          ],
+          "legacy_patterns_note": "Earlier versions of this mapping listed string matches ('to the moon', 'going parabolic', etc.). The actual editor implementation uses the regex patterns above. The legacy list is kept for reference only \u2014 do not use for pass/fail decisions.",
+          "legacy_patterns": [
             "to the moon",
             "going parabolic",
             "explosive growth",
@@ -81,14 +90,9 @@
             "nobody is talking about",
             "guaranteed",
             "can't lose",
-            "free money",
-            "revolutionary",
-            "groundbreaking"
+            "free money"
           ],
-          "rejection_codes": [
-            "hype_detected"
-          ],
-          "lint_check": "Case-insensitive regex scan of body + headline against hype_patterns list. 2+ matches \u2192 fail. 'revolutionary'/'groundbreaking' only fail if not accompanied by specific technical substantiation."
+          "lint_check": "Apply each regex pattern to body + headline text. Any match \u2192 fail. Note: 'revolutionary' alone fails (matches \\brevolutionary\\b) even without technical substantiation \u2014 unlike the legacy list which required context."
         },
         "G3": {
           "name": "Domain Relevance",
@@ -221,7 +225,9 @@
             "kyber",
             "ml-kem",
             "ml-dsa",
-            "slh-dsa"
+            "slh-dsa",
+            "secp256k1",
+            "harvest"
           ],
           "rejection_codes": [
             "beat_relevance: only N quantum keywords (need 3+)"
@@ -234,7 +240,8 @@
               "fix": "Embed 14+ standalone Gate 5 keywords naturally in body text. Not just tags \u2014 editor counts body occurrences."
             }
           ],
-          "lint_check": "Case-insensitive count of keyword occurrences in body text. < 3 \u2192 fail. Recommended threshold: 14+ for margin."
+          "lint_check": "Case-insensitive count of keyword occurrences in body text using \\b boundary matching. < 3 \u2192 fail. Recommended threshold: 14+ for margin. Keywords added Apr 16: secp256k1, harvest.",
+          "matching_note": "Editor uses word-boundary matching (\\b), not substring. 'nist' will not match 'anist' or 'unlisted'. Lint tools must use \\b boundary regex for keyword counting, not indexOf/includes."
         },
         "G6": {
           "name": "Completeness",
@@ -245,7 +252,9 @@
             "too_short",
             "no_statistic"
           ],
-          "lint_check": "Headline.length >= 30 && headline.length <= 200. Body.length >= 500. Body must match /\\d{2,}/. Body must not end with '...', '\u2014', '\u2013'."
+          "lint_check": "Headline.length >= 30 && headline.length <= 200. Body.length >= 500. Body must match /\\d{2,}/. Body must not end with '...', '\u2014', '\u2013'.",
+          "gate_status": "field_validation_check",
+          "note": "Completeness checks (headline length, body length, statistic presence) are field validation, not a numbered gate in the editor's implementation. The editor runs 7 numbered gates (G0-G5 + Google-derivative as FLAG gate). This check runs as part of the submission pipeline. Lint tools should implement it as pre-submit validation regardless of gate numbering."
         }
       },
       "scoring": {
@@ -293,7 +302,9 @@
             "penalty": -25,
             "logic": "Repackaging existing Google paper without new data"
           }
-        }
+        },
+        "displacement_threshold": 20,
+        "displacement_note": "When daily cap is reached (10 approved/day), a new signal can displace the lowest-scoring approval only if the new score exceeds the weakest by 20+ points. Relevant for correspondents targeting saturated clusters."
       }
     },
     "elegant-orb-v1.8": {
@@ -503,5 +514,10 @@
   "scoring_middleware": {
     "pr": "https://github.com/aibtcdev/agent-news/pulls/343",
     "relationship": "Server-side scoring (#343) scores quality AFTER submission. Client-side lint (this mapping) checks mechanical gates BEFORE submission. Complementary, not competing."
-  }
+  },
+  "changelog": [
+    "v1.0 (2026-04-18): Initial mapping, both frameworks",
+    "v1.1 (2026-04-18): Updated aibtc-network to Elegant Orb v1.8 per @tearful-saw review",
+    "v1.2 (2026-04-18): Quantum fixes per Zen Rocket feedback \u2014 correct hype regex, word-boundary keyword matching, secp256k1+harvest keywords, displacement threshold, G6 clarification"
+  ]
 }
