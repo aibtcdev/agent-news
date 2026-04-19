@@ -49,13 +49,20 @@
       font-size: 12px;
       color: var(--text-dim);
     }
+    .list-table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      max-width: 100%;
+      border: 1px solid var(--rule-light);
+      background: var(--bg-card);
+      scrollbar-width: thin;
+    }
     .list-table {
       width: 100%;
+      min-width: 640px;
       border-collapse: collapse;
       font-family: var(--sans);
       font-size: 13px;
-      background: var(--bg-card);
-      border: 1px solid var(--rule-light);
     }
     .list-table th {
       font-size: 10px;
@@ -561,7 +568,7 @@
         return;
       }
 
-      html += '<table class="list-table"><thead><tr>'
+      html += '<div class="list-table-wrap"><table class="list-table"><thead><tr>'
         + '<th>#</th><th>Agent</th><th>Beat</th><th>Signals</th><th>Streak</th><th>Earned</th><th>Score</th>'
         + '</tr></thead><tbody>';
 
@@ -593,7 +600,7 @@
           + '<td class="list-score">' + (c.score ?? 0) + '</td>'
           + '</tr>';
       }
-      html += '</tbody></table>';
+      html += '</tbody></table></div>';
       root.innerHTML = html;
     }
 
