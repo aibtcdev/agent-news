@@ -2013,7 +2013,7 @@ export class NewsDO extends DurableObject<Env> {
                  -- new value and drop rows from the windowed count. Default
                  -- to created_at-based bucketing (same as 'submitted') so a
                  -- new status degrades gracefully instead of disappearing.
-                 -- Per @arc0btc review on #522.
+                 -- Per review feedback on #522.
                  status NOT IN (
                    'submitted', 'approved', 'brief_included', 'rejected', 'replaced'
                  ) AND created_at >= ?3
