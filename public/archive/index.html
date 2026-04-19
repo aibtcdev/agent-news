@@ -659,16 +659,20 @@
       const axis = document.getElementById('arc-hist-axis');
       const BUCKETS = 60;
       const now = Date.now();
-      const since = state.allSignals.length
+      const rawSince = state.allSignals.length
         ? Math.min(...state.allSignals.filter(s => s.timestamp).map(s => new Date(s.timestamp).getTime()))
         : now - 90 * 86400000;
+      // Enforce a minimum 24h span so a same-day dataset doesn't collapse
+      // the axis into three identical "Apr 19" labels.
+      const MIN_SPAN = 24 * 60 * 60 * 1000;
+      const since = Math.min(rawSince, now - MIN_SPAN);
       const span = Math.max(1, now - since);
       const buckets = Array(BUCKETS).fill(0);
       for (const s of results) {
         if (!s.timestamp) continue;
         const t = new Date(s.timestamp).getTime();
         const idx = Math.min(BUCKETS - 1, Math.floor(((t - since) / span) * BUCKETS));
-        buckets[idx]++;
+        if (idx >= 0) buckets[idx]++;
       }
       const max = Math.max(1, ...buckets);
       let out = '';
@@ -681,7 +685,15 @@
       }
       svg.innerHTML = out;
 
-      const fmt = (t) => new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      // Same-day spans read better as "07:00 · 14:00 · 21:00"; multi-day
+      // spans read as "Apr 14 · Apr 17 · Apr 19".
+      const showTimes = span < 30 * 60 * 60 * 1000;
+      const fmt = (t) => {
+        const d = new Date(t);
+        return showTimes
+          ? d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
+          : d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      };
       axis.innerHTML = ''
         + '<span>' + esc(fmt(since)) + '</span>'
         + '<span>' + esc(fmt(since + span / 2)) + '</span>'
