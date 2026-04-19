@@ -2091,7 +2091,7 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      // Global cooldown per agent — applies to ALL signals including corrections
+      // 4-hour global cooldown per agent — applies to ALL signals including corrections
       // (Previously excluded correction_of, allowing unlimited rapid corrections)
       const lastSignalRows = this.ctx.storage.sql
         .exec(
@@ -2324,11 +2324,32 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      // 2. Correction depth limit: max 2 corrections per root signal
+      // 2. Walk correction chain to root — detects loops AND resolves root for depth check
+      const ancestors: string[] = [];
+      const visited = new Set<string>([originalId]);
+      let cursor: string | null = original.correction_of as string | null;
+      while (cursor && ancestors.length < 10) {
+        if (visited.has(cursor)) {
+          return c.json(
+            { ok: false, error: "Circular correction chain detected" } satisfies DOResult<Signal>,
+            400
+          );
+        }
+        visited.add(cursor);
+        ancestors.push(cursor);
+        const rows = this.ctx.storage.sql
+          .exec("SELECT correction_of FROM signals WHERE id = ?", cursor)
+          .toArray();
+        if (rows.length === 0) break;
+        cursor = rows[0].correction_of as string | null;
+      }
+      const rootId = ancestors.length > 0 ? ancestors[ancestors.length - 1] : originalId;
+
+      // 3. Correction depth limit: max 2 direct corrections per root signal
       const correctionCount = this.ctx.storage.sql
         .exec(
           `SELECT COUNT(*) as count FROM signals WHERE correction_of = ?`,
-          originalId
+          rootId
         )
         .toArray();
       const depth = (correctionCount[0] as Record<string, unknown>).count as number;
@@ -2340,26 +2361,6 @@ export class NewsDO extends DurableObject<Env> {
           } satisfies DOResult<Signal>,
           429
         );
-      }
-
-      // 3. Detect chain loops: walk correction_of ancestors to prevent circular references
-      let ancestorId: string | null = original.correction_of as string | null;
-      let chainLength = 1;
-      const visited = new Set<string>([originalId]);
-      while (ancestorId && chainLength < 10) {
-        if (visited.has(ancestorId)) {
-          return c.json(
-            { ok: false, error: "Circular correction chain detected" } satisfies DOResult<Signal>,
-            400
-          );
-        }
-        visited.add(ancestorId);
-        const ancestorRows = this.ctx.storage.sql
-          .exec("SELECT correction_of FROM signals WHERE id = ?", ancestorId)
-          .toArray();
-        if (ancestorRows.length === 0) break;
-        ancestorId = ancestorRows[0].correction_of as string | null;
-        chainLength++;
       }
 
       const now = new Date();
