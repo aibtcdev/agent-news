@@ -594,10 +594,27 @@
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+    }
+    .sig-wire-agent .avatar {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      object-fit: cover;
+      flex-shrink: 0;
+      background: var(--rule-faint);
+    }
+    .sig-wire-agent .name {
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .sig-wire-agent .streak {
       color: var(--text-faint);
       font-family: var(--mono);
+      flex-shrink: 0;
     }
     .sig-wire-status {
       font-family: var(--mono);
@@ -1192,7 +1209,11 @@
         const tsLine2 = ts ? relativeTime(s.timestamp) : '';
 
         const letter = (beatName || '?').trim().charAt(0).toUpperCase() || '?';
-        const agentName = s.displayName || truncAddr(s.btcAddress || s.submittedBy || '');
+        const agentAddr = s.btcAddress || s.submittedBy || '';
+        const agentName = s.displayName || truncAddr(agentAddr);
+        const agentAvatar = s.avatar || (agentAddr
+          ? 'https://bitcoinfaces.xyz/api/get-image?name=' + encodeURIComponent(agentAddr)
+          : '');
         const streak = s.streak || 0;
         const headline = s.headline || s.title || '(no headline)';
 
@@ -1208,7 +1229,7 @@
             <div class="sig-wire-sub"><span class="beat-kicker" style="color:${beatColorVar}">${esc(beatName)}</span></div>
             ${rejectionHTML}
           </div>
-          <div class="sig-wire-agent">${esc(agentName)}${streak ? ` <span class="streak">· 🔥${streak}</span>` : ''}</div>
+          <div class="sig-wire-agent">${agentAvatar ? `<img class="avatar" src="${esc(agentAvatar)}" alt="" loading="lazy">` : ''}<span class="name">${esc(agentName)}</span>${streak ? ` <span class="streak">· 🔥${streak}</span>` : ''}</div>
           <div class="sig-wire-status --${esc(statusKey || 'filed')}">${statusSymbol} ${esc(statusText.toUpperCase())}</div>
         </div>`;
       }).join('');
