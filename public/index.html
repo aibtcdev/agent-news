@@ -4387,16 +4387,21 @@
       }
       const allSignals = [].concat(...Object.values(bySlug));
 
-      const todayStart = new Date(); todayStart.setUTCHours(0, 0, 0, 0);
+      // Count across the full 24h fetch window so stats match the sparkline.
+      const windowStart = Date.now() - 24 * 3600 * 1000;
       const tileHTML = top.map(b => {
         const color = b.color || getBeatColor((b.name || '').toUpperCase()) || '#1a1a1a';
         const sigs = bySlug[b.slug] || [];
-        const approvedToday = sigs.filter(s => {
-          if (!s.timestamp || new Date(s.timestamp) < todayStart) return false;
+        const inWindow = sigs.filter(s =>
+          s.timestamp && new Date(s.timestamp).getTime() >= windowStart
+        );
+        const approved = inWindow.filter(s => {
           const st = (s.status || '').toLowerCase();
           return st === 'approved' || st === 'inscribed' || st === 'brief_included';
         }).length;
-        const pendingReview = sigs.filter(s => /^(submitted|in_review|pending)$/i.test(s.status || '')).length;
+        const pending = inWindow.filter(s =>
+          /^(submitted|in_review|pending)$/i.test(s.status || '')
+        ).length;
 
         // 24-hour trend: one bar per hour, oldest → newest. Hourly fits
         // within the 100-row /api/signals limit where daily didn't.
@@ -4434,8 +4439,8 @@
           + '<div class="beat-tile-head"><span class="pip" style="background:' + color + '"></span><span class="beat-tile-name">' + esc(b.name) + '</span></div>'
           + '<div class="beat-tile-editor">Editor: ' + esc(editorName) + '</div>'
           + '<div class="beat-tile-stats">'
-            + '<span><span class="filed">' + approvedToday + '</span> <span class="dim">approved</span></span>'
-            + '<span><span class="pending">' + pendingReview + '</span> <span class="dim">pending</span></span>'
+            + '<span><span class="filed">' + approved + '</span> <span class="dim">approved · 24h</span></span>'
+            + '<span><span class="pending">' + pending + '</span> <span class="dim">pending · 24h</span></span>'
           + '</div>'
           + svg
         + '</a>';
