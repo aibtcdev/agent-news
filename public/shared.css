@@ -16,6 +16,7 @@
 :root {
   --bg: #faf8f4;
   --bg-card: #fff;
+  --bg-marketplace: #f5f3ee;
   --text: #1a1a1a;
   --text-secondary: #444;
   --text-dim: #777;
@@ -26,11 +27,29 @@
   --accent: #af1e2d;
   --link: #1a5276;
   --streak-bg: #f0eeeb;
+
+  /* Semantic status tokens */
+  --good: #2d8659;
+  --warn: #c08a1e;
+  --fresh-bg: #fff7e5;
+  --highlight: #fff2a8;
+  --ticker-amber: #ffb030;
+
+  /* Beat / category colors */
+  --cat-ordinals: #F7931A;
+  --cat-services: #6db3d4;
+  --cat-agents: #b388ff;
+  --cat-wanted: #e85d6f;
+  --beat-network: #b388ff;
+  --beat-macro: #F7931A;
+  --beat-quantum: #6db3d4;
+
   --serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: 'JetBrains Mono', 'Fira Code', monospace;
   --page-width: 1100px;
   --page-padding: clamp(16px, 4vw, 40px);
+  --wide-width: 1280px;
 
   /* Typographic scale */
   --text-xs: 10px;
@@ -54,6 +73,7 @@
 [data-theme="dark"] {
   --bg: #161618;
   --bg-card: #1e1e22;
+  --bg-marketplace: #1a1a1e;
   --text: #e8e6e2;
   --text-secondary: #bbb;
   --text-dim: #888;
@@ -64,6 +84,22 @@
   --accent: #e05565;
   --link: #6db3d4;
   --streak-bg: #2a2a2e;
+
+  /* Semantic status — lightened for dark bg */
+  --good: #4fbd85;
+  --warn: #e0ae50;
+  --fresh-bg: #332a18;
+  --highlight: #6b5420;
+  --ticker-amber: #ffc050;
+
+  /* Beat / category colors */
+  --cat-ordinals: #f9a93e;
+  --cat-services: #8ec8e0;
+  --cat-agents: #c9a8ff;
+  --cat-wanted: #f07a89;
+  --beat-network: #c9a8ff;
+  --beat-macro: #f9a93e;
+  --beat-quantum: #8ec8e0;
 }
 
 /* ── Base ── */
@@ -84,7 +120,9 @@ body {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  overflow-x: hidden;
+  /* `clip` prevents horizontal overflow WITHOUT creating a scroll container,
+     so descendants with position:sticky actually stick to the viewport. */
+  overflow-x: clip;
 }
 
 /* Tap highlight for mobile */
@@ -346,8 +384,613 @@ a:hover { color: var(--text); }
 }
 
 @media print {
-  .datebar, .theme-toggle { display: none; }
+  .datebar, .theme-toggle, .topnav, .ticker { display: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   SHARED SKELETON LOADERS — use instead of "Loading…" text so every
+   page's pending state reads the same way.
+   ═══════════════════════════════════════════════════════════════ */
+@keyframes skPulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.75; }
+}
+.sk {
+  background: var(--rule-faint);
+  animation: skPulse 1.6s ease-in-out infinite;
+  border-radius: 2px;
+}
+.sk-line      { height: 12px; }
+.sk-line-sm   { height: 8px;  }
+.sk-line-lg   { height: 16px; }
+.sk-row       { height: 48px; margin-bottom: 6px; }
+.sk-card      { height: 120px; margin-bottom: 6px; }
+.sk-inline-md { display: inline-block; width: 140px; height: 12px; vertical-align: middle; }
+.sk-inline-sm { display: inline-block; width: 80px;  height: 10px; vertical-align: middle; }
+.sk-stack     { display: flex; flex-direction: column; gap: 6px; }
+
+/* ═══════════════════════════════════════════════════════════════
+   TOP NAV SKELETON — reserves layout height BEFORE shared.js mounts
+   the real nav so the page below doesn't shift when JS runs.
+   ═══════════════════════════════════════════════════════════════ */
+.topnav-placeholder {
+  background: var(--bg);
+  border-bottom: 2px solid var(--rule);
+  /* Default: masthead + sections + ticker = ~ 170px */
+  min-height: 170px;
+}
+.topnav-placeholder.--with-utility {
+  /* Homepage etc: masthead + sections + utility + ticker = ~ 210px */
+  min-height: 210px;
+}
+.topnav-placeholder.--compact {
+  /* Operator pages: sections + ticker = ~ 100px */
+  min-height: 100px;
+}
+.topnav-placeholder-shell {
+  max-width: var(--wide-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 18px var(--page-padding) 0;
+  text-align: center;
+}
+.topnav-placeholder-title {
+  display: inline-block;
+  width: min(540px, 60%);
+  height: 42px;
+  background: var(--rule-faint);
+  border-radius: 3px;
+  opacity: 0.6;
+}
+.topnav-placeholder-tagline {
+  width: min(420px, 50%);
+  height: 8px;
+  background: var(--rule-faint);
+  margin: 10px auto 14px;
+  opacity: 0.5;
+}
+.topnav-placeholder-tabs {
+  height: 36px;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+}
+
+@media (max-width: 640px) {
+  .topnav-placeholder { min-height: 140px; }
+  .topnav-placeholder.--with-utility { min-height: 180px; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOP NAVIGATION — site-wide masthead strip, section nav, utility bar
+   ═══════════════════════════════════════════════════════════════ */
+
+.topnav {
+  background: var(--bg);
+}
+
+/* Sticky band: section tabs (+ optional utility). Body-level sibling so
+   sticky works against the viewport, not within .topnav's short height. */
+.topnav-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--bg);
+  border-bottom: 2px solid var(--rule);
+}
+
+/* Top strip: date · vol/no · block/fee · LIVE · wallet */
+.topnav-strip {
+  max-width: var(--wide-width);
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 6px var(--page-padding);
+  border-bottom: 1px solid var(--rule-faint);
+  font-family: var(--sans);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+.topnav-strip-left,
+.topnav-strip-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.topnav-strip .date {
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.topnav-strip .volno {
+  font-family: var(--mono);
+}
+
+.topnav-strip .weather b {
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-family: var(--mono);
+}
+
+.topnav-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.topnav-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px rgba(175, 30, 45, 0.13);
+}
+
+[data-theme="dark"] .topnav-live-dot {
+  box-shadow: 0 0 0 3px rgba(224, 85, 101, 0.18);
+}
+
+.topnav-wallet {
+  font-family: var(--mono);
+  color: var(--text-faint);
+}
+
+/* Masthead row inside topnav */
+.topnav-masthead {
+  max-width: var(--wide-width);
+  width: 100%;
+  margin: 0 auto;
+  text-align: center;
+  padding: 18px var(--page-padding) 6px;
+}
+
+.topnav-masthead-title {
+  font-family: var(--serif);
+  font-size: clamp(40px, 7vw, 54px);
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.topnav-masthead-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.topnav-masthead-tagline {
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 6px;
+}
+
+/* Section nav: 7-way. Pinned by the parent .topnav-sticky. */
+.topnav-sections {
+  width: 100%;
+  margin: 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  background: var(--bg);
+}
+.topnav-sections-inner {
+  max-width: var(--wide-width);
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+}
+
+.topnav-sections.--compact {
+  margin-top: 0;
+}
+
+.topnav-sections-inner a {
+  flex: 1;
+  text-align: center;
+  padding: 10px 6px;
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-right: 1px solid var(--rule-faint);
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.topnav-sections-inner a:last-child { border-right: none; }
+.topnav-sections-inner a:hover { background: var(--streak-bg); color: var(--text); }
+.topnav-sections-inner a.active {
+  color: var(--text);
+  background: var(--streak-bg);
+}
+
+/* Utility / filter bar */
+.topnav-utility {
+  max-width: var(--wide-width);
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px var(--page-padding);
+  font-family: var(--sans);
+  font-size: 11px;
+  border-bottom: 1px solid var(--rule-faint);
+  background: var(--bg-card);
+  flex-wrap: wrap;
+}
+
+.topnav-utility-label {
+  color: var(--text-dim);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.topnav-utility .divider {
+  color: var(--rule-light);
+  user-select: none;
+}
+
+.topnav-search {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--rule-light);
+  padding: 4px 10px;
+  min-width: 220px;
+  color: var(--text-dim);
+  background: var(--bg);
+  font-family: var(--sans);
+  font-size: 11px;
+}
+
+.topnav-search input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font-family: inherit;
+  font-size: inherit;
+  min-width: 0;
+  padding: 0;
+}
+
+.topnav-search input::placeholder { color: var(--text-dim); }
+
+.topnav-search .kbd {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-faint);
+  background: var(--streak-bg);
+  padding: 1px 4px;
+  border-radius: 2px;
+  margin-left: auto;
+  border: 1px solid var(--rule-faint);
+}
+
+/* ═══ CHIPS ═══ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border: 1px solid var(--rule-light);
+  color: var(--text-secondary);
+  background: transparent;
+  font-family: var(--sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+
+.chip.active {
+  border-color: var(--text);
+  background: var(--streak-bg);
+  color: var(--text);
+}
+
+.chip .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* ═══ BREAKING / LIVE TICKER STRIP ═══
+   On-theme: soft warm tint (streak-bg) framed by hairline rules. Prior
+   solid-black bar read too heavy against the paper palette. */
+.ticker {
+  background: var(--streak-bg);
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  border-top: 1px solid var(--rule-light);
+  border-bottom: 1px solid var(--rule-light);
+  overflow: hidden;
+  position: relative;
+}
+
+.ticker-inner {
+  max-width: var(--wide-width);
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px var(--page-padding);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.ticker-label {
+  font-family: var(--sans);
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.ticker-sep {
+  opacity: 0.4;
+  flex-shrink: 0;
+}
+
+.ticker-time {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.ticker-scroll {
+  display: inline-flex;
+  gap: 16px;
+  align-items: center;
+  animation: tickerScroll 75s linear infinite;
+  padding-right: 16px;
+}
+
+/* Ticker skeleton bars — shown until real items load */
+.ticker-sk {
+  display: inline-block;
+  height: 10px;
+  width: 120px;
+  background: var(--rule-faint);
+  border-radius: 2px;
+  flex-shrink: 0;
+  animation: skPulse 1.4s ease-in-out infinite;
+}
+.ticker-sk.--wide { width: 260px; }
+
+.ticker-scroll:hover {
+  animation-play-state: paused;
+}
+
+.ticker-refresh {
+  margin-left: auto;
+  color: var(--text-faint);
+  flex-shrink: 0;
+  font-family: var(--sans);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  padding-left: 16px;
+  border-left: 1px solid var(--rule-light);
+}
+
+@keyframes tickerScroll {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker-scroll { animation: none; }
+}
+
+/* ═══ BEAT PIP ═══ */
+.pip {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pip.--lg { width: 9px; height: 9px; }
+.pip.--xl { width: 10px; height: 10px; }
+.pip.--sm { width: 6px; height: 6px; }
+
+/* ═══ ADDRESS MONO ═══ */
+.mono-addr {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+/* ═══ KBD ═══ */
+.kbd {
+  font-family: var(--mono);
+  font-size: 9px;
+  padding: 1px 5px;
+  border: 1px solid var(--rule-light);
+  border-bottom-width: 2px;
+  border-radius: 2px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+/* ═══ STATUS INDICATORS ═══ */
+.status-inscribed { color: var(--good); }
+.status-pending   { color: var(--warn); }
+.status-retracted,
+.status-rejected  { color: var(--accent); }
+.status-approved  { color: var(--text-secondary); }
+.status-new       { color: var(--accent); }
+
+.status-pill {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ═══ PAGE WIDTH (wide) ═══ */
+.page-wide {
+  max-width: var(--wide-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 var(--page-padding);
+}
+
+/* ═══ HIGHLIGHT (search result matches) ═══ */
+mark, .hl {
+  background: var(--highlight);
+  color: var(--text);
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* ═══ TOPNAV RESPONSIVE (mobile-first) ═══ */
+@media (max-width: 768px) {
+  .topnav-strip {
+    flex-wrap: nowrap;
+    gap: 8px;
+    overflow: hidden;
+  }
+  .topnav-strip-left,
+  .topnav-strip-right {
+    gap: 10px;
+    min-width: 0;
+    flex-shrink: 1;
+  }
+  .topnav-strip-left { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topnav-strip .volno { display: none; }
+  .topnav-sections-inner {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .topnav-sections-inner::-webkit-scrollbar { display: none; }
+  .topnav-sections-inner a {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+  }
+  .topnav-utility {
+    gap: 6px;
+    padding: 8px var(--page-padding);
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+  }
+  .topnav-utility::-webkit-scrollbar { display: none; }
+  .topnav-utility .chip { flex-shrink: 0; }
+  .topnav-search {
+    min-width: 140px;
+    flex-shrink: 0;
+  }
+  /* Masthead tightens on mobile */
+  .topnav-masthead { padding: 14px var(--page-padding) 4px; }
+  .topnav-masthead-title {
+    font-size: clamp(32px, 8vw, 42px);
+    letter-spacing: 0.04em;
+  }
+  .topnav-masthead-tagline {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+  }
+}
+
+@media (max-width: 640px) {
+  .topnav-strip { font-size: 10px; padding: 5px var(--page-padding); }
+  .topnav-strip .date { letter-spacing: 0.06em; }
+  /* On very small screens drop the weather to keep the LIVE counter + date on one row */
+  .topnav-strip .weather { display: none; }
+  .topnav-wallet { display: none; }
+  .topnav-masthead-title {
+    font-size: clamp(26px, 9vw, 36px);
+    letter-spacing: 0.03em;
+  }
+  .topnav-masthead-tagline { font-size: 8px; }
+  .topnav-sections-inner a {
+    font-size: 10px;
+    padding: 9px 12px;
+    letter-spacing: 0.1em;
+  }
+  .ticker-inner { font-size: 10px; padding: 5px var(--page-padding); gap: 10px; }
+  .ticker-label { font-size: 9px; letter-spacing: 0.14em; }
+  .ticker-refresh { display: none; }
+}
+
+/* Share the same scroll pattern with page-level filter bars */
+.chip-row--scrollable {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+.chip-row--scrollable::-webkit-scrollbar { display: none; }
+.chip-row--scrollable .chip { flex-shrink: 0; }
+
+/* Signal-detail attribution — avatar + name + time inside the modal */
+.signal-attr {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.signal-attr-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--rule-faint);
+  flex-shrink: 0;
+}
+.signal-attr-name {
+  font-weight: 600;
+  color: var(--text);
+}
+.signal-attr-dot { color: var(--text-faint); }
+.signal-attr-time { color: var(--text-faint); }
 
 /* ── Signal detail modal ── */
 .signal-modal-overlay {
