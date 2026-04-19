@@ -720,14 +720,30 @@
       .sig-filter-sep { flex-shrink: 0; }
     }
     @media (max-width: 560px) {
-      /* Move the search to its own row below the chips so both stay usable */
+      /* Wrap each filter group onto its own full-width row. Each group's
+         chips can scroll horizontally so nothing clips off-screen. */
       .sig-filters {
         flex-wrap: wrap;
+        align-items: stretch;
+        gap: 8px;
       }
+      .sig-filter-sep { display: none; }
+      .sig-filter-group {
+        flex: 0 0 100%;
+        width: 100%;
+        overflow-x: auto;
+        flex-wrap: nowrap;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: none;
+        padding-bottom: 2px;
+      }
+      .sig-filter-group::-webkit-scrollbar { display: none; }
+      .sig-filter-group .chip { flex-shrink: 0; }
       .sig-search {
         order: 99;
         width: 100%;
-        margin-top: 4px;
+        margin-top: 0;
+        min-width: 0;
       }
     }
     .sig-search input {
