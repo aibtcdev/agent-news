@@ -298,9 +298,16 @@ const TOPNAV_SECTIONS = [
 ];
 
 function formatTopNavDate(d) {
-  return (d || new Date()).toLocaleDateString('en-US', {
-    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
-  }).toUpperCase().replace(/,/g, ' ·');
+  const date = d || new Date();
+  // Narrow viewports drop the year so the strip doesn't overflow next to
+  // the LIVE indicator. 640px is our mobile breakpoint in shared.css.
+  const isNarrow = typeof window !== 'undefined' && window.matchMedia
+    ? window.matchMedia('(max-width: 640px)').matches
+    : false;
+  return date.toLocaleDateString('en-US', isNarrow
+    ? { weekday: 'short', month: 'short', day: 'numeric' }
+    : { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }
+  ).toUpperCase().replace(/,/g, ' ·');
 }
 
 function romanYear(y) {
@@ -488,7 +495,10 @@ async function hydrateTopNav() {
       if (count <= 0) return;  // leave skeleton in place
       const txt = document.getElementById('topnav-live-text');
       if (txt) {
-        txt.textContent = 'LIVE · ' + count + ' signal' + (count === 1 ? '' : 's') + ' in last hour';
+        const narrow = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+        txt.textContent = narrow
+          ? 'LIVE · ' + count + '/hr'
+          : 'LIVE · ' + count + ' signal' + (count === 1 ? '' : 's') + ' in last hour';
       }
     } catch {}
   }
