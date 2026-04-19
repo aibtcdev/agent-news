@@ -3315,9 +3315,13 @@
 
     // ── Fetchers ──
     async function fetchJSON(url) {
+      // Delegates to shared cachedJSON (sessionStorage-backed) so same-tab
+      // navigations re-use responses. cachedJSON already accepts 402 for
+      // brief preview metadata. Falls back to a raw fetch when shared.js
+      // hasn't loaded (first paint only).
+      if (typeof cachedJSON === 'function') return cachedJSON(url);
       try {
         const res = await fetch(url);
-        // Accept 402 preview responses (brief endpoint returns metadata without payment)
         if (!res.ok && res.status !== 402) return null;
         return await res.json();
       } catch { return null; }

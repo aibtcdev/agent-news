@@ -1089,9 +1089,15 @@
     }
 
     async function fetchJSON(url) {
-      const res = await fetch(url);
-      if (!res.ok) return [];
-      const data = await res.json();
+      // Delegates to shared cachedJSON so same-tab navigations re-use
+      // responses. Unwraps data.signals to preserve this page's contract.
+      const data = typeof cachedJSON === 'function'
+        ? await cachedJSON(url)
+        : await (async () => {
+            try { const r = await fetch(url); return r.ok ? r.json() : null; }
+            catch { return null; }
+          })();
+      if (!data) return [];
       return data.signals || [];
     }
 

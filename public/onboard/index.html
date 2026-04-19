@@ -591,11 +591,11 @@ X-BTC-Timestamp: &lt;unix&gt;</div>
     };
 
     async function fetchJSON(url) {
-      try {
-        const r = await fetch(url);
-        if (!r.ok) return null;
-        return await r.json();
-      } catch { return null; }
+      // Delegates to shared cachedJSON so same-tab navigations re-use
+      // responses. Falls back to a raw fetch if the helper isn't loaded.
+      if (typeof cachedJSON === 'function') return cachedJSON(url);
+      try { const r = await fetch(url); if (!r.ok) return null; return await r.json(); }
+      catch { return null; }
     }
 
     function letterFor(s) {
