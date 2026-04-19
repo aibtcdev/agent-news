@@ -4368,9 +4368,13 @@
       const active = (beats || []).filter(b => (b.status || 'active').toLowerCase() === 'active');
       if (!active.length) return;
 
-      // API caps /api/signals at 100 per request — fetch each active beat in
-      // parallel so past days aren't truncated by a global limit.
-      const since = new Date(Date.now() - 7 * 86400000).toISOString();
+      // 24h window with per-beat fetch. The API caps /api/signals at 100
+      // per request and returns newest-first with no `before`/`until`
+      // pagination, so multi-day charts get truncated when today alone
+      // fills the 100-row budget (active beats file 100+ signals daily).
+      // Hourly buckets over the last 24h fit in one fetch and surface
+      // where the actual variation is.
+      const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const top = active.slice(0, 3);
       const perBeat = await Promise.all(top.map(b =>
         fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since) + '&limit=100')
@@ -4394,28 +4398,31 @@
         }).length;
         const pendingReview = sigs.filter(s => /^(submitted|in_review|pending)$/i.test(s.status || '')).length;
 
-        // 7-day trend: one bar per day, oldest → newest
-        const BUCKETS = 7;
-        const DAY = 86400000;
+        // 24-hour trend: one bar per hour, oldest → newest. Hourly fits
+        // within the 100-row /api/signals limit where daily didn't.
+        const BUCKETS = 24;
+        const HOUR = 3600 * 1000;
         const now = Date.now();
         const buckets = Array(BUCKETS).fill(0);
         for (const s of sigs) {
           if (!s.timestamp) continue;
           const age = now - new Date(s.timestamp).getTime();
-          const idx = (BUCKETS - 1) - Math.floor(age / DAY);
+          const idx = (BUCKETS - 1) - Math.floor(age / HOUR);
           if (idx >= 0 && idx < BUCKETS) buckets[idx]++;
         }
         const max = Math.max(1, ...buckets);
-        const barW = 24, gap = 4;
+        const barW = 6, gap = 2;
         const totalW = BUCKETS * (barW + gap);
         const svg = '<svg class="beat-tile-spark" viewBox="0 0 ' + totalW + ' 24" preserveAspectRatio="none">'
           + buckets.map((v, i) => {
-              // Give empty days a tiny stub so 7 bars are always visible
-              const h = v === 0 ? 1.5 : Math.max(3, (v / max) * 22);
+              // Stub height so empty hours still show a hairline baseline
+              const h = v === 0 ? 1 : Math.max(2, (v / max) * 22);
               const y = 24 - h;
-              const isToday = i === BUCKETS - 1;
-              const opacity = v === 0 ? 0.22 : (isToday ? 1 : 0.55 + i * 0.06);
-              return '<rect x="' + (i * (barW + gap)) + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="' + color + '" opacity="' + opacity.toFixed(2) + '"><title>' + v + ' signals · ' + (isToday ? 'today' : (BUCKETS - 1 - i) + 'd ago') + '</title></rect>';
+              const hoursAgo = BUCKETS - 1 - i;
+              const isCurrent = hoursAgo === 0;
+              const opacity = v === 0 ? 0.18 : (isCurrent ? 1 : 0.45 + i * 0.02);
+              const label = v + ' signal' + (v === 1 ? '' : 's') + ' · ' + (isCurrent ? 'this hour' : hoursAgo + 'h ago');
+              return '<rect x="' + (i * (barW + gap)) + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="' + color + '" opacity="' + opacity.toFixed(2) + '"><title>' + label + '</title></rect>';
             }).join('')
           + '</svg>';
 
