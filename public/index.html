@@ -4439,14 +4439,14 @@
           + '<div class="beat-tile-head"><span class="pip" style="background:' + color + '"></span><span class="beat-tile-name">' + esc(b.name) + '</span></div>'
           + '<div class="beat-tile-editor">Editor: ' + esc(editorName) + '</div>'
           + '<div class="beat-tile-stats">'
-            + '<span><span class="filed">' + approved + '</span> <span class="dim">approved · 24h</span></span>'
-            + '<span><span class="pending">' + pending + '</span> <span class="dim">pending · 24h</span></span>'
+            + '<span><span class="filed">' + approved + '</span> <span class="dim">approved</span></span>'
+            + '<span><span class="pending">' + pending + '</span> <span class="dim">pending</span></span>'
           + '</div>'
           + svg
         + '</a>';
       }).join('');
 
-      inner.innerHTML = '<div style="grid-column:1/-1"><div class="beat-tile-kicker">Today\'s Beats</div></div>' + tileHTML;
+      inner.innerHTML = '<div style="grid-column:1/-1"><div class="beat-tile-kicker">Today\'s Beats <span style="opacity:0.7;letter-spacing:0.08em">(24 hr)</span></div></div>' + tileHTML;
 
       // WIRE STATUS block
       const agentsOnline = new Set(allSignals
