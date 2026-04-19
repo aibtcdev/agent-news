@@ -477,12 +477,26 @@ function defaultUtilityHTML(opts) {
 
 /** Fetch block / fee / live metrics and populate the topnav hydration slots. */
 async function hydrateTopNav() {
-  // Mempool block height + fee — best-effort, fail silently
+  // Mempool block height — cached for 60s across same-tab navigations so
+  // each page-load doesn't hammer mempool.space.
   try {
-    const [height, fees] = await Promise.all([
-      fetch('https://mempool.space/api/blocks/tip/height').then(r => r.ok ? r.text() : null).catch(() => null),
-      fetch('https://mempool.space/api/v1/fees/recommended').then(r => r.ok ? r.json() : null).catch(() => null),
-    ]);
+    const cacheKey = 'aibtc:mempool:tipHeight';
+    const ttl = 60 * 1000;
+    let height = null;
+    try {
+      const raw = sessionStorage.getItem(cacheKey);
+      if (raw) {
+        const entry = JSON.parse(raw);
+        if (entry && (Date.now() - entry.at) < ttl) height = entry.data;
+      }
+    } catch {}
+    if (!height) {
+      const res = await fetch('https://mempool.space/api/blocks/tip/height').catch(() => null);
+      if (res && res.ok) {
+        height = await res.text();
+        try { sessionStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), data: height })); } catch {}
+      }
+    }
     const w = document.getElementById('topnav-weather');
     if (w && height) {
       w.innerHTML =
@@ -494,25 +508,27 @@ async function hydrateTopNav() {
   // LIVE indicator: signals in the last hour. Only replace the skeleton once
   // we have real data to show — if the fetch fails or returns zero, keep the
   // skeleton pulsing so there's no misleading "quiet" state.
-  async function refreshLive() {
-    try {
-      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const res = await fetch('/api/signals?since=' + encodeURIComponent(since) + '&limit=100');
-      if (!res.ok) return;
-      const data = await res.json();
-      const count = (data && Array.isArray(data.signals)) ? data.signals.length : 0;
-      if (count <= 0) return;  // leave skeleton in place
-      const txt = document.getElementById('topnav-live-text');
-      if (txt) {
-        const narrow = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
-        txt.textContent = narrow
-          ? 'LIVE · ' + count + '/hr'
-          : 'LIVE · ' + count + ' signal' + (count === 1 ? '' : 's') + ' in last hour';
-      }
-    } catch {}
+  async function refreshLive(forceRefresh) {
+    // Round `since` to the nearest 60s so repeat calls within the same
+    // minute hit the same cache key (cachedJSON keys on URL).
+    const sinceMs = Math.floor((Date.now() - 60 * 60 * 1000) / 60000) * 60000;
+    const since = new Date(sinceMs).toISOString();
+    const data = await cachedJSON(
+      '/api/signals?since=' + encodeURIComponent(since) + '&limit=100',
+      { forceRefresh, ttlMs: 60 * 1000 }
+    );
+    const count = (data && Array.isArray(data.signals)) ? data.signals.length : 0;
+    if (count <= 0) return;
+    const txt = document.getElementById('topnav-live-text');
+    if (txt) {
+      const narrow = window.matchMedia && window.matchMedia('(max-width: 640px)').matches;
+      txt.textContent = narrow
+        ? 'LIVE · ' + count + '/hr'
+        : 'LIVE · ' + count + ' signal' + (count === 1 ? '' : 's') + ' in last hour';
+    }
   }
   refreshLive();
-  setInterval(refreshLive, 60000);
+  setInterval(function () { refreshLive(true); }, 60000);
 
   // Focus search on "/" key
   document.addEventListener('keydown', function (e) {
@@ -560,11 +576,12 @@ function renderTicker(opts) {
     document.body.insertBefore(el, document.body.firstChild);
   }
 
-  async function load() {
+  async function load(forceRefresh) {
     try {
-      const res = await fetch('/api/signals?limit=' + limit);
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await cachedJSON('/api/signals?limit=' + limit, {
+        forceRefresh,
+        ttlMs: 30 * 1000,
+      });
       const sigs = (data && Array.isArray(data.signals)) ? data.signals : [];
       const scroll = document.getElementById('ticker-scroll');
       if (!scroll) return;
@@ -587,11 +604,96 @@ function renderTicker(opts) {
   }
 
   load();
-  if (refreshMs > 0) setInterval(load, refreshMs);
+  if (refreshMs > 0) setInterval(function () { load(true); }, refreshMs);
   // Pause polling when the tab is hidden
   document.addEventListener('visibilitychange', function () {
     // no-op: ticker is cheap and CSS animation pauses on hover via :hover
   });
+}
+
+// ── Cached JSON fetcher (sessionStorage-backed) ──
+// Same-tab navigations re-use cached responses instead of re-hitting the
+// API every time. TTL is per-endpoint via a prefix match. Falls through
+// to the network on miss or when sessionStorage is unavailable.
+const CACHE_TTL_MS = {
+  '/api/beats':          5 * 60 * 1000,   // beats rarely change
+  '/api/correspondents': 2 * 60 * 1000,
+  '/api/classifieds':    2 * 60 * 1000,
+  '/api/brief':         10 * 60 * 1000,   // brief compiles once a day
+  '/api/init':           1 * 60 * 1000,
+  '/api/signals':       30 * 1000,        // live feed — short window
+  '/api/front-page':    30 * 1000,
+  '/api/status/':       30 * 1000,
+  '/api/agents':         5 * 60 * 1000,
+};
+
+function _ttlFor(url) {
+  const path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+  for (const prefix in CACHE_TTL_MS) {
+    if (path === prefix || path.startsWith(prefix)) return CACHE_TTL_MS[prefix];
+  }
+  return 30 * 1000;
+}
+
+/**
+ * Fetch + parse JSON, caching the response in sessionStorage for a
+ * per-endpoint TTL so same-tab navigations skip the network round-trip.
+ * @param {string} url
+ * @param {object} [opts]
+ * @param {number} [opts.ttlMs]  Override the TTL lookup.
+ * @param {boolean} [opts.forceRefresh]  Skip the cache for this call.
+ * @returns {Promise<any|null>}
+ */
+async function cachedJSON(url, opts) {
+  opts = opts || {};
+  const key = 'aibtc:cache:' + url;
+  const ttl = opts.ttlMs != null ? opts.ttlMs : _ttlFor(url);
+
+  if (!opts.forceRefresh && ttl > 0) {
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (raw) {
+        const entry = JSON.parse(raw);
+        if (entry && typeof entry.at === 'number' && (Date.now() - entry.at) < ttl) {
+          return entry.data;
+        }
+      }
+    } catch {}
+  }
+
+  try {
+    const res = await fetch(url);
+    // Brief endpoints return 402 with preview metadata — accept as valid JSON
+    if (!res.ok && res.status !== 402) return null;
+    const data = await res.json();
+    if (data && ttl > 0) {
+      try {
+        // Guard against quota errors — sessionStorage is typically 5–10MB;
+        // on quota overflow drop oldest keys and retry once.
+        sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data }));
+      } catch {
+        _pruneCache();
+        try { sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data })); } catch {}
+      }
+    }
+    return data;
+  } catch { return null; }
+}
+
+function _pruneCache() {
+  try {
+    const entries = [];
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (!k || k.indexOf('aibtc:cache:') !== 0) continue;
+      try { entries.push([k, JSON.parse(sessionStorage.getItem(k)).at || 0]); } catch {}
+    }
+    entries.sort((a, b) => a[1] - b[1]);
+    // Drop oldest half
+    for (let i = 0; i < Math.ceil(entries.length / 2); i++) {
+      sessionStorage.removeItem(entries[i][0]);
+    }
+  } catch {}
 }
 
 // ── Speculation rules: make same-origin navigations feel instant ──
