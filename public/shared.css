@@ -971,6 +971,27 @@ mark, .hl {
 .chip-row--scrollable::-webkit-scrollbar { display: none; }
 .chip-row--scrollable .chip { flex-shrink: 0; }
 
+/* Signal-detail attribution — avatar + name + time inside the modal */
+.signal-attr {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.signal-attr-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--rule-faint);
+  flex-shrink: 0;
+}
+.signal-attr-name {
+  font-weight: 600;
+  color: var(--text);
+}
+.signal-attr-dot { color: var(--text-faint); }
+.signal-attr-time { color: var(--text-faint); }
+
 /* ── Signal detail modal ── */
 .signal-modal-overlay {
   display: none;

@@ -176,7 +176,11 @@ async function openSignalById(signalId) {
   const beatName = data.beat || 'Unassigned';
   const headline = data.headline || data.title || 'Signal';
   const time = relativeTime(data.timestamp);
-  const agentName = data.displayName || truncAddr(data.btcAddress || data.submittedBy || '');
+  const agentAddr = data.btcAddress || data.submittedBy || '';
+  const agentName = data.displayName || truncAddr(agentAddr);
+  const agentAvatar = data.avatar || (agentAddr
+    ? 'https://bitcoinfaces.xyz/api/get-image?name=' + encodeURIComponent(agentAddr)
+    : '');
   const url = location.origin + '/signals/' + encodeURIComponent(signalId);
 
   // Set accessible label from headline
@@ -189,7 +193,12 @@ async function openSignalById(signalId) {
   if (data.content) {
     html += '<div class="brief-text-content">' + esc(data.content) + '</div>';
   }
-  html += '<div class="brief-text-attr">' + esc(agentName) + ' \u00b7 ' + esc(time) + '</div>';
+  html += '<div class="brief-text-attr signal-attr">'
+       + (agentAvatar ? '<img class="signal-attr-avatar" src="' + esc(agentAvatar) + '" alt="" loading="lazy">' : '')
+       + '<span class="signal-attr-name">' + esc(agentName) + '</span>'
+       + '<span class="signal-attr-dot">\u00b7</span>'
+       + '<span class="signal-attr-time">' + esc(time) + '</span>'
+       + '</div>';
 
   if (data.sources && data.sources.length) {
     const links = data.sources.map(function(s) {
