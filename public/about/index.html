@@ -34,10 +34,11 @@
       padding: var(--space-6) var(--page-padding) var(--space-7);
       flex: 1;
       display: grid;
-      grid-template-columns: 1fr 260px;
+      grid-template-columns: minmax(0, 1fr) 260px;
       gap: var(--space-6);
       align-items: start;
     }
+    .about-wrap > * { min-width: 0; }
     @media (max-width: 900px) {
       .about-wrap { grid-template-columns: 1fr; }
       .about-aside { order: 2; }
@@ -45,6 +46,19 @@
 
     .about-content {
       max-width: 720px;
+      min-width: 0;
+    }
+    /* Defensive: long URLs / mono payloads should wrap, not overflow */
+    .about-content p,
+    .about-content li,
+    .about-content .about-step-text {
+      overflow-wrap: anywhere;
+    }
+    .about-content pre {
+      max-width: 100%;
+      overflow-x: auto;
+      white-space: pre;
+      word-break: normal;
     }
 
     .about-kicker {
@@ -289,14 +303,15 @@
     }
     @media (max-width: 768px) {
       .about-headline {
-        font-size: clamp(26px, 7vw, 34px);
+        font-size: clamp(22px, 6vw, 28px);
       }
       .about-pitch {
-        font-size: 16px;
+        font-size: 14px;
       }
-      .about-section .lead { font-size: 18px; }
-      .about-section p { font-size: 14px; }
-      pre { font-size: 11px; padding: var(--space-3); }
+      .about-section .lead { font-size: 16px; }
+      .about-section p { font-size: 13px; line-height: 1.65; }
+      .about-step-text { font-size: 13px; line-height: 1.6; }
+      pre { font-size: 10.5px; padding: var(--space-3); }
     }
 
     @media (max-width: 640px) {
@@ -305,35 +320,36 @@
       }
       .about-kicker { font-size: 9px; }
       .about-headline {
-        font-size: clamp(24px, 8vw, 30px);
+        font-size: clamp(20px, 7vw, 24px);
         line-height: 1.15;
       }
       .about-pitch {
-        font-size: 14px;
+        font-size: 13px;
         margin-bottom: var(--space-5);
       }
       .about-section { margin-bottom: var(--space-5); }
       .about-section h2 { font-size: 10px; letter-spacing: 0.14em; }
-      .about-section p { font-size: 14px; line-height: 1.7; }
-      .about-section .lead { font-size: 16px; }
+      .about-section p { font-size: 13px; line-height: 1.65; }
+      .about-section .lead { font-size: 15px; }
       .about-step {
-        padding: 8px 0 8px 12px;
+        padding: 7px 0 7px 10px;
       }
-      .about-step-text { font-size: 14px; line-height: 1.6; }
+      .about-step-text { font-size: 13px; line-height: 1.55; }
       .about-quote {
-        font-size: 15px;
+        font-size: 14px;
         padding: var(--space-3) 0 var(--space-3) var(--space-3);
       }
       pre {
-        font-size: 10px;
+        font-size: 9.5px;
         padding: var(--space-2);
-        line-height: 1.6;
+        line-height: 1.55;
       }
       /* Aside in mobile context */
       .about-aside-block { padding: var(--space-3) 0; }
-      .about-aside-api { font-size: 10px; padding: 10px; }
+      .about-aside-api { font-size: 9.5px; padding: 10px; }
+      .about-toc a { font-size: 12px; }
       .about-cta { padding-top: var(--space-4); }
-      .about-cta-heading { font-size: 18px; }
+      .about-cta-heading { font-size: 17px; }
 
       .about-cta-links {
         gap: var(--space-2);
