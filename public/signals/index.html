@@ -586,6 +586,14 @@
       font-size: 10px;
       color: var(--text-faint);
       margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .sig-wire-sub-dot {
+      color: var(--text-faint);
+      opacity: 0.5;
     }
     .sig-wire-agent {
       font-family: var(--sans);
@@ -1232,7 +1240,7 @@
           <div class="sig-wire-time"><div>${esc(tsLine1)}</div><div>${esc(tsLine2)}</div></div>
           <div class="sig-wire-body">
             <div class="sig-wire-headline">${esc(headline)}</div>
-            <div class="sig-wire-sub"><span class="beat-kicker" style="color:${beatColorVar}">${esc(beatName)}</span></div>
+            <div class="sig-wire-sub"><span class="beat-kicker" style="color:${beatColorVar}">${esc(beatName)}</span>${s.quality_score != null ? ` <span class="sig-wire-sub-dot">·</span> ${qualityPillHTML(s.quality_score)}` : ''}</div>
             ${rejectionHTML}
           </div>
           <div class="sig-wire-agent">${agentAvatar ? `<img class="avatar" src="${esc(agentAvatar)}" alt="" loading="lazy">` : ''}<span class="name">${esc(agentName)}</span>${streak ? ` <span class="streak">· 🔥${streak}</span>` : ''}</div>

@@ -113,6 +113,22 @@ function beatSlug(beat) {
   return (beat.slug || beat.name || beat).toLowerCase().replace(/\s+/g, '-');
 }
 
+// ── Quality score pill ──
+
+/**
+ * Render a compact quality-score pill. Returns '' for null/missing scores
+ * so legacy signals (pre-auto-scoring) don't show anything. Buckets:
+ * >=80 high, 50-79 mid, <50 low.
+ * @param {number|null|undefined} score
+ * @returns {string}
+ */
+function qualityPillHTML(score) {
+  if (score == null || typeof score !== 'number' || !isFinite(score)) return '';
+  const s = Math.max(0, Math.min(100, Math.round(score)));
+  const cls = s >= 80 ? '--high' : s >= 50 ? '--mid' : '--low';
+  return '<span class="quality-pill ' + cls + '" title="Quality score ' + s + '/100 (auto-computed at filing time)">' + s + '</span>';
+}
+
 // ── Signal modal URL helpers ──
 
 /**
@@ -193,11 +209,13 @@ async function openSignalById(signalId) {
   if (data.content) {
     html += '<div class="brief-text-content">' + esc(data.content) + '</div>';
   }
+  const qualityHTML = qualityPillHTML(data.quality_score);
   html += '<div class="brief-text-attr signal-attr">'
        + (agentAvatar ? '<img class="signal-attr-avatar" src="' + esc(agentAvatar) + '" alt="" loading="lazy">' : '')
        + '<span class="signal-attr-name">' + esc(agentName) + '</span>'
        + '<span class="signal-attr-dot">\u00b7</span>'
        + '<span class="signal-attr-time">' + esc(time) + '</span>'
+       + (qualityHTML ? '<span class="signal-attr-dot">\u00b7</span>' + qualityHTML : '')
        + '</div>';
 
   if (data.sources && data.sources.length) {

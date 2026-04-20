@@ -454,6 +454,7 @@
             + '<div class="wire-body-meta">'
               + '<span>' + esc(agent) + (s.streak ? ' · 🔥' + s.streak : '') + '</span>'
               + (s.threadCount ? '<span class="wire-body-thread">↪ ' + s.threadCount + ' related</span>' : '')
+              + qualityPillHTML(s.quality_score)
               + '<span class="wire-body-status ' + statusClass + '">' + statusLabel + '</span>'
             + '</div>'
           + '</div>'
