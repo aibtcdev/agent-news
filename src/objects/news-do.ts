@@ -1810,23 +1810,15 @@ export class NewsDO extends DurableObject<Env> {
     // Signals CRUD
     // -------------------------------------------------------------------------
 
-    // GET /signals/counts — signal counts grouped by status
-    this.router.get("/signals/counts", (c) => {
-      const rows = this.ctx.storage.sql
-        .exec("SELECT status, COUNT(*) as count FROM signals GROUP BY status")
-        .toArray();
-      // Initialize with all known statuses set to 0 so the response shape
-      // always includes every status key, even when no signals have that status.
-      const counts: Record<string, number> = {};
-      for (const s of SIGNAL_STATUSES) {
-        counts[s] = 0;
-      }
-      for (const row of rows) {
-        const r = row as { status: string; count: number };
-        counts[r.status] = Number(r.count);
-      }
-      return c.json({ ok: true, data: counts } satisfies DOResult<Record<string, number>>);
-    });
+    // Note: a second `/signals/counts` handler lives below (see comment near
+    // line ~1985) — it carries the full `beat`/`agent`/`since` filter set
+    // used by the public route. An earlier simpler duplicate registered here
+    // shadowed the richer handler under Hono's first-match routing, causing
+    // `since` (and `beat`/`agent`) filters to silently do nothing against the
+    // public endpoint. Removed in #503's fix so the filter path actually
+    // runs; the newer handler emits the same canonical `{submitted, approved,
+    // replaced, rejected, brief_included, total}` shape the client type
+    // declares in lib/do-client.ts.
 
     // GET /signals — list signals with optional filters (beat, agent, tag, since, status, limit)
     this.router.get("/signals", (c) => {
@@ -1982,6 +1974,17 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // GET /signals/counts — lightweight signal counts by status (no full records fetched)
+    //
+    // When `since` is supplied, it's intended to answer "what happened inside
+    // this window". For signals still in the `submitted` state that means the
+    // creation date; for signals that have moved through editorial review
+    // (`approved`, `brief_included`, `rejected`, `replaced`) the operationally
+    // relevant date is when the review happened — `reviewed_at`. Using
+    // `created_at` uniformly silently mis-attributes back-filled historical
+    // signals (where `created_at` is today but the review may be historical,
+    // or vice versa) into today's bucket — see #503. For rows predating the
+    // `reviewed_at` column (legacy data with NULL `reviewed_at`), COALESCE
+    // falls back to `created_at` so they still count in their creation bucket.
     this.router.get("/signals/counts", (c) => {
       const beat = c.req.query("beat") ?? null;
       const agent = c.req.query("agent") ?? null;
@@ -1994,7 +1997,28 @@ export class NewsDO extends DurableObject<Env> {
            FROM signals
            WHERE (?1 IS NULL OR beat_slug = ?1)
              AND (?2 IS NULL OR btc_address = ?2)
-             AND (?3 IS NULL OR created_at >= ?3)
+             AND (
+               ?3 IS NULL
+               OR (
+                 status = 'submitted' AND created_at >= ?3
+               )
+               OR (
+                 status IN ('approved', 'brief_included', 'rejected', 'replaced')
+                 AND COALESCE(reviewed_at, created_at) >= ?3
+               )
+               OR (
+                 -- Defensive fall-through for any future status added to
+                 -- SIGNAL_STATUSES. TypeScript's as-const enum forces call
+                 -- sites to update, but the SQL string can silently miss a
+                 -- new value and drop rows from the windowed count. Default
+                 -- to created_at-based bucketing (same as 'submitted') so a
+                 -- new status degrades gracefully instead of disappearing.
+                 -- Per review feedback on #522.
+                 status NOT IN (
+                   'submitted', 'approved', 'brief_included', 'rejected', 'replaced'
+                 ) AND created_at >= ?3
+               )
+             )
            GROUP BY status`,
           beat,
           agent,
