@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
@@ -296,7 +296,8 @@ export class NewsDO extends DurableObject<Env> {
     // 22 = Beat consolidation — 12 → 3 beats, retire old beats, create aibtc-network (#423)
     // 23 = Streak UTC migration (backfill last_signal_date from actual signal timestamps)
     // 24 = Signal quality auto-scoring — quality_score INTEGER, score_breakdown TEXT (#343)
-    const CURRENT_MIGRATION_VERSION = 24;
+    // 25 = Publisher payout reconciliation — Apr 7 amendment + clear 8 RBF payout_txid + Mar 31 over-cap void (#502)
+    const CURRENT_MIGRATION_VERSION = 25;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -643,8 +644,31 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Publisher payout reconciliation (#502):
+      //   (a) Apr 7 amendment — align earnings with 2d999d7f…i0 (pre-void witness content)
+      //       that differs from platform re-curated brief_signals by 14 of 30 signals.
+      //   (b) Clear 8 dropped-mempool RBF payout_txid values (7 Mar 25 + 1 Mar 31)
+      //       so curated-payout.ts can resend the victimized transfers.
+      //   (c) Mar 31 over-cap void — void 98 brief_inclusion earnings not in the curated
+      //       30 (from amended-2026-03-31.html); 29 already-paid stay untouched; 1
+      //       canonical unpaid becomes payable.
+      // All are UPDATE-only + idempotent, mirroring Migration 20 (#385). Per-statement
+      // errors are logged but the version still advances — intentional, since idempotency
+      // means a manual retry is safe and the alternative (pinning the version on partial
+      // failure) blocks all subsequent migrations on a transient storage blip.
+      if (appliedVersion < 25) {
+        for (const stmt of MIGRATION_APR7_EARNINGS_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            console.error("Apr 7 earnings amendment migration failed:", e);
+          }
+        }
+      }
+
       // Record current migration version so future cold starts skip all of the above.
-      // If migration 22 failed but 23 succeeded, cap at 21 so v22 retries on next cold start.
+      // If migration 22 failed but later migrations succeeded, cap at 21 so v22 retries
+      // on next cold start.
       const versionToWrite = migration22Ok ? CURRENT_MIGRATION_VERSION : 21;
       this.ctx.storage.sql.exec(
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
