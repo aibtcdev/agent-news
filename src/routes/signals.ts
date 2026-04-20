@@ -116,6 +116,8 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
       status: s.status,
       publisherFeedback: s.publisher_feedback,
       disclosure: s.disclosure,
+      quality_score: s.quality_score ?? null,
+      score_breakdown: s.score_breakdown ?? null,
     };
   });
 
@@ -166,6 +168,8 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
     publisherFeedback: s.publisher_feedback,
     reviewedAt: s.reviewed_at,
     disclosure: s.disclosure,
+    quality_score: s.quality_score ?? null,
+    score_breakdown: s.score_breakdown ?? null,
   });
 });
 
