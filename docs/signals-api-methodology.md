@@ -11,6 +11,8 @@ Short guide clarifying which endpoint returns which flavor of "editor activity",
 
 Use the first for per-day editor-action audits (DRI reviews, rubric evaluation, dispute resolution). Use the second for live-queue dashboards where "how many signals are currently in state X" is the intended question.
 
+The `limit=50` in the first row is intentionally over-provisioned — the per-beat daily cap is 10 approved signals, so 50 gives headroom without pagination while still returning the complete daily set in one call.
+
 ## Why these return different numbers
 
 Signals transition through these statuses:
