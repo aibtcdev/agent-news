@@ -343,6 +343,25 @@ export const MIGRATION_BEAT_RESTRUCTURE_SQL = `
  * Migration seeds beat_claims from existing beats.created_by so current
  * owners retain their membership automatically.
  */
+
+/**
+ * Per-beat streak tracking migration.
+ * Adds a beat_streaks table that tracks (btc_address, beat_slug) pair streaks.
+ */
+export const MIGRATION_BEAT_STREAKS_SQL = [
+  `CREATE TABLE IF NOT EXISTS beat_streaks (
+    btc_address      TEXT NOT NULL,
+    beat_slug        TEXT NOT NULL REFERENCES beats(slug),
+    current_streak   INTEGER NOT NULL DEFAULT 0,
+    longest_streak   INTEGER NOT NULL DEFAULT 0,
+    last_signal_date TEXT,
+    total_signals    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (btc_address, beat_slug)
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_beat_streaks_address ON beat_streaks(btc_address)",
+  "CREATE INDEX IF NOT EXISTS idx_beat_streaks_slug ON beat_streaks(beat_slug)",
+] as const;
+
 export const MIGRATION_BEAT_CLAIMS_SQL = [
   `CREATE TABLE IF NOT EXISTS beat_claims (
     beat_slug    TEXT NOT NULL REFERENCES beats(slug),

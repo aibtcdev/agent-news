@@ -608,6 +608,35 @@ export async function listStreaks(
   return result.data;
 }
 
+
+// ---------------------------------------------------------------------------
+// Per-beat streaks
+// ---------------------------------------------------------------------------
+
+export interface BeatStreakEntry {
+  current: number;
+  longest: number;
+  last_signal: string | null;
+}
+
+export interface AgentStreaksData {
+  streaks: Record<string, BeatStreakEntry>;
+  global: { current: number; longest: number };
+}
+
+export async function getAgentStreaks(
+  env: Env,
+  address: string
+): Promise<AgentStreaksData | null> {
+  const stub = getStub(env);
+  const result = await doFetch<AgentStreaksData>(
+    stub,
+    `/streaks/${encodeURIComponent(address)}`
+  );
+  if (!result.ok) throw new Error(result.error ?? "Failed to fetch agent streaks");
+  return result.data ?? null;
+}
+
 // ---------------------------------------------------------------------------
 // Agent Status
 // ---------------------------------------------------------------------------
