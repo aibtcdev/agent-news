@@ -58,6 +58,7 @@ const TIER1_DOMAINS = [
 const TIER1_TLDS = [".gov", ".edu", ".ac.uk", ".ac.jp"];
 
 // ── Beat-specific keyword sets (editor Gate 3 + Gate 5) ──
+// Precompiled at module level for performance
 const BEAT_KEYWORDS: Record<string, string[]> = {
   quantum: [
     "quantum", "post-quantum", "pqc", "bip-360", "bip-361", "ecdsa",
@@ -77,6 +78,14 @@ const BEAT_KEYWORDS: Record<string, string[]> = {
     "nonce", "bip-322", "stx",
   ],
 };
+
+// Precompiled beat keyword regexes (word-boundary matching)
+const BEAT_KEYWORD_REGEXES: Record<string, RegExp[]> = Object.fromEntries(
+  Object.entries(BEAT_KEYWORDS).map(([beat, kws]) => [
+    beat,
+    kws.map((kw) => new RegExp("\\b" + kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i")),
+  ])
+);
 
 // ── Novelty indicator words ──
 const NOVELTY_WORDS = [
@@ -99,12 +108,6 @@ const SPECIFICITY_PATTERNS = [
   /[\d.]+%/g,                 // percentages
 ];
 
-// ── Disclosure keywords ──
-const DISCLOSURE_KEYWORDS = [
-  "claude", "gpt", "gemini", "llm", "ai", "model", "tool", "skill",
-  "mcp", "agent", "openai", "anthropic", "mistral", "llama", "groq",
-  "hermes", "quiet falcon",
-];
 
 // ── Dimension weights (sum = 100) ──
 const MAX_SOURCE_QUALITY = 25;
@@ -219,11 +222,11 @@ function scoreBeatRelevance(
   body?: string | null,
   headline?: string
 ): number {
-  const keywords = BEAT_KEYWORDS[beat_slug] || BEAT_KEYWORDS["quantum"];
+  const keywords = BEAT_KEYWORDS[beat_slug];
+  if (!keywords || keywords.length === 0) return 0;
   const text = [headline, body, ...tags].filter(Boolean).join(" ").toLowerCase();
 
   let keywordHits = 0;
-  const matchedKw = new Set<string>();
 
   for (const kw of keywords) {
     // Word-boundary match (editor uses \b regex)
@@ -249,11 +252,9 @@ function scoreStructure(body?: string | null): number {
   if (!body) return 0;
   const upper = body.toUpperCase();
 
-  const hasClaim = /\bCLAIM\b/.test(upper) || /\bCLAIM[:.]/i.test(body);
-  const hasEvidence = /\bEVIDENCE\b/.test(upper) || /\bEVIDENCE[:.]/i.test(body);
-  const hasImplication =
-    /\bIMPLICATION\b/.test(upper) || /\bIMPLICATION[:.]/i.test(body) ||
-    /\bACTION\b/.test(upper) || /\bWHAT THIS MEANS\b/i.test(body);
+  const hasClaim = /\bCLAIM\b/.test(upper);
+  const hasEvidence = /\bEVIDENCE\b/.test(upper);
+  const hasImplication = /\bIMPLICATION\b/.test(upper) || /\bACTION\b/.test(upper);
 
   const sections = [hasClaim, hasEvidence, hasImplication].filter(Boolean).length;
 
@@ -267,13 +268,17 @@ function scoreStructure(body?: string | null): number {
  * Score novelty (0–10).
  * Counts novelty indicator words in body.
  */
+// Precompiled novelty regexes
+const NOVELTY_REGEXES = NOVELTY_WORDS.map(
+  (w) => new RegExp("\\b" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i")
+);
+
 function scoreNovelty(body?: string | null): number {
   if (!body) return 0;
-  const lower = body.toLowerCase();
 
   let hits = 0;
-  for (const word of NOVELTY_WORDS) {
-    if (lower.includes(word)) hits++;
+  for (const regex of NOVELTY_REGEXES) {
+    if (regex.test(body)) hits++;
   }
 
   if (hits >= 3) return MAX_NOVELTY;
