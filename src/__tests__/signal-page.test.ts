@@ -11,11 +11,13 @@ import { SELF } from "cloudflare:test";
 const APPROVED_ID = "sigpage-approved-001";
 const DRAFT_ID = "sigpage-submitted-002";
 const HOSTILE_SOURCE_ID = "sigpage-hostile-003";
+const BRIEF_PENDING_ID = "sigpage-brief-pending-004";
 const MISSING_ID = "00000000-0000-0000-0000-000000000000";
 
 const APPROVED_ADDR = "bc1qsigpageapproved0000000000000000000000000";
 const DRAFT_ADDR = "bc1qsigpagedraft00000000000000000000000000000";
 const HOSTILE_ADDR = "bc1qsigpagehostile00000000000000000000000000";
+const PENDING_ADDR = "bc1qsigpagebriefpending00000000000000000000";
 
 beforeAll(async () => {
   await SELF.fetch("http://example.com/api/test-seed", {
@@ -60,6 +62,27 @@ beforeAll(async () => {
           created_at: "2026-04-20T12:00:00Z",
           status: "approved",
           disclosure: "",
+        },
+        {
+          id: BRIEF_PENDING_ID,
+          beat_slug: "bitcoin-macro",
+          btc_address: PENDING_ADDR,
+          headline: "Signal in a compiled-but-not-yet-inscribed brief",
+          body: "brief-pending provenance copy coverage.",
+          sources: "[]",
+          created_at: "2026-04-19T08:00:00Z",
+          status: "brief_included",
+          disclosure: "",
+        },
+      ],
+      briefs: [
+        {
+          date: "2026-04-19",
+          text: "test brief body",
+          json_data: null,
+          compiled_at: "2026-04-19T23:50:00Z",
+          inscribed_txid: null,
+          inscription_id: null,
         },
       ],
     }),
@@ -172,6 +195,39 @@ describe("GET /signals/:id — hostile source URL", () => {
     expect(body).not.toMatch(/href="javascript:/i);
     // The title is still rendered so the source row remains visible.
     expect(body).toContain("Evil link");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// brief_included without inscription — "brief-pending" copy
+// ---------------------------------------------------------------------------
+
+describe("GET /signals/:id — brief_included, brief not inscribed", () => {
+  it("says 'Awaiting Bitcoin inscription', NOT 'editorial review'", async () => {
+    const res = await SELF.fetch(
+      `http://example.com/signals/${BRIEF_PENDING_ID}`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // Should mention the brief date and the inscription-pending state.
+    expect(body).toMatch(/Included in the 2026-04-19 daily brief/);
+    expect(body).toMatch(/Awaiting Bitcoin inscription/);
+    // MUST NOT fall through to the stage-fallback copy — brief_included is
+    // past editorial review.
+    expect(body).not.toMatch(/currently in editorial review/);
+    // No inscription markers should leak into JSON-LD or visible DOM.
+    expect(body).not.toContain("BitcoinInscriptionId");
+    expect(body).not.toContain('"archivedAt"');
+  });
+
+  it("emits BriefDate but not BitcoinInscriptionId in JSON-LD identifier", async () => {
+    const res = await SELF.fetch(
+      `http://example.com/signals/${BRIEF_PENDING_ID}`
+    );
+    const body = await res.text();
+    expect(body).toContain('"propertyID":"BriefDate"');
+    expect(body).toContain('"value":"2026-04-19"');
+    expect(body).not.toContain('"propertyID":"BitcoinInscriptionId"');
   });
 });
 
