@@ -65,25 +65,34 @@ initRouter.get("/api/init", async (c) => {
   }
 
   // --- Beats ---
-  // Build a claims-by-beat map for member lists
-  const claimsByBeat = new Map<string, Array<{ address: string; claimedAt: string }>>();
+  // Count claims per beat so we can surface `memberCount` without shipping
+  // the entire member roster on the homepage — that array was the largest
+  // field in the /api/init payload and the homepage never reads it.
+  // Consumers that need the full list (e.g. the Bureau page) hit
+  // /api/beats?include=members directly.
+  const memberCountByBeat = new Map<string, number>();
   for (const claim of bundle.claims) {
-    if (!claimsByBeat.has(claim.beat_slug)) claimsByBeat.set(claim.beat_slug, []);
-    claimsByBeat.get(claim.beat_slug)!.push({
-      address: claim.btc_address,
-      claimedAt: claim.claimed_at,
-    });
+    memberCountByBeat.set(
+      claim.beat_slug,
+      (memberCountByBeat.get(claim.beat_slug) ?? 0) + 1
+    );
   }
-  const beatsPayload = bundle.beats.map((b) => ({
-    slug: b.slug,
-    name: b.name,
-    description: b.description,
-    color: b.color,
-    claimedBy: b.created_by,
-    claimedAt: b.created_at,
-    status: b.status,
-    members: claimsByBeat.get(b.slug) ?? [],
-  }));
+  const beatsPayload = bundle.beats.map((b) => {
+    // null (not 0) when there's no entry in the map — "unknown" is a
+    // different state from "known zero" and we'd rather surface a data
+    // integrity issue than silently misreport.
+    const count = memberCountByBeat.get(b.slug);
+    return {
+      slug: b.slug,
+      name: b.name,
+      description: b.description,
+      color: b.color,
+      claimedBy: b.created_by,
+      claimedAt: b.created_at,
+      status: b.status,
+      memberCount: count ?? null,
+    };
+  });
 
   // --- Classifieds ---
   const classifiedsPayload = {
@@ -92,6 +101,18 @@ initRouter.get("/api/init", async (c) => {
   };
 
   // --- Correspondents (with agent name resolution) ---
+  // The homepage renders only the top-5 correspondents by score (TOP_N in
+  // public/index.html). Shipping all ~400+ entries in /api/init made the
+  // payload ~400KB uncompressed — the single largest network cost on
+  // initial load. We cap to TOP_CORRESPONDENTS here and keep the real
+  // `total` so UI stats stay accurate. Full list remains at
+  // /api/correspondents for the dedicated page.
+  //
+  // We sort BEFORE name resolution so `resolveAgentNames` only does
+  // lookups for the capped slice instead of every correspondent — this
+  // also slashes the KV/API work on /api/init cache misses.
+  const TOP_CORRESPONDENTS = 20;
+
   const scoreMap = new Map<string, number>();
   const earningsMap = new Map<string, number>();
   const unpaidMap = new Map<string, number>();
@@ -102,14 +123,28 @@ initRouter.get("/api/init", async (c) => {
   }
 
   const beatsByAddress = buildBeatsByAddress(bundle.beats, bundle.claims);
-  const addresses = bundle.correspondents.map((r) => r.btc_address);
+
+  // Sort by score desc, then streak desc, then address to mirror the
+  // leaderboard's tie-breaking. Matches the original post-map sort.
+  const sortedCorrespondents = [...bundle.correspondents].sort((a, b) => {
+    const aScore = scoreMap.get(a.btc_address) ?? 0;
+    const bScore = scoreMap.get(b.btc_address) ?? 0;
+    if (bScore !== aScore) return bScore - aScore;
+    const aStreak = Number(a.current_streak) || 0;
+    const bStreak = Number(b.current_streak) || 0;
+    if (bStreak !== aStreak) return bStreak - aStreak;
+    return a.btc_address.localeCompare(b.btc_address);
+  });
+  const topCorrespondents = sortedCorrespondents.slice(0, TOP_CORRESPONDENTS);
+
+  const topAddresses = topCorrespondents.map((r) => r.btc_address);
   const nameMap = await resolveNamesWithTimeout(
     c.env.NEWS_KV,
-    addresses,
+    topAddresses,
     (p) => c.executionCtx.waitUntil(p)
   );
 
-  const correspondentsList = bundle.correspondents.map((row) => {
+  const correspondentsList = topCorrespondents.map((row) => {
     const signalCount = Number(row.signal_count) || 0;
     const streak = Number(row.current_streak) || 0;
     const longestStreak = Number(row.longest_streak) || 0;
@@ -135,18 +170,11 @@ initRouter.get("/api/init", async (c) => {
     };
   });
 
-  // Sort by score descending, then streak, then address to mirror
-  // leaderboard tie-breaking when signal_count order diverges after a reset.
-  correspondentsList.sort(
-    (a, b) =>
-      b.score - a.score ||
-      b.streak - a.streak ||
-      a.address.localeCompare(b.address),
-  );
-
   const correspondentsPayload = {
     correspondents: correspondentsList,
-    total: correspondentsList.length,
+    // Total is the REAL count of correspondents (not the trimmed slice),
+    // so `stat-correspondents` displays properly on the homepage.
+    total: sortedCorrespondents.length,
   };
 
   // --- Signals ---
