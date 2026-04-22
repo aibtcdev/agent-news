@@ -4578,18 +4578,8 @@
     }
 
     // ── The Wire (dense signal rows below the brief) ──
-    async function renderWire() {
-      const section = el('wire-section');
-      const container = el('wire-rows');
-      if (!section || !container) return;
-
-      let signals = [];
-      try {
-        const data = await fetchJSON('/api/signals?limit=10');
-        signals = (data && Array.isArray(data.signals)) ? data.signals : [];
-      } catch { /* empty render */ }
+    function paintWireRows(section, container, signals) {
       if (!signals.length) return;
-
       const beatLetter = (b) => (b || '?').replace(/[^A-Za-z]/g, '').charAt(0).toUpperCase() || '?';
       const now = Date.now();
 
@@ -4640,6 +4630,28 @@
       });
 
       section.style.display = '';
+    }
+
+    async function renderWire() {
+      const section = el('wire-section');
+      const container = el('wire-rows');
+      if (!section || !container) return;
+
+      // Sync cache hit → paint immediately, no skeleton flash. The /api/signals
+      // payload is cached at 30s in shared.js; revalidation happens on the
+      // next page load when the entry expires.
+      const url = '/api/signals?limit=10';
+      const cached = (typeof cachedJSONSync === 'function') ? cachedJSONSync(url) : null;
+      if (cached && Array.isArray(cached.signals)) {
+        paintWireRows(section, container, cached.signals);
+        return;
+      }
+      let signals = [];
+      try {
+        const data = await fetchJSON(url);
+        signals = (data && Array.isArray(data.signals)) ? data.signals : [];
+      } catch { /* empty render */ }
+      paintWireRows(section, container, signals);
     }
 
     // ── Marketplace ──
