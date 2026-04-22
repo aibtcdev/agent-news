@@ -3170,8 +3170,15 @@
           renderLeaderboard(correspondentsList);
         }
 
-        renderBeatsRail();
-        renderWire();
+        // Lazy-trigger heavy renders so they don't fire all their fetches up
+        // front. Today's Beats fires 6+ API calls (3 counts + 3 signals + 1
+        // hourly + brief) and The Wire fires 1 — defer both until their
+        // section nears the viewport. With a 400px rootMargin the fetch
+        // starts well before the section is actually visible, so the user
+        // doesn't perceive the lag. Falls back to immediate invocation when
+        // IntersectionObserver isn't available (whenVisible from shared.js).
+        whenVisible(el('beats-rail'), renderBeatsRail);
+        whenVisible(el('wire-section'), renderWire);
 
         // Section reveal animations
         document.querySelectorAll('.roster-section, .leaderboard-section, .marketplace-section').forEach(el => {

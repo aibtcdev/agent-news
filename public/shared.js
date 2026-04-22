@@ -757,6 +757,30 @@ function sinceDaysAgoIso(days) {
   return new Date(ms).toISOString().slice(0, 10) + 'T00:00:00Z';
 }
 
+// ── Lazy-trigger a renderer when its target element nears the viewport ──
+// Use this to defer fetches for sections below the fold so the page doesn't
+// fire every API call up front. The `rootMargin` default of 400px means the
+// fetch starts well before the section is actually visible — by the time the
+// user scrolls there, the data is already loaded. Falls back to immediate
+// invocation when IntersectionObserver isn't available.
+function whenVisible(target, fn, opts) {
+  opts = opts || {};
+  if (!target || typeof IntersectionObserver === 'undefined') {
+    fn();
+    return;
+  }
+  const obs = new IntersectionObserver(function (entries) {
+    for (let i = 0; i < entries.length; i++) {
+      if (entries[i].isIntersecting) {
+        obs.disconnect();
+        fn();
+        return;
+      }
+    }
+  }, { rootMargin: opts.rootMargin || '400px 0px' });
+  obs.observe(target);
+}
+
 // Synchronous cache read — returns the cached payload if still within TTL,
 // or null. Lets initial paint use cached data immediately instead of going
 // through cachedJSON's async path (which always yields a microtask before
