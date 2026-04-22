@@ -4443,8 +4443,29 @@
         return '<svg class="beat-tile-spark" viewBox="0 0 ' + totalW + ' 24" preserveAspectRatio="none">' + bars + '</svg>';
       }
 
+      // Sanitize beat colors before they reach any HTML sink. Colors come
+      // from /api/beats — trusted in steady state, but a future malicious or
+      // misconfigured editor row could carry a string that breaks out of the
+      // SVG fill="…" attribute. Validate against the hex / named-color shape
+      // we actually use; reject anything else to a safe fallback.
+      // Defense-in-depth against the CodeQL js/xss-through-dom flow that
+      // would otherwise round-trip the color through a data-* attribute.
+      function safeBeatColor(raw) {
+        if (typeof raw !== 'string') return '#1a1a1a';
+        return /^#[0-9a-fA-F]{3,8}$|^[a-zA-Z]+$/.test(raw) ? raw : '#1a1a1a';
+      }
+
+      // Closure-local color lookup so phase 2's sparkline replacement can
+      // re-derive the color without round-tripping through a DOM attribute
+      // (CodeQL js/xss-through-dom). Keys by slug — the slug also lives on
+      // the tile as data-beat-slug, but slugs are validated server-side and
+      // we use CSS.escape() before passing to querySelector, so the slug
+      // round-trip is safe; the color one is not.
+      const colorBySlug = {};
+
       const tileHTML = top.map((b, i) => {
-        const color = b.color || getBeatColor((b.name || '').toUpperCase()) || '#1a1a1a';
+        const color = safeBeatColor(b.color || getBeatColor((b.name || '').toUpperCase()) || '#1a1a1a');
+        colorBySlug[b.slug] = color;
         const c = perBeatCounts[i] || {};
         // approved + brief_included = editorially accepted in the window.
         // submitted = awaiting editor review (pending). Pull from the counts
@@ -4457,7 +4478,7 @@
         const editor = editorAddr ? (correspondentsList || []).find(c => c.address === editorAddr) : null;
         const editorName = (editor && editor.display_name) || (editorAddr ? truncAddr(editorAddr) : 'Vacant');
 
-        return '<a class="beat-tile" data-beat-slug="' + esc(b.slug) + '" data-beat-color="' + esc(color) + '" href="/signals/?beat=' + encodeURIComponent(b.slug) + '">'
+        return '<a class="beat-tile" data-beat-slug="' + esc(b.slug) + '" href="/signals/?beat=' + encodeURIComponent(b.slug) + '">'
           + '<div class="beat-tile-head"><span class="pip" style="background:' + color + '"></span><span class="beat-tile-name">' + esc(b.name) + '</span></div>'
           + '<div class="beat-tile-editor">Editor: ' + esc(editorName) + '</div>'
           + '<div class="beat-tile-stats">'
@@ -4524,7 +4545,10 @@
           if (!tile) continue;
           const oldSvg = tile.querySelector('svg.beat-tile-spark');
           if (!oldSvg) continue;
-          const color = tile.getAttribute('data-beat-color') || '#1a1a1a';
+          // Read color from the closure-local map, NOT from a DOM attribute,
+          // so we avoid the CodeQL js/xss-through-dom flow (DOM text → HTML).
+          // colorBySlug values are pre-validated by safeBeatColor().
+          const color = colorBySlug[top[i].slug] || '#1a1a1a';
           const tmp = document.createElement('div');
           tmp.innerHTML = bucketedSparkSvg(color, sigs);
           oldSvg.replaceWith(tmp.firstChild);
