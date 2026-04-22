@@ -3090,9 +3090,18 @@
 
     async function init() {
       try {
-        // Single request replaces 5 parallel API calls — one DO round-trip instead of 5.
-        // Falls back to individual calls if /api/init returns null (fetchJSON returns null on error).
-        let data = await fetchJSON('/api/init');
+        // Sync cache hit on /api/init → skip the await round-trip and paint
+        // immediately. Same data shape as the async path, so downstream code
+        // doesn't branch — only the initial source differs. cachedJSONSync
+        // is provided by shared.js; fall through to async if not loaded yet.
+        let data = (typeof cachedJSONSync === 'function')
+          ? cachedJSONSync('/api/init')
+          : null;
+        if (!data) {
+          // Single request replaces 5 parallel API calls — one DO round-trip instead of 5.
+          // Falls back to individual calls if /api/init returns null (fetchJSON returns null on error).
+          data = await fetchJSON('/api/init');
+        }
         if (!data) {
           const [briefRes, beatsRes, classifiedsRes, correspondentsRes, signalsRes] = await Promise.allSettled([
             fetchJSON('/api/brief?format=json'),

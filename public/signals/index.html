@@ -1082,10 +1082,7 @@
         // (5-min TTL — beats rarely change). Raw fetch() bypassed the cache.
         const data = (typeof cachedJSON === 'function')
           ? await cachedJSON('/api/beats?status=active')
-          : await (async () => {
-              const r = await fetch('/api/beats?status=active');
-              return r.ok ? r.json() : null;
-            })();
+          : await fetch('/api/beats?status=active').then(r => r.ok ? r.json() : null);
         if (!data) return;
         allBeats = Array.isArray(data) ? data : (data.beats || []);
         renderBeatFilter();

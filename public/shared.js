@@ -748,6 +748,10 @@ function sinceUtcMidnightIso() {
 
 // "N days ago" rounded to UTC midnight — stable for the whole UTC day.
 // Use for archive-style facets (last 7d, 30d, 90d) where day-grain is fine.
+// Note: result is the UTC midnight of the day n days ago, so the actual
+// window covered is between n×24h and (n+1)×24h depending on the current
+// time of day. Acceptable for archive facets where ±1 day's worth of
+// signals doesn't change the headline number meaningfully.
 function sinceDaysAgoIso(days) {
   const ms = Date.now() - days * 86400000;
   return new Date(ms).toISOString().slice(0, 10) + 'T00:00:00Z';

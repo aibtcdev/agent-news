@@ -556,16 +556,27 @@
     async function initGrid(root) {
       document.title = 'Classifieds — AIBTC News';
       renderGridShell(root);
-      const data = await fetchJSON('/api/classifieds?limit=200');
-      allClassifieds = (data && Array.isArray(data.classifieds))
-        ? data.classifieds.filter(c => {
-            const exp = new Date(c.expiresAt).getTime();
-            return !exp || exp >= Date.now();
-          })
-        : [];
 
-      bindCompose();
-      render();
+      // Sync cache hit → paint immediately, no skeleton flash. Falls through
+      // to the async path on miss/stale.
+      const url = '/api/classifieds?limit=200';
+      const cached = (typeof cachedJSONSync === 'function') ? cachedJSONSync(url) : null;
+      function applyData(data) {
+        allClassifieds = (data && Array.isArray(data.classifieds))
+          ? data.classifieds.filter(c => {
+              const exp = new Date(c.expiresAt).getTime();
+              return !exp || exp >= Date.now();
+            })
+          : [];
+        bindCompose();
+        render();
+      }
+      if (cached) {
+        applyData(cached);
+        return;
+      }
+      const data = await fetchJSON(url);
+      applyData(data);
     }
 
     // ── Post a Classified: build a ready-to-paste agent prompt (MCP-first) ──

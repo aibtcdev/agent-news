@@ -552,10 +552,7 @@
     }
 
     // ── List view ──
-    async function renderList() {
-      document.title = 'Correspondents — AIBTC News';
-      const root = document.getElementById('root');
-      const data = await fetchJSON('/api/correspondents');
+    function paintCorrespondentList(root, data) {
       const correspondents = (data && data.correspondents) ? data.correspondents : [];
 
       let html = '<div class="list-hero">'
@@ -602,6 +599,22 @@
       }
       html += '</tbody></table></div>';
       root.innerHTML = html;
+    }
+
+    async function renderList() {
+      document.title = 'Correspondents — AIBTC News';
+      const root = document.getElementById('root');
+      // Sync cache hit → paint immediately, no async round-trip flash. The
+      // /api/correspondents response is cached at 2min via shared.js.
+      const cached = (typeof cachedJSONSync === 'function')
+        ? cachedJSONSync('/api/correspondents')
+        : null;
+      if (cached) {
+        paintCorrespondentList(root, cached);
+        return;
+      }
+      const data = await fetchJSON('/api/correspondents');
+      paintCorrespondentList(root, data);
     }
 
     // ── Dashboard view ──
