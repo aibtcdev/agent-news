@@ -149,6 +149,168 @@ function getPaymentStageRow(
 }
 
 /**
+ * Apply a terminal reconciliation decision to a single staged payment row.
+ * Shared by the /payment-staging/:paymentId/reconcile route (poll-driven) and
+ * the alarm sweep (backend-driven). Returns the row after the write, or null
+ * if no staged record exists for paymentId.
+ *
+ * A no-op for rows already in 'finalized' or 'discarded' — idempotent under
+ * concurrent poll + sweep reconciliation.
+ */
+function reconcileStageRow(
+  sql: DurableObjectState["storage"]["sql"],
+  paymentId: string,
+  status: PaymentTrackedState,
+  txid?: string,
+  terminalReason?: PaymentTerminalReason
+): PaymentStageMaterialized | null {
+  const staged = getPaymentStageRow(sql, paymentId);
+  if (!staged) return null;
+  if (staged.stageStatus !== "staged" && staged.stageStatus !== "expired") {
+    return staged;
+  }
+
+  const now = new Date().toISOString();
+
+  if (status === "confirmed") {
+    if (staged.kind === "classified_submission") {
+      const payload = staged.payload as Extract<PaymentStagePayload, { kind: "classified_submission" }>;
+      sql.exec(
+        `INSERT OR IGNORE INTO classifieds
+           (id, btc_address, category, headline, body, payment_txid, status, created_at, expires_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
+        payload.classified_id,
+        payload.btc_address,
+        payload.category,
+        payload.headline,
+        payload.body,
+        txid ?? payload.payment_txid,
+        now,
+        now
+      );
+    } else if (staged.kind === "brief_access") {
+      const payload = staged.payload as Extract<PaymentStagePayload, { kind: "brief_access" }>;
+      if (payload.payer) {
+        sql.exec(
+          `INSERT OR IGNORE INTO earnings
+             (id, btc_address, amount_sats, reason, reference_id, created_at)
+           VALUES (?, ?, ?, 'brief-revenue', ?, ?)`,
+          generateId(),
+          payload.payer,
+          payload.amount_sats,
+          paymentId,
+          now
+        );
+      }
+    }
+
+    sql.exec(
+      `UPDATE payment_staging
+          SET stage_status = 'finalized',
+              terminal_status = 'confirmed',
+              terminal_reason = NULL,
+              updated_at = ?,
+              finalized_at = ?,
+              discarded_at = NULL
+        WHERE payment_id = ?`,
+      now,
+      now,
+      paymentId
+    );
+  } else if (status === "failed" || status === "replaced" || status === "not_found") {
+    sql.exec(
+      `UPDATE payment_staging
+          SET stage_status = 'discarded',
+              terminal_status = ?,
+              terminal_reason = ?,
+              updated_at = ?,
+              discarded_at = ?
+        WHERE payment_id = ?`,
+      status,
+      terminalReason ?? null,
+      now,
+      now,
+      paymentId
+    );
+  }
+
+  return getPaymentStageRow(sql, paymentId);
+}
+
+type CheckPaymentResult = { status: string; txid?: string; terminalReason?: string };
+type CheckPaymentFn = (paymentId: string) => Promise<CheckPaymentResult>;
+
+/**
+ * Return a bound checkPayment callable if the relay binding exposes one.
+ * In the test miniflare config X402_RELAY is a plain Fetcher (no RPC methods),
+ * so the sweep no-ops without throwing.
+ */
+function resolveRelayCheckPayment(relay: unknown): CheckPaymentFn | null {
+  if (!relay || typeof relay !== "object") return null;
+  const fn = (relay as Record<string, unknown>).checkPayment;
+  if (typeof fn !== "function") return null;
+  return (paymentId) => (fn as CheckPaymentFn)(paymentId);
+}
+
+/**
+ * Scan payment_staging for rows still in 'staged' that are older than graceMs,
+ * call the provided checkPayment for each, and reconcile on terminal outcomes.
+ * Caller-agnostic — the sweep closure receives a bound checkPayment (either the
+ * live X402_RELAY RPC or a test stub) so this function has no env dependency.
+ */
+async function sweepPaymentStagingRows(
+  sql: DurableObjectState["storage"]["sql"],
+  checkPayment: CheckPaymentFn,
+  opts: { graceMs?: number; limit?: number } = {}
+): Promise<number> {
+  const graceMs = opts.graceMs ?? 30_000;
+  const limit = opts.limit ?? 10;
+  const cutoff = new Date(Date.now() - graceMs).toISOString();
+  const rows = sql
+    .exec(
+      `SELECT payment_id FROM payment_staging
+        WHERE stage_status = 'staged' AND created_at < ?
+        ORDER BY created_at ASC
+        LIMIT ?`,
+      cutoff,
+      limit
+    )
+    .toArray() as Array<{ payment_id: string }>;
+  if (rows.length === 0) return 0;
+
+  let reconciledCount = 0;
+  for (const row of rows) {
+    const paymentId = row.payment_id;
+    try {
+      const result = await checkPayment(paymentId);
+      if (
+        result.status === "confirmed" ||
+        result.status === "failed" ||
+        result.status === "replaced" ||
+        result.status === "not_found"
+      ) {
+        const reconciled = reconcileStageRow(
+          sql,
+          paymentId,
+          result.status as PaymentTrackedState,
+          result.txid,
+          result.terminalReason as PaymentTerminalReason | undefined
+        );
+        if (reconciled && reconciled.stageStatus !== "staged") {
+          reconciledCount += 1;
+          console.log(
+            `[alarm-sweep] reconciled paymentId=${paymentId} status=${result.status} stage=${reconciled.stageStatus}`
+          );
+        }
+      }
+    } catch (err) {
+      console.error(`[alarm-sweep] checkPayment failed for paymentId=${paymentId}:`, err);
+    }
+  }
+  return reconciledCount;
+}
+
+/**
  * Expire staged payment records that have been in the "staged" state longer
  * than PAYMENT_STAGE_TTL_MS. Marks them as 'expired' instead of deleting so
  * the payment history remains recoverable (e.g. if the on-chain tx confirmed
@@ -917,81 +1079,40 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      const staged = getPaymentStageRow(this.ctx.storage.sql, paymentId);
-      if (!staged) {
-        return c.json({ ok: true, data: null } satisfies DOResult<PaymentStageMaterialized | null>);
-      }
+      const reconciled = reconcileStageRow(
+        this.ctx.storage.sql,
+        paymentId,
+        body.status,
+        body.txid,
+        body.terminalReason
+      );
+      return c.json({ ok: true, data: reconciled } satisfies DOResult<PaymentStageMaterialized | null>);
+    });
 
-      if (staged.stageStatus !== "staged" && staged.stageStatus !== "expired") {
-        return c.json({ ok: true, data: staged } satisfies DOResult<PaymentStageMaterialized>);
-      }
-
-      const now = new Date().toISOString();
-
-      if (body.status === "confirmed") {
-        if (staged.kind === "classified_submission") {
-          const payload = staged.payload as Extract<PaymentStagePayload, { kind: "classified_submission" }>;
-          this.ctx.storage.sql.exec(
-            `INSERT OR IGNORE INTO classifieds
-               (id, btc_address, category, headline, body, payment_txid, status, created_at, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
-            payload.classified_id,
-            payload.btc_address,
-            payload.category,
-            payload.headline,
-            payload.body,
-            body.txid ?? payload.payment_txid,
-            now,
-            now
-          );
-        } else if (staged.kind === "brief_access") {
-          const payload = staged.payload as Extract<PaymentStagePayload, { kind: "brief_access" }>;
-          if (payload.payer) {
-            this.ctx.storage.sql.exec(
-              `INSERT OR IGNORE INTO earnings
-                 (id, btc_address, amount_sats, reason, reference_id, created_at)
-               VALUES (?, ?, ?, 'brief-revenue', ?, ?)`,
-              generateId(),
-              payload.payer,
-              payload.amount_sats,
-              paymentId,
-              now
-            );
+    // Test-only hook — trigger sweepStagedPayments without waiting for the
+    // 50-second alarm cadence. Gated at the worker layer on ENVIRONMENT !== 'production'.
+    // If `results` is provided, stubs checkPayment per paymentId; otherwise falls
+    // back to the live X402_RELAY binding.
+    this.router.post("/test/sweep-staged-payments", async (c) => {
+      const body = (await parseRequiredJson<{
+        graceMs?: number;
+        limit?: number;
+        results?: Record<string, CheckPaymentResult>;
+      }>(c)) ?? {};
+      const stubs = body.results;
+      const checkPayment: CheckPaymentFn | undefined = stubs
+        ? async (paymentId) => {
+            const stub = stubs[paymentId];
+            if (!stub) throw new Error(`no test stub for paymentId=${paymentId}`);
+            return stub;
           }
-        }
-
-        this.ctx.storage.sql.exec(
-          `UPDATE payment_staging
-              SET stage_status = 'finalized',
-                  terminal_status = 'confirmed',
-                  terminal_reason = NULL,
-                  updated_at = ?,
-                  finalized_at = ?,
-                  discarded_at = NULL
-            WHERE payment_id = ?`,
-          now,
-          now,
-          paymentId
-        );
-      } else if (body.status === "failed" || body.status === "replaced" || body.status === "not_found") {
-        this.ctx.storage.sql.exec(
-          `UPDATE payment_staging
-              SET stage_status = 'discarded',
-                  terminal_status = ?,
-                  terminal_reason = ?,
-                  updated_at = ?,
-                  discarded_at = ?
-            WHERE payment_id = ?`,
-          body.status,
-          body.terminalReason ?? null,
-          now,
-          now,
-          paymentId
-        );
-      }
-
-      const reconciled = getPaymentStageRow(this.ctx.storage.sql, paymentId);
-      return c.json({ ok: true, data: reconciled ?? null } satisfies DOResult<PaymentStageMaterialized | null>);
+        : undefined;
+      const reconciled = await this.sweepStagedPayments({
+        graceMs: body.graceMs,
+        limit: body.limit,
+        checkPayment,
+      });
+      return c.json({ ok: true, data: { reconciled } } satisfies DOResult<{ reconciled: number }>);
     });
 
     // -------------------------------------------------------------------------
@@ -5161,8 +5282,42 @@ export class NewsDO extends DurableObject<Env> {
       .toArray();
   }
 
-  /** Keep-alive alarm — reschedules itself every 50 seconds to prevent DO eviction. */
+  /**
+   * Reconcile staged x402 payments whose client never polled /api/payment-status.
+   * Picks up to `limit` rows in 'staged' older than `graceMs`, queries the relay,
+   * and applies terminal outcomes via reconcileStageRow. Returns the number of
+   * rows finalized or discarded (pending-state rows are left for the next tick).
+   *
+   * Grace window prevents racing the synchronous POST-time reconcile path — a
+   * fresh stage row is almost always followed by the POST's own status check.
+   *
+   * Wrapper around sweepPaymentStagingRows — binds the SQL handle and the live
+   * X402_RELAY.checkPayment. A checkPayment override can be passed for tests.
+   */
+  async sweepStagedPayments(opts: {
+    graceMs?: number;
+    limit?: number;
+    checkPayment?: CheckPaymentFn;
+  } = {}): Promise<number> {
+    const check = opts.checkPayment ?? resolveRelayCheckPayment(this.env.X402_RELAY);
+    if (!check) return 0;
+    return sweepPaymentStagingRows(this.ctx.storage.sql, check, {
+      graceMs: opts.graceMs,
+      limit: opts.limit,
+    });
+  }
+
+  /**
+   * Keep-alive alarm — reschedules itself every 50 seconds to prevent DO eviction.
+   * Also sweeps staged x402 payments whose client never polled /api/payment-status,
+   * so backend-owned polling fills the gap from fire-and-forget clients (#572).
+   */
   async alarm(): Promise<void> {
+    try {
+      await this.sweepStagedPayments();
+    } catch (err) {
+      console.error("[alarm] sweepStagedPayments threw:", err);
+    }
     await this.ctx.storage.setAlarm(Date.now() + 50_000);
   }
 
