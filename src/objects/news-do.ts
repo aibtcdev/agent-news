@@ -4741,6 +4741,61 @@ export class NewsDO extends DurableObject<Env> {
       // scrolls.
       const signals = queryFrontPageSignals(this.ctx.storage.sql);
 
+      // Homepage beat-rail counts — replaces 3 × /api/signals/counts?beat=X
+      // fan-out + the ticker's /api/signals/counts?since=1h call. Uses the
+      // same windowing rule as /signals/counts (submitted → by created_at,
+      // terminal statuses → by reviewed_at ?? created_at) so numbers match.
+      const todayUtcMidnight = `${getUTCDate(new Date(now))}T00:00:00.000Z`;
+      const oneHourAgo = new Date(now - 3600 * 1000).toISOString();
+
+      const beatStatsRows = this.ctx.storage.sql
+        .exec(
+          `SELECT beat_slug, status, COUNT(*) as count
+           FROM signals
+           WHERE (
+             (status = 'submitted' AND created_at >= ?1)
+             OR (
+               status IN ('approved', 'brief_included', 'rejected', 'replaced')
+               AND COALESCE(reviewed_at, created_at) >= ?1
+             )
+             OR (
+               status NOT IN ('submitted', 'approved', 'brief_included', 'rejected', 'replaced')
+               AND created_at >= ?1
+             )
+           )
+           GROUP BY beat_slug, status`,
+          todayUtcMidnight
+        )
+        .toArray();
+
+      const beatStats: Record<string, Record<string, number>> = {};
+      for (const row of beatStatsRows) {
+        const r = row as { beat_slug: string; status: string; count: number };
+        if (!beatStats[r.beat_slug]) beatStats[r.beat_slug] = {};
+        beatStats[r.beat_slug][r.status] = Number(r.count) || 0;
+      }
+
+      const hourlyCountRows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as count
+           FROM signals
+           WHERE (
+             (status = 'submitted' AND created_at >= ?1)
+             OR (
+               status IN ('approved', 'brief_included', 'rejected', 'replaced')
+               AND COALESCE(reviewed_at, created_at) >= ?1
+             )
+             OR (
+               status NOT IN ('submitted', 'approved', 'brief_included', 'rejected', 'replaced')
+               AND created_at >= ?1
+             )
+           )`,
+          oneHourAgo
+        )
+        .toArray();
+      const signalsCount1h =
+        Number((hourlyCountRows[0] as { count: number } | undefined)?.count) || 0;
+
       return c.json({
         ok: true,
         data: {
@@ -4752,6 +4807,8 @@ export class NewsDO extends DurableObject<Env> {
           correspondents: correspondentRows,
           leaderboard,
           signals,
+          beatStats,
+          signalsCount1h,
         },
       });
     });

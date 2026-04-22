@@ -184,6 +184,15 @@ export interface InitBundle {
   correspondents: CorrespondentRow[];
   leaderboard: LeaderboardEntry[];
   signals: Signal[];
+  /**
+   * Per-beat signal counts by status for today (UTC-midnight window),
+   * keyed by beat_slug. Replaces the homepage's N x /api/signals/counts?beat=X
+   * fan-out. Status keys mirror SignalStatus — only statuses with non-zero
+   * counts appear for a given beat.
+   */
+  beatStats: Record<string, Partial<Record<string, number>>>;
+  /** Total signals across all beats in the last 1 hour (ticker display). */
+  signalsCount1h: number;
 }
 
 /** Fetch all initial page load data in a single DO round-trip. */

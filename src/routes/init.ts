@@ -204,6 +204,10 @@ initRouter.get("/api/init", async (c) => {
     classifieds: classifiedsPayload,
     correspondents: correspondentsPayload,
     signals: signalsPayload,
+    // Pass-through from the DO: saves the homepage from firing
+    // 3 × /api/signals/counts?beat=X + the ticker's /api/signals/counts?since=1h.
+    beatStats: bundle.beatStats ?? {},
+    signalsCount1h: bundle.signalsCount1h ?? 0,
   });
   edgeCachePut(c, response);
   return response;
