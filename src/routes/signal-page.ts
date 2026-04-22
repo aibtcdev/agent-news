@@ -128,20 +128,22 @@ function buildNewsArticle(
       value: signal.id,
     },
   ];
+  // BriefDate applies whether or not the brief has been inscribed yet —
+  // it's the day of curation either way.
   if (provenance) {
-    identifier.push(
-      {
-        "@type": "PropertyValue",
-        propertyID: "BitcoinInscriptionId",
-        value: provenance.inscriptionId,
-        url: provenance.inscriptionUrl,
-      },
-      {
-        "@type": "PropertyValue",
-        propertyID: "BriefDate",
-        value: provenance.briefDate,
-      }
-    );
+    identifier.push({
+      "@type": "PropertyValue",
+      propertyID: "BriefDate",
+      value: provenance.briefDate,
+    });
+  }
+  if (provenance?.state === "inscribed") {
+    identifier.push({
+      "@type": "PropertyValue",
+      propertyID: "BitcoinInscriptionId",
+      value: provenance.inscriptionId,
+      url: provenance.inscriptionUrl,
+    });
     if (provenance.inscribedTxid && provenance.txUrl) {
       identifier.push({
         "@type": "PropertyValue",
@@ -190,12 +192,13 @@ function buildNewsArticle(
     creator: { "@id": agentId },
     digitalSourceType: IPTC_AI_SOURCE,
     creditText: `Reported by ${addrShort} (AI agent) for ${SITE_NAME}${
-      provenance ? ", inscribed on Bitcoin" : ""
+      provenance?.state === "inscribed" ? ", inscribed on Bitcoin" : ""
     }`,
     identifier,
   };
 
-  if (provenance) {
+  // Only advertise on-chain equivalence when the brief is actually inscribed.
+  if (provenance?.state === "inscribed") {
     article.sameAs = provenance.inscriptionUrl;
     article.archivedAt = provenance.inscriptionUrl;
   }
@@ -324,30 +327,19 @@ function renderProvenance(
       )}</p>`
     : `<p class="sig-disclosure"><strong>AI disclosure.</strong> This report was filed by an autonomous AI agent correspondent under the ${SITE_NAME} editorial framework. See the <a href="/about/">about page</a> for the full editorial policy.</p>`;
 
-  if (!provenance) {
-    const pending =
-      signal.status === "approved"
-        ? `<p class="sig-provenance-note">This signal is editorially approved. It will be sealed on Bitcoin with its next daily brief inscription.</p>`
-        : `<p class="sig-provenance-note">This signal is currently in editorial review and has not yet been inscribed on Bitcoin.</p>`;
-    return `
-      <section class="sig-provenance" aria-labelledby="sig-provenance-h">
-        <h2 id="sig-provenance-h">Provenance</h2>
-        ${disclosure}
-        ${pending}
-      </section>`;
-  }
-
-  const inscrShort = `${provenance.inscriptionId.slice(0, 10)}…${provenance.inscriptionId.slice(-8)}`;
-  const txRow = provenance.inscribedTxid && provenance.txUrl
-    ? `          <div class="sig-prov-row">
+  // Case 1: in an inscribed brief → full on-chain provenance block.
+  if (provenance?.state === "inscribed") {
+    const inscrShort = `${provenance.inscriptionId.slice(0, 10)}…${provenance.inscriptionId.slice(-8)}`;
+    const txRow =
+      provenance.inscribedTxid && provenance.txUrl
+        ? `          <div class="sig-prov-row">
             <dt>Reveal tx</dt>
             <dd><a href="${esc(provenance.txUrl)}" rel="noopener" target="_blank"><code>${esc(
               provenance.inscribedTxid.slice(0, 10)
             )}…${esc(provenance.inscribedTxid.slice(-8))}</code></a></dd>
           </div>`
-    : "";
-
-  return `
+        : "";
+    return `
       <section class="sig-provenance" aria-labelledby="sig-provenance-h">
         <h2 id="sig-provenance-h">Provenance</h2>
         ${disclosure}
@@ -367,6 +359,31 @@ function renderProvenance(
           </div>
 ${txRow}
         </dl>
+      </section>`;
+  }
+
+  // Case 2: included in a brief but the brief isn't inscribed yet.
+  if (provenance?.state === "brief-pending") {
+    return `
+      <section class="sig-provenance" aria-labelledby="sig-provenance-h">
+        <h2 id="sig-provenance-h">Provenance</h2>
+        ${disclosure}
+        <p class="sig-provenance-note">Included in the ${esc(
+          provenance.briefDate
+        )} daily brief. Awaiting Bitcoin inscription.</p>
+      </section>`;
+  }
+
+  // Case 3: not in any brief yet — use the signal's editorial status.
+  const pending =
+    signal.status === "approved"
+      ? `<p class="sig-provenance-note">This signal is editorially approved. It will be sealed on Bitcoin with its next daily brief inscription.</p>`
+      : `<p class="sig-provenance-note">This signal is currently in editorial review and has not yet been inscribed on Bitcoin.</p>`;
+  return `
+      <section class="sig-provenance" aria-labelledby="sig-provenance-h">
+        <h2 id="sig-provenance-h">Provenance</h2>
+        ${disclosure}
+        ${pending}
       </section>`;
 }
 

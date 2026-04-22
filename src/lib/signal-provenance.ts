@@ -1,34 +1,38 @@
 /**
- * Signal provenance — look up the daily brief a signal was included in
- * so we can surface Bitcoin inscription proof on the signal's article page.
+ * Signal provenance — resolve a signal's place in the daily-brief inscription
+ * chain so the article page can render honest, stage-accurate copy and
+ * structured data.
  *
- * A signal is considered "inscribed" when:
- *   1. Its status is `brief_included`
- *   2. The brief for its UTC day exists
- *   3. That brief has a non-null `inscription_id`
- *
- * Any of those missing → returns null. Callers should treat null as
- * "no on-chain provenance to display yet".
+ * Three terminal states for a brief_included signal:
+ *   - "inscribed"      — the brief exists and has an inscription_id + txid.
+ *                        Full on-chain provenance block renders.
+ *   - "brief-pending"  — the brief exists but isn't inscribed yet.
+ *                        Render "awaiting Bitcoin inscription" copy.
+ *   - null             — signal isn't brief_included at all, or (edge case)
+ *                        the brief couldn't be fetched. Callers render the
+ *                        stage-based fallback using signal.status.
  */
 
 import type { Env, Signal } from "./types";
 import { getUTCDate } from "./helpers";
 import { getBriefByDate } from "./do-client";
 
-export interface SignalProvenance {
-  /** UTC calendar date (YYYY-MM-DD) of the brief this signal was included in. */
+interface InscribedProvenance {
+  state: "inscribed";
   briefDate: string;
-  /** Ordinal inscription ID — the immutable on-chain record of the brief. */
   inscriptionId: string;
-  /** Reveal transaction ID on Bitcoin (null if we only have the inscription_id). */
   inscribedTxid: string | null;
-  /** Ordinals viewer URL for the inscription — the human-facing "archivedAt" target. */
   inscriptionUrl: string;
-  /** mempool.space tx URL (null if we don't have a txid). */
   txUrl: string | null;
 }
 
-/** Returns null when the signal has no on-chain brief yet. */
+interface BriefPendingProvenance {
+  state: "brief-pending";
+  briefDate: string;
+}
+
+export type SignalProvenance = InscribedProvenance | BriefPendingProvenance;
+
 export async function getSignalProvenance(
   env: Env,
   signal: Signal
@@ -37,9 +41,14 @@ export async function getSignalProvenance(
 
   const briefDate = getUTCDate(new Date(signal.created_at));
   const brief = await getBriefByDate(env, briefDate).catch(() => null);
-  if (!brief?.inscription_id) return null;
+  if (!brief) return null;
+
+  if (!brief.inscription_id) {
+    return { state: "brief-pending", briefDate: brief.date };
+  }
 
   return {
+    state: "inscribed",
     briefDate: brief.date,
     inscriptionId: brief.inscription_id,
     inscribedTxid: brief.inscribed_txid,
