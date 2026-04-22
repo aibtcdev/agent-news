@@ -6,14 +6,20 @@ import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { getCorrespondentsBundle } from "../lib/do-client";
 import { truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const correspondentsRouter = new Hono<{
   Bindings: Env;
   Variables: AppVariables;
 }>();
 
-// GET /api/correspondents — ranked correspondents with signal counts, streaks, and names
+// GET /api/correspondents — ranked correspondents with signal counts, streaks, and names.
+// Edge-cached: production response is ~371 KB and the DO round-trip costs ~3s
+// without the cache. Single put per s-maxage window then sub-100ms thereafter.
 correspondentsRouter.get("/api/correspondents", async (c) => {
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   // Single DO round-trip fetches correspondents, beats, and leaderboard together
   const bundle = await getCorrespondentsBundle(c.env);
   const rows = bundle.correspondents;
@@ -77,7 +83,9 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
   );
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({ correspondents, total: correspondents.length });
+  const response = c.json({ correspondents, total: correspondents.length });
+  edgeCachePut(c, response);
+  return response;
 });
 
 export { correspondentsRouter };

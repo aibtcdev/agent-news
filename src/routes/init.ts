@@ -12,31 +12,18 @@ import { getInitBundle } from "../lib/do-client";
 import { transformClassified } from "./classifieds";
 import { getUTCDate, truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
 import { BRIEF_PRICE_SATS } from "../lib/constants";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 
 const initRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // GET /api/init — all initial page load data in one response.
-//
-// Wrapped in the Workers edge cache so subsequent visits (anywhere globally)
-// get served from the nearest Cloudflare PoP in <100ms instead of paying
-// the ~3s DO round-trip + heavy SQL pass we observed in production. Workers
-// responses bypass the edge cache by default — the `Cache-Control` header
-// alone isn't enough; you have to put the response into `caches.default`
-// explicitly. TTL is governed by the Cache-Control header below; the cache
-// key is the canonical request URL.
+// Edge-cached via the Workers Cache API (see src/lib/edge-cache.ts) so
+// subsequent visits within the s-maxage window serve from the nearest
+// Cloudflare PoP in <100ms instead of paying the ~3s DO round-trip.
 initRouter.get("/api/init", async (c) => {
-  const cache = caches.default;
-  const cacheKey = new Request(new URL(c.req.url).toString(), { method: "GET" });
-
-  const cached = await cache.match(cacheKey);
-  if (cached) {
-    // Edge HIT — serve straight from cache, skipping all DO work below.
-    // Add a debug header so we can confirm in DevTools that caching is live.
-    const hit = new Response(cached.body, cached);
-    hit.headers.set("X-Edge-Cache", "HIT");
-    return hit;
-  }
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
 
   const bundle = await getInitBundle(c.env);
   const today = getUTCDate();
@@ -183,7 +170,6 @@ initRouter.get("/api/init", async (c) => {
   };
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  c.header("X-Edge-Cache", "MISS");
   const response = c.json({
     brief: briefPayload,
     beats: beatsPayload,
@@ -191,14 +177,7 @@ initRouter.get("/api/init", async (c) => {
     correspondents: correspondentsPayload,
     signals: signalsPayload,
   });
-
-  // Store the response at the edge for s-maxage seconds. waitUntil lets the
-  // put complete after we've already returned to the user — the first request
-  // still pays the DO round-trip, but every subsequent request within the
-  // 5-min s-maxage window gets the HIT path above. Clone is required because
-  // Response bodies are single-read streams.
-  c.executionCtx.waitUntil(cache.put(cacheKey, response.clone()));
-
+  edgeCachePut(c, response);
   return response;
 });
 
