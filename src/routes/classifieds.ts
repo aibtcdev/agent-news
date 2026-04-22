@@ -27,6 +27,7 @@ import {
 import { logPaymentEvent } from "../lib/payment-logging";
 import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 import { resolveNamesWithTimeout, generateId } from "../lib/helpers";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 /** Transform a Classified row to the camelCase API response shape. */
 export function transformClassified(cl: Classified) {
@@ -71,7 +72,13 @@ classifiedsRouter.get("/api/classifieds/rotation", async (c) => {
 
 // GET /api/classifieds — list classifieds
 // Default: active approved ads. With ?agent=ADDRESS: all submissions for that agent.
+// Edge-cached: anomalously slow in production (~5.8s for ~2.6 KB output) so
+// the cache fix delivers an outsized win on top of the standard pattern.
+// Per-agent and per-category variants get separate cache entries via the URL.
 classifiedsRouter.get("/api/classifieds", async (c) => {
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   const category = c.req.query("category");
   const agent = c.req.query("agent");
   const limitParam = c.req.query("limit");
@@ -101,7 +108,9 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
   });
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({ classifieds: withNames, total: withNames.length });
+  const response = c.json({ classifieds: withNames, total: withNames.length });
+  edgeCachePut(c, response);
+  return response;
 });
 
 // GET /api/classifieds/:id — get a single classified ad
