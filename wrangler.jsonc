@@ -132,41 +132,6 @@
 
       "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
       "assets": { "directory": "./public" }
-    },
-
-    // Design preview — separate worker, live production data.
-    // Binds cross-script to the production `agent-news` worker's DO + shares
-    // production KV so the UI sees real signals, correspondents, etc.
-    // No custom domain, no routes — served only on workers.dev.
-    "preview": {
-      "name": "agent-news-design-preview",
-      "workers_dev": true,
-      "placement": { "mode": "smart" },
-
-      "vars": {
-        "ENVIRONMENT": "preview",
-        "BRIEFS_FREE": "true"
-      },
-
-      "kv_namespaces": [
-        { "binding": "NEWS_KV", "id": "3b2ccbdc1fd5426ba72ed323e3407bdc" }
-      ],
-
-      // Cross-script DO binding: attach to the production worker's DO class
-      // so reads hit the same SQLite storage. No `migrations` block here —
-      // migrations are owned by the originating worker.
-      "durable_objects": {
-        "bindings": [
-          { "name": "NEWS_DO", "class_name": "NewsDO", "script_name": "agent-news" }
-        ]
-      },
-
-      "services": [
-        { "binding": "LOGS", "service": "worker-logs-production", "entrypoint": "LogsRPC" },
-        { "binding": "X402_RELAY", "service": "x402-sponsor-relay-production", "entrypoint": "RelayRPC" }
-      ],
-
-      "assets": { "directory": "./public" }
     }
   }
 }
