@@ -4530,7 +4530,19 @@
         + '</a>';
       }).join('');
 
-      inner.innerHTML = '<div style="grid-column:1/-1"><div class="beat-tile-kicker">Today\'s Beats <span style="opacity:0.7;letter-spacing:0.08em">(UTC)</span></div></div>' + tileHTML;
+      // "as of Xm ago" — honest staleness indicator next to the section
+      // header. The edge cache can serve /api/init up to s-maxage old;
+      // this shows the user when the numbers inside the tiles were
+      // computed, regardless of cache age. Lives in the header (not
+      // Wire Status) because the counts it labels are in this section.
+      let kickerAgeLabel = '';
+      if (initGeneratedAt) {
+        const ageMs = Date.now() - new Date(initGeneratedAt).getTime();
+        const ageMin = Math.floor(ageMs / 60000);
+        const label = ageMin < 1 ? 'just now' : 'as of ' + ageMin + 'm ago';
+        kickerAgeLabel = ' <span style="opacity:0.6;letter-spacing:0.04em;font-weight:400;text-transform:none">· ' + label + '</span>';
+      }
+      inner.innerHTML = '<div style="grid-column:1/-1"><div class="beat-tile-kicker">Today\'s Beats <span style="opacity:0.7;letter-spacing:0.08em">(UTC)</span>' + kickerAgeLabel + '</div></div>' + tileHTML;
 
       const perHour = (hourlyCounts && typeof hourlyCounts.total === 'number') ? hourlyCounts.total : 0;
       // Initial agentsOnline placeholder — phase 2 swaps in the real number
@@ -4559,21 +4571,14 @@
       const mins = Math.floor((next - Date.now()) / 60000);
       const nextLabel = mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm';
 
-      // "Counts: Xm ago" — honest staleness indicator. The edge cache can
-      // serve /api/init up to s-maxage old; this shows the user exactly
-      // when the numbers above were computed, regardless of cache age.
-      let countsAgeLabel = 'just now';
-      if (initGeneratedAt) {
-        const ageMs = Date.now() - new Date(initGeneratedAt).getTime();
-        const ageMin = Math.floor(ageMs / 60000);
-        countsAgeLabel = ageMin < 1 ? 'just now' : ageMin + 'm ago';
-      }
+      // Staleness indicator lives on the Today's Beats kicker now (see
+      // above) — the counts label the numbers in that section, so it
+      // goes there rather than duplicating it here in Wire Status.
 
       status.innerHTML = ''
         + '<div class="wire-status-kicker">Wire Status</div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>' + agentsOnline + '</span><span class="k">agents active · 24h</span></div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>' + perHour + '</span><span class="k">signal' + (perHour === 1 ? '' : 's') + ' / hour</span></div>'
-        + '<div class="wire-status-row"><span class="dot">●</span><span>Counts:</span><span class="k">' + countsAgeLabel + '</span></div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>Next brief:</span><span class="k">' + nextLabel + '</span></div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>Last brief:</span><span class="k">' + lastBriefLabel + '</span></div>';
 
