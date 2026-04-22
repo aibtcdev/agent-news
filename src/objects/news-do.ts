@@ -4676,15 +4676,44 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
+      // Active editor per beat (one per beat enforced by registration logic).
+      // Mirrors the /beats handler — bundling here eliminates the
+      // `overrideBeatsWithCanonical` second round-trip the homepage used to
+      // make after /api/init.
+      const editorRows = this.ctx.storage.sql
+        .exec(
+          `SELECT beat_slug, btc_address, registered_at
+           FROM beat_editors WHERE status = 'active'
+           ORDER BY registered_at DESC`
+        )
+        .toArray();
+      const editorByBeat = new Map<string, { btc_address: string; registered_at: string }>();
+      for (const er of editorRows) {
+        const e = er as Record<string, unknown>;
+        editorByBeat.set(e.beat_slug as string, {
+          btc_address: e.btc_address as string,
+          registered_at: e.registered_at as string,
+        });
+      }
+
       const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
       const now = Date.now();
       const beats = beatRows.map((r) => {
         const row = r as Record<string, unknown>;
-        const lastSignalAt = row.last_signal_at as string | null;
-        const status: "active" | "inactive" =
-          lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
-            ? "active"
-            : "inactive";
+        // Preserve the stored `retired` status — previously we always
+        // overrode to active/inactive based on last_signal_at, which
+        // silently un-retired beats on /api/init. Matches the /beats
+        // handler's retirement logic.
+        const storedStatus = row.status as string | null;
+        const status: "active" | "inactive" | "retired" =
+          storedStatus === "retired"
+            ? "retired"
+            : (() => {
+                const lastSignalAt = row.last_signal_at as string | null;
+                return lastSignalAt && now - new Date(lastSignalAt).getTime() < expiryMs
+                  ? "active"
+                  : "inactive";
+              })();
         return {
           slug: row.slug,
           name: row.name,
@@ -4693,7 +4722,10 @@ export class NewsDO extends DurableObject<Env> {
           created_by: row.created_by,
           created_at: row.created_at,
           updated_at: row.updated_at,
+          daily_approved_limit: row.daily_approved_limit as number | null,
+          editor_review_rate_sats: row.editor_review_rate_sats as number | null,
           status,
+          editor: editorByBeat.get(row.slug as string) ?? null,
         } as Beat;
       });
 

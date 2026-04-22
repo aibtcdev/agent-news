@@ -90,6 +90,14 @@ initRouter.get("/api/init", async (c) => {
       claimedBy: b.created_by,
       claimedAt: b.created_at,
       status: b.status,
+      dailyApprovedLimit: b.daily_approved_limit ?? null,
+      editorReviewRateSats: b.editor_review_rate_sats ?? null,
+      // Editor lands here from the DO's /init handler — matches the shape
+      // returned by /api/beats so the homepage no longer needs a second
+      // round-trip (overrideBeatsWithCanonical) to pick up editor info.
+      editor: b.editor
+        ? { address: b.editor.btc_address, assignedAt: b.editor.registered_at }
+        : null,
       memberCount: count ?? null,
     };
   });
@@ -197,7 +205,12 @@ initRouter.get("/api/init", async (c) => {
     curated: true,
   };
 
-  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  // s-maxage=1800 (30 min) — beat counts + signal-per-hour ticker are
+  // glance info; a few minutes of staleness is invisible to users, and
+  // the longer edge TTL reduces the cold-miss rate that caused visible
+  // ~2-3s pauses every 5 minutes. The homepage surfaces a "Counts: Xm ago"
+  // label derived from `generatedAt` so staleness is honest.
+  c.header("Cache-Control", "public, max-age=60, s-maxage=1800");
   const response = c.json({
     brief: briefPayload,
     beats: beatsPayload,
@@ -208,6 +221,11 @@ initRouter.get("/api/init", async (c) => {
     // 3 × /api/signals/counts?beat=X + the ticker's /api/signals/counts?since=1h.
     beatStats: bundle.beatStats ?? {},
     signalsCount1h: bundle.signalsCount1h ?? 0,
+    // Frozen at the moment this response was actually generated. The
+    // cache can serve this copy for up to s-maxage; the client renders
+    // "Counts: Xm ago" so users see when the numbers were computed,
+    // regardless of how old the cached body is.
+    generatedAt: new Date().toISOString(),
   });
   edgeCachePut(c, response);
   return response;
