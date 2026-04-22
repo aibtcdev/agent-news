@@ -4368,43 +4368,46 @@
       const active = (beats || []).filter(b => (b.status || 'active').toLowerCase() === 'active');
       if (!active.length) return;
 
-      // 24h window with per-beat fetch. The API caps /api/signals at 100
-      // per request and returns newest-first with no `before`/`until`
-      // pagination, so multi-day charts get truncated when today alone
-      // fills the 100-row budget (active beats file 100+ signals daily).
-      // Hourly buckets over the last 24h fit in one fetch and surface
-      // where the actual variation is.
+      // 24h window. Tile numbers come from /api/signals/counts (purpose-built,
+      // not capped by row limits) so high-volume beats — bitcoin-macro currently
+      // files 600+ signals/24h, mostly rejected — don't crowd approved rows out
+      // of a 200-row /api/signals window and silently undercount the dashboard.
+      // /api/signals is still fetched, but only for the sparkline; for very
+      // active beats the sparkline reflects the most recent ~200 events.
       const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const top = active.slice(0, 3);
-      const perBeat = await Promise.all(top.map(b =>
-        fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since) + '&limit=100')
-      ));
+      const [perBeatCounts, perBeatSignals] = await Promise.all([
+        Promise.all(top.map(b =>
+          fetchJSON('/api/signals/counts?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since))
+        )),
+        Promise.all(top.map(b =>
+          fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since) + '&limit=200')
+        )),
+      ]);
 
       const bySlug = {};
+      const countsBySlug = {};
       for (let i = 0; i < top.length; i++) {
-        const d = perBeat[i];
-        bySlug[top[i].slug] = (d && Array.isArray(d.signals)) ? d.signals : [];
+        const sigData = perBeatSignals[i];
+        bySlug[top[i].slug] = (sigData && Array.isArray(sigData.signals)) ? sigData.signals : [];
+        countsBySlug[top[i].slug] = perBeatCounts[i] || {};
       }
       const allSignals = [].concat(...Object.values(bySlug));
 
-      // Count across the full 24h fetch window so stats match the sparkline.
-      const windowStart = Date.now() - 24 * 3600 * 1000;
       const tileHTML = top.map(b => {
         const color = b.color || getBeatColor((b.name || '').toUpperCase()) || '#1a1a1a';
         const sigs = bySlug[b.slug] || [];
-        const inWindow = sigs.filter(s =>
-          s.timestamp && new Date(s.timestamp).getTime() >= windowStart
-        );
-        const approved = inWindow.filter(s => {
-          const st = (s.status || '').toLowerCase();
-          return st === 'approved' || st === 'inscribed' || st === 'brief_included';
-        }).length;
-        const pending = inWindow.filter(s =>
-          /^(submitted|in_review|pending)$/i.test(s.status || '')
-        ).length;
+        const c = countsBySlug[b.slug] || {};
+        // approved + brief_included = editorially accepted in the window.
+        // submitted = awaiting editor review (pending). Pull from the counts
+        // endpoint so the numbers are accurate even when the beat files more
+        // signals than fit in a single /api/signals page.
+        const approved = (c.approved || 0) + (c.brief_included || 0);
+        const pending = c.submitted || 0;
 
-        // 24-hour trend: one bar per hour, oldest → newest. Hourly fits
-        // within the 100-row /api/signals limit where daily didn't.
+        // 24-hour trend: one bar per hour, oldest → newest. May undercount
+        // older buckets for beats whose 24h volume exceeds the 200-row page
+        // (rare across most beats — bitcoin-macro is the current outlier).
         const BUCKETS = 24;
         const HOUR = 3600 * 1000;
         const now = Date.now();
@@ -4448,16 +4451,35 @@
 
       inner.innerHTML = '<div style="grid-column:1/-1"><div class="beat-tile-kicker">Today\'s Beats <span style="opacity:0.7;letter-spacing:0.08em">(24 hr)</span></div></div>' + tileHTML;
 
-      // WIRE STATUS block
+      // WIRE STATUS block — signals/hour and brief recency come from dedicated
+      // endpoints so they're accurate regardless of how many signals each beat
+      // files. agentsOnline still derives from the per-beat /api/signals fetch
+      // above (no unique-address counts endpoint exists), so it remains a floor
+      // estimate when high-volume beats truncate at the 200-row page cap.
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const [hourlyCounts, latestBrief] = await Promise.all([
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(oneHourAgo)),
+        fetchJSON('/api/brief?format=json'),
+      ]);
+      const perHour = (hourlyCounts && typeof hourlyCounts.total === 'number') ? hourlyCounts.total : 0;
       const agentsOnline = new Set(allSignals
         .filter(s => s.timestamp && (Date.now() - new Date(s.timestamp).getTime()) < 24 * 3600 * 1000)
         .map(s => s.btcAddress).filter(Boolean)).size;
-      const perHour = allSignals
-        .filter(s => s.timestamp && (Date.now() - new Date(s.timestamp).getTime()) < 60 * 60 * 1000).length;
-      const lastInscribed = allSignals.find(s => (s.status || '').toLowerCase() === 'inscribed' && s.timestamp);
-      const lastInscribedAgo = lastInscribed
-        ? Math.max(1, Math.floor((Date.now() - new Date(lastInscribed.timestamp).getTime()) / (60 * 60 * 1000))) + 'h ago'
-        : '—';
+
+      // Last brief: prefer the latest archive date with a compiledAt; fall
+      // back to today's brief object's compiledAt if today is already compiled.
+      // (No signal carries a literal 'inscribed' status, so the prior version
+      // of this row was always rendering "—".)
+      let lastBriefLabel = '—';
+      if (latestBrief && latestBrief.compiledAt) {
+        const ageH = (Date.now() - new Date(latestBrief.compiledAt).getTime()) / (3600 * 1000);
+        lastBriefLabel = ageH < 1
+          ? Math.max(1, Math.floor(ageH * 60)) + 'm ago'
+          : Math.floor(ageH) + 'h ago';
+      } else if (latestBrief && Array.isArray(latestBrief.archive) && latestBrief.archive.length) {
+        // Today's brief not compiled yet — show date of most recent archive entry.
+        lastBriefLabel = latestBrief.archive[0];
+      }
 
       // Next brief target: 04:00 UTC tomorrow
       const next = new Date();
@@ -4471,7 +4493,7 @@
         + '<div class="wire-status-row"><span class="dot">●</span><span>' + agentsOnline + '</span><span class="k">agents active · 24h</span></div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>' + perHour + '</span><span class="k">signal' + (perHour === 1 ? '' : 's') + ' / hour</span></div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>Next brief:</span><span class="k">' + nextLabel + '</span></div>'
-        + '<div class="wire-status-row"><span class="dot">●</span><span>Last inscribed:</span><span class="k">' + lastInscribedAgo + '</span></div>';
+        + '<div class="wire-status-row"><span class="dot">●</span><span>Last brief:</span><span class="k">' + lastBriefLabel + '</span></div>';
 
       // Drop skeleton pulse classes now that real data has rendered
       status.classList.remove('skeleton-status');
