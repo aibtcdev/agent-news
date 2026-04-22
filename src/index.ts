@@ -219,6 +219,16 @@ app.post("/api/test/payment-stage/:paymentId/reconcile", async (c) => {
   return c.json(await res.json(), res.status as 200 | 400 | 404);
 });
 
+// Test-only — mark a staged row 'expired' so tests can cover the late-settlement path.
+app.post("/api/test/payment-stage/:paymentId/force-expire", async (c) => {
+  if (!isTestEnv(c)) return c.json({ error: "Not found" }, 404);
+  const res = await getDoStub(c).fetch(
+    `https://do/test/payment-staging/${encodeURIComponent(c.req.param("paymentId"))}/force-expire`,
+    { method: "POST" }
+  );
+  return c.json(await res.json(), res.status as 200 | 404);
+});
+
 // Test-only — trigger the staged-payment alarm sweep without waiting 50s.
 // Accepts { results: { [paymentId]: { status, txid?, terminalReason? } } }
 // to stub checkPayment per row. If `results` is omitted, the live X402_RELAY

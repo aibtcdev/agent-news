@@ -244,19 +244,39 @@ type CheckPaymentFn = (paymentId: string) => Promise<CheckPaymentResult>;
  * Return a bound checkPayment callable if the relay binding exposes one.
  * In the test miniflare config X402_RELAY is a plain Fetcher (no RPC methods),
  * so the sweep no-ops without throwing.
+ *
+ * Returns a closure that calls `relay.checkPayment(paymentId)` with the relay
+ * as receiver — extracting the method and calling it standalone would drop
+ * `this` for WorkerEntrypoint-based RPC bindings.
  */
 function resolveRelayCheckPayment(relay: unknown): CheckPaymentFn | null {
   if (!relay || typeof relay !== "object") return null;
-  const fn = (relay as Record<string, unknown>).checkPayment;
-  if (typeof fn !== "function") return null;
-  return (paymentId) => (fn as CheckPaymentFn)(paymentId);
+  const bound = relay as Record<string, unknown> & { checkPayment?: CheckPaymentFn };
+  if (typeof bound.checkPayment !== "function") return null;
+  return (paymentId) => bound.checkPayment!(paymentId);
 }
 
+const TERMINAL_PAYMENT_STATES = new Set(["confirmed", "failed", "replaced", "not_found"]);
+
 /**
- * Scan payment_staging for rows still in 'staged' that are older than graceMs,
- * call the provided checkPayment for each, and reconcile on terminal outcomes.
- * Caller-agnostic — the sweep closure receives a bound checkPayment (either the
- * live X402_RELAY RPC or a test stub) so this function has no env dependency.
+ * Scan payment_staging for rows eligible for backend reconciliation, call
+ * checkPayment for each, and apply terminal outcomes. Caller-agnostic — the
+ * sweep receives a bound checkPayment (live X402_RELAY RPC or a test stub)
+ * so this function has no env dependency.
+ *
+ * Eligibility: rows in 'staged' or 'expired' whose `created_at` is older than
+ * `graceMs`. 'expired' rows are included because the TTL is advisory —
+ * `purgeExpiredStagedRecords` keeps them around precisely so late settlements
+ * can still be delivered; the sweep is the primary consumer of that path.
+ *
+ * Ordering: `ORDER BY updated_at ASC` so the batch rotates through the pool.
+ * On each non-terminal response we bump `updated_at` to push the row to the
+ * back of the queue — without this, a backlog of pending rows at the front
+ * would starve newer staged rows forever.
+ *
+ * Concurrency: checkPayment calls are serial on purpose — the relay is shared
+ * infrastructure and a burst of alarm-driven concurrent calls under backlog
+ * recovery would be self-DoS-ing. `limit` (default 10) caps the per-tick cost.
  */
 async function sweepPaymentStagingRows(
   sql: DurableObjectState["storage"]["sql"],
@@ -269,8 +289,8 @@ async function sweepPaymentStagingRows(
   const rows = sql
     .exec(
       `SELECT payment_id FROM payment_staging
-        WHERE stage_status = 'staged' AND created_at < ?
-        ORDER BY created_at ASC
+        WHERE stage_status IN ('staged', 'expired') AND created_at < ?
+        ORDER BY updated_at ASC
         LIMIT ?`,
       cutoff,
       limit
@@ -283,12 +303,11 @@ async function sweepPaymentStagingRows(
     const paymentId = row.payment_id;
     try {
       const result = await checkPayment(paymentId);
-      if (
-        result.status === "confirmed" ||
-        result.status === "failed" ||
-        result.status === "replaced" ||
-        result.status === "not_found"
-      ) {
+      if (typeof result?.status !== "string") {
+        console.warn(`[alarm-sweep] invalid checkPayment response for paymentId=${paymentId}:`, result);
+        continue;
+      }
+      if (TERMINAL_PAYMENT_STATES.has(result.status)) {
         const reconciled = reconcileStageRow(
           sql,
           paymentId,
@@ -296,12 +315,20 @@ async function sweepPaymentStagingRows(
           result.txid,
           result.terminalReason as PaymentTerminalReason | undefined
         );
-        if (reconciled && reconciled.stageStatus !== "staged") {
+        if (reconciled && reconciled.stageStatus !== "staged" && reconciled.stageStatus !== "expired") {
           reconciledCount += 1;
           console.log(
             `[alarm-sweep] reconciled paymentId=${paymentId} status=${result.status} stage=${reconciled.stageStatus}`
           );
         }
+      } else {
+        // Non-terminal — bump updated_at so the row rotates to the back of the
+        // sweep queue next tick and newer staged rows get a turn.
+        sql.exec(
+          "UPDATE payment_staging SET updated_at = ? WHERE payment_id = ?",
+          new Date().toISOString(),
+          paymentId
+        );
       }
     } catch (err) {
       console.error(`[alarm-sweep] checkPayment failed for paymentId=${paymentId}:`, err);
@@ -1087,6 +1114,19 @@ export class NewsDO extends DurableObject<Env> {
         body.terminalReason
       );
       return c.json({ ok: true, data: reconciled } satisfies DOResult<PaymentStageMaterialized | null>);
+    });
+
+    // Test-only — mark a staged row as 'expired' directly so we can cover the
+    // late-settlement path without waiting out the 24h TTL.
+    this.router.post("/test/payment-staging/:paymentId/force-expire", (c) => {
+      const paymentId = c.req.param("paymentId");
+      this.ctx.storage.sql.exec(
+        "UPDATE payment_staging SET stage_status = 'expired', updated_at = ? WHERE payment_id = ? AND stage_status = 'staged'",
+        new Date().toISOString(),
+        paymentId
+      );
+      const row = getPaymentStageRow(this.ctx.storage.sql, paymentId);
+      return c.json({ ok: true, data: row } satisfies DOResult<PaymentStageMaterialized | null>);
     });
 
     // Test-only hook — trigger sweepStagedPayments without waiting for the

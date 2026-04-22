@@ -95,6 +95,55 @@ describe("payment staging alarm sweep (#572)", () => {
     expect(stageBody.data.stageStatus).toBe("staged");
   });
 
+  it("recovers an expired row when the relay finally confirms (late settlement)", async () => {
+    // Rows that cross the 24h TTL are marked 'expired' but kept in the table
+    // precisely so late on-chain confirmations can still deliver. Confirmed by
+    // #572's repro comment — jingswap.btc classifieds sat staged for days.
+    const paymentId = "pay_sweep_expired_001";
+    const classifiedId = "cl-sweep-expired-001";
+    await stageClassified(paymentId, classifiedId);
+
+    const expireRes = await SELF.fetch(
+      `http://example.com/api/test/payment-stage/${paymentId}/force-expire`,
+      { method: "POST" }
+    );
+    expect(expireRes.status).toBe(200);
+    const expireBody = await expireRes.json<{ data: { stageStatus: string } }>();
+    expect(expireBody.data.stageStatus).toBe("expired");
+
+    const reconciled = await runSweep({
+      [paymentId]: { status: "confirmed", txid: "f".repeat(64) },
+    });
+    expect(reconciled).toBe(1);
+
+    const stageRes = await SELF.fetch(`http://example.com/api/test/payment-stage/${paymentId}`);
+    const stageBody = await stageRes.json<{ data: { stageStatus: string } }>();
+    expect(stageBody.data.stageStatus).toBe("finalized");
+  });
+
+  it("bumps updated_at on non-terminal sweeps so rows rotate instead of starve", async () => {
+    // A pending row left in 'staged' must have its updated_at advanced on each
+    // check. Without this, ORDER BY updated_at ASC would pin the same rows at
+    // the front of the queue forever and starve newer stagings.
+    const paymentId = "pay_sweep_rotate_bump";
+    await stageClassified(paymentId, "cl-sweep-rotate-bump");
+
+    const before = await SELF.fetch(`http://example.com/api/test/payment-stage/${paymentId}`);
+    const beforeBody = await before.json<{ data: { updatedAt: string; stageStatus: string } }>();
+    expect(beforeBody.data.stageStatus).toBe("staged");
+    const originalUpdatedAt = beforeBody.data.updatedAt;
+
+    // A non-terminal response — row stays 'staged' but updated_at should advance.
+    await new Promise((r) => setTimeout(r, 20));
+    const reconciled = await runSweep({ [paymentId]: { status: "mempool" } });
+    expect(reconciled).toBe(0);
+
+    const after = await SELF.fetch(`http://example.com/api/test/payment-stage/${paymentId}`);
+    const afterBody = await after.json<{ data: { updatedAt: string; stageStatus: string } }>();
+    expect(afterBody.data.stageStatus).toBe("staged");
+    expect(afterBody.data.updatedAt > originalUpdatedAt).toBe(true);
+  });
+
   it("skips rows still inside the grace window to avoid racing the POST reconcile", async () => {
     const paymentId = "pay_sweep_grace_001";
     const classifiedId = "cl-sweep-grace-001";
