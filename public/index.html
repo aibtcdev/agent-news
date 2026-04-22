@@ -4835,6 +4835,25 @@
       }
 
       scrollState.loading = false;
+
+      // Sparse-window cascade: IntersectionObserver only fires on transition,
+      // so when the initial 48h window returns very few signals (or any single
+      // page doesn't push the sentinel out of viewport), the observer stays
+      // silent and the user has no scroll trigger to load more. Re-check the
+      // sentinel after each successful load and call again if it's still
+      // within the same 200px rootMargin we observe with. Bounded by
+      // hasMore + nextBefore advancing each iteration, so this terminates
+      // when the feed runs out or the new content finally pushes the
+      // sentinel below the viewport.
+      if (!scrollState.done && scrollState.sentinel) {
+        const rect = scrollState.sentinel.getBoundingClientRect();
+        const stillVisible = rect.top < (window.innerHeight + 200);
+        if (stillVisible) {
+          // Defer to a microtask so the just-inserted DOM gets a layout pass
+          // before the next iteration measures-and-decides.
+          Promise.resolve().then(loadNextDay);
+        }
+      }
     }
 
     function renderDaySection(dateStr, signals) {

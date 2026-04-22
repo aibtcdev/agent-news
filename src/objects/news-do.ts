@@ -87,6 +87,34 @@ function rowToSignal(row: Record<string, unknown>): Signal {
   };
 }
 
+// ── Front-page (curated) signals window ──
+// The homepage's initial render shows curated (approved + brief_included)
+// signals from this rolling window only; older days are loaded on demand
+// via /signals/front-page-page as the user scrolls. Both /init bundle and
+// /signals/front-page use the same window — keep the SQL fragment in one
+// place so future tweaks (window or row cap) are a one-line change.
+const FRONT_PAGE_WINDOW_SQL = "-2 days";
+const FRONT_PAGE_MAX_ROWS = 200;
+
+const FRONT_PAGE_SIGNALS_QUERY = `
+  SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+  FROM signals s
+  LEFT JOIN beats b ON s.beat_slug = b.slug
+  LEFT JOIN signal_tags st ON s.id = st.signal_id
+  WHERE s.status IN ('approved', 'brief_included')
+    AND s.created_at >= datetime('now', '${FRONT_PAGE_WINDOW_SQL}')
+  GROUP BY s.id
+  ORDER BY s.created_at DESC
+  LIMIT ${FRONT_PAGE_MAX_ROWS}
+`;
+
+function queryFrontPageSignals(
+  sql: DurableObjectState["storage"]["sql"]
+): Signal[] {
+  return sql.exec(FRONT_PAGE_SIGNALS_QUERY).toArray()
+    .map((r) => rowToSignal(r as Record<string, unknown>));
+}
+
 function rowToCompiledSignal(row: Record<string, unknown>): RawCompiledSignalRow {
   const raw = row as unknown as RawCompiledSignalRow;
   return {
@@ -2087,27 +2115,11 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // GET /signals/front-page — curated signals (approved + brief_included)
-    // from the last 48 hours. Older signals are loaded on-demand via the
-    // date-paginated /signals/front-page-page endpoint as the user scrolls.
-    // The previous LIMIT 500 returned ~12 days of data in one ~830 KB
-    // response; this trims the initial payload to a few dozen signals
-    // typical for the 48h window. Hard cap at 200 as a safety bound.
+    // for the initial render. Window + row cap defined by FRONT_PAGE_WINDOW_SQL
+    // and FRONT_PAGE_MAX_ROWS at the top of this file; older signals load on
+    // demand via /signals/front-page-page as the user scrolls.
     this.router.get("/signals/front-page", (c) => {
-      const rows = this.ctx.storage.sql
-        .exec(
-          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
-           FROM signals s
-           LEFT JOIN beats b ON s.beat_slug = b.slug
-           LEFT JOIN signal_tags st ON s.id = st.signal_id
-           WHERE s.status IN ('approved', 'brief_included')
-             AND s.created_at >= datetime('now', '-2 days')
-           GROUP BY s.id
-           ORDER BY s.created_at DESC
-           LIMIT 200`
-        )
-        .toArray();
-
-      const signals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
+      const signals = queryFrontPageSignals(this.ctx.storage.sql);
       return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
     });
 
@@ -4724,24 +4736,10 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       // Front-page signals (approved + brief_included) for the initial render.
-      // Limited to last 48h so the bundled /api/init payload is small enough
-      // to render fast. The frontend's existing infinite-scroll path
-      // (/api/front-page?before=…&limit=50) loads older signals on demand
-      // as the user scrolls, so the deeper archive isn't lost — just deferred.
-      const signalRows = this.ctx.storage.sql
-        .exec(
-          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
-           FROM signals s
-           LEFT JOIN beats b ON s.beat_slug = b.slug
-           LEFT JOIN signal_tags st ON s.id = st.signal_id
-           WHERE s.status IN ('approved', 'brief_included')
-             AND s.created_at >= datetime('now', '-2 days')
-           GROUP BY s.id
-           ORDER BY s.created_at DESC
-           LIMIT 200`
-        )
-        .toArray();
-      const signals = signalRows.map((r) => rowToSignal(r as Record<string, unknown>));
+      // Window + row cap defined by FRONT_PAGE_WINDOW_SQL / FRONT_PAGE_MAX_ROWS;
+      // older signals load on demand via /api/front-page?before=… as the user
+      // scrolls.
+      const signals = queryFrontPageSignals(this.ctx.storage.sql);
 
       return c.json({
         ok: true,
