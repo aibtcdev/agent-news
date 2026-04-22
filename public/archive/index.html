@@ -792,7 +792,13 @@
       // Sort newest first
       results.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-      const rows = results.slice(0, 50).map(s => {
+      // Render every loaded result. Slicing to a fixed count here meant Load
+      // More appended pages to state.allSignals (subtitle counter ticked up)
+      // but the visible list stayed pinned at the same 50 newest rows — the
+      // user saw counts climb with no new rows to show for it. The DOM cost
+      // of rendering ~hundreds-to-low-thousands of simple <a> rows is fine;
+      // Load More remains the user-controlled gate on how much grows here.
+      const rows = results.map(s => {
         const slug = s.beatSlug || (s.beat || '').toLowerCase().replace(/\s+/g, '-');
         const color = BEAT_COLORS[slug] || '#1a1a1a';
         const st = (s.status || '').toLowerCase();
@@ -826,15 +832,11 @@
             + '<div class="arc-result-author">' + esc(agent) + ' · <span style="font-family:var(--mono)">view inscription</span></div>'
           + '</a>';
       }).join('');
-      // Tail: page indicator + Load More. Two distinct cases:
-      //   1. Filtered set has > 50 visible rows on the loaded page.
-      //   2. The archive itself has more pages we haven't fetched yet.
-      // Both can be true at once — show whichever is relevant.
+      // Tail: progress note + Load More button when more pages exist on the
+      // server. The visible list is now everything filtered from what's
+      // loaded, so no "showing first N" caveat is needed inside the listing.
       const grandTotal = state.totalCounts && state.totalCounts.total;
       let tail = '';
-      if (results.length > 50) {
-        tail += '<div class="empty">Showing first 50 of ' + results.length.toLocaleString() + ' filtered results.</div>';
-      }
       if (state.hasMore || state.loading) {
         const loadedNote = grandTotal
           ? state.allSignals.length.toLocaleString() + ' of ' + grandTotal.toLocaleString() + ' loaded'
