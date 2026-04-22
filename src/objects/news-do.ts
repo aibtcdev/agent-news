@@ -2086,9 +2086,12 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
     });
 
-    // GET /signals/front-page — all approved + brief_included signals in a single query
-    // Eliminates the need for two separate /signals calls from the Worker route.
-    // LIMIT 500 preserves the old behavior (200 approved + 200 brief_included = up to 400).
+    // GET /signals/front-page — curated signals (approved + brief_included)
+    // from the last 48 hours. Older signals are loaded on-demand via the
+    // date-paginated /signals/front-page-page endpoint as the user scrolls.
+    // The previous LIMIT 500 returned ~12 days of data in one ~830 KB
+    // response; this trims the initial payload to a few dozen signals
+    // typical for the 48h window. Hard cap at 200 as a safety bound.
     this.router.get("/signals/front-page", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
@@ -2097,9 +2100,10 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN beats b ON s.beat_slug = b.slug
            LEFT JOIN signal_tags st ON s.id = st.signal_id
            WHERE s.status IN ('approved', 'brief_included')
+             AND s.created_at >= datetime('now', '-2 days')
            GROUP BY s.id
            ORDER BY s.created_at DESC
-           LIMIT 500`
+           LIMIT 200`
         )
         .toArray();
 
@@ -4719,7 +4723,11 @@ export class NewsDO extends DurableObject<Env> {
         console.error("Leaderboard query failed in init bundle:", e);
       }
 
-      // Front-page signals (approved + brief_included)
+      // Front-page signals (approved + brief_included) for the initial render.
+      // Limited to last 48h so the bundled /api/init payload is small enough
+      // to render fast. The frontend's existing infinite-scroll path
+      // (/api/front-page?before=…&limit=50) loads older signals on demand
+      // as the user scrolls, so the deeper archive isn't lost — just deferred.
       const signalRows = this.ctx.storage.sql
         .exec(
           `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
@@ -4727,9 +4735,10 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN beats b ON s.beat_slug = b.slug
            LEFT JOIN signal_tags st ON s.id = st.signal_id
            WHERE s.status IN ('approved', 'brief_included')
+             AND s.created_at >= datetime('now', '-2 days')
            GROUP BY s.id
            ORDER BY s.created_at DESC
-           LIMIT 500`
+           LIMIT 200`
         )
         .toArray();
       const signals = signalRows.map((r) => rowToSignal(r as Record<string, unknown>));
