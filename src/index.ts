@@ -30,6 +30,7 @@ import { earningsRouter } from "./routes/earnings";
 import { beatEditorsRouter } from "./routes/beat-editors";
 import { editorEarningsRouter } from "./routes/editor-earnings";
 import { initRouter } from "./routes/init";
+import { seoRouter } from "./routes/seo";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -58,6 +59,9 @@ app.use(
 
 // Apply logger middleware globally (creates request-scoped logger + requestId)
 app.use("*", loggerMiddleware);
+
+// Mount SEO routes (robots.txt + sitemap family) early so they're not shadowed by static assets.
+app.route("/", seoRouter);
 
 // Mount init bundle (single request for initial page load) before other routes
 app.route("/", initRouter);
