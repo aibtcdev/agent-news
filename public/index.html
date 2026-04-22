@@ -4359,6 +4359,14 @@
     }
 
     // ── Today's Beats rail (horizontal 3-up + wire status block) ──
+    // Two-phase render to cut perceived load time. Phase 1 fires the lightweight
+    // /api/signals/counts and /api/brief calls (~85 byte to ~1KB responses) and
+    // paints tile numbers + wire status as soon as they land — typically <500ms
+    // when warm. Phase 2 lazy-fills the sparkline SVG and the agentsOnline gauge
+    // from /api/signals (which returns full signal records — ~250-375KB per beat,
+    // a 1MB+ payload across 3 beats just to extract timestamps). The user sees
+    // real headline numbers immediately; the trend bars and unique-agent count
+    // settle in afterward without blocking the rest of the rail.
     async function renderBeatsRail() {
       const rail = el('beats-rail');
       const inner = el('beats-rail-inner');
@@ -4376,40 +4384,40 @@
       // across the midnight boundary (visualization intent != count intent).
       const todayUtcMidnight = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
       const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const top = active.slice(0, 3);
-      const [perBeatCounts, perBeatSignals] = await Promise.all([
+
+      // Fire EVERY rail fetch in parallel up front so cold-start latency on any
+      // single endpoint doesn't gate the rest. We then await two groups —
+      // phase 1 (cheap, render-blocking) and phase 2 (heavy, progressive fill).
+      const phase1 = Promise.all([
         Promise.all(top.map(b =>
           fetchJSON('/api/signals/counts?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(todayUtcMidnight))
         )),
-        Promise.all(top.map(b =>
-          fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since24h) + '&limit=200')
-        )),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(oneHourAgo)),
+        fetchJSON('/api/brief?format=json'),
       ]);
+      const phase2 = Promise.all(top.map(b =>
+        fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since24h) + '&limit=200')
+      ));
 
-      const bySlug = {};
-      const countsBySlug = {};
-      for (let i = 0; i < top.length; i++) {
-        const sigData = perBeatSignals[i];
-        bySlug[top[i].slug] = (sigData && Array.isArray(sigData.signals)) ? sigData.signals : [];
-        countsBySlug[top[i].slug] = perBeatCounts[i] || {};
+      const [perBeatCounts, hourlyCounts, latestBrief] = await phase1;
+
+      // Sparkline geometry — used in both the placeholder render and the lazy
+      // fill, so hoisted out of the per-tile loop.
+      const BUCKETS = 24;
+      const barW = 6, gap = 2;
+      const totalW = BUCKETS * (barW + gap);
+      // Empty-state placeholder: 24 hairline bars at baseline opacity. The SVG
+      // is replaced wholesale once the per-beat signal data arrives.
+      function placeholderSparkSvg(color) {
+        let bars = '';
+        for (let i = 0; i < BUCKETS; i++) {
+          bars += '<rect x="' + (i * (barW + gap)) + '" y="23" width="' + barW + '" height="1" fill="' + color + '" opacity="0.18"></rect>';
+        }
+        return '<svg class="beat-tile-spark" viewBox="0 0 ' + totalW + ' 24" preserveAspectRatio="none">' + bars + '</svg>';
       }
-      const allSignals = [].concat(...Object.values(bySlug));
-
-      const tileHTML = top.map(b => {
-        const color = b.color || getBeatColor((b.name || '').toUpperCase()) || '#1a1a1a';
-        const sigs = bySlug[b.slug] || [];
-        const c = countsBySlug[b.slug] || {};
-        // approved + brief_included = editorially accepted in the window.
-        // submitted = awaiting editor review (pending). Pull from the counts
-        // endpoint so the numbers are accurate even when the beat files more
-        // signals than fit in a single /api/signals page.
-        const approved = (c.approved || 0) + (c.brief_included || 0);
-        const pending = c.submitted || 0;
-
-        // 24-hour trend: one bar per hour, oldest → newest. May undercount
-        // older buckets for beats whose 24h volume exceeds the 200-row page
-        // (rare across most beats — bitcoin-macro is the current outlier).
-        const BUCKETS = 24;
+      function bucketedSparkSvg(color, sigs) {
         const HOUR = 3600 * 1000;
         const now = Date.now();
         const buckets = Array(BUCKETS).fill(0);
@@ -4420,52 +4428,73 @@
           if (idx >= 0 && idx < BUCKETS) buckets[idx]++;
         }
         const max = Math.max(1, ...buckets);
-        const barW = 6, gap = 2;
-        const totalW = BUCKETS * (barW + gap);
-        const svg = '<svg class="beat-tile-spark" viewBox="0 0 ' + totalW + ' 24" preserveAspectRatio="none">'
-          + buckets.map((v, i) => {
-              // Stub height so empty hours still show a hairline baseline
-              const h = v === 0 ? 1 : Math.max(2, (v / max) * 22);
-              const y = 24 - h;
-              const hoursAgo = BUCKETS - 1 - i;
-              const isCurrent = hoursAgo === 0;
-              const opacity = v === 0 ? 0.18 : (isCurrent ? 1 : 0.45 + i * 0.02);
-              const label = v + ' signal' + (v === 1 ? '' : 's') + ' · ' + (isCurrent ? 'this hour' : hoursAgo + 'h ago');
-              return '<rect x="' + (i * (barW + gap)) + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="' + color + '" opacity="' + opacity.toFixed(2) + '"><title>' + label + '</title></rect>';
-            }).join('')
-          + '</svg>';
+        let bars = '';
+        for (let i = 0; i < BUCKETS; i++) {
+          const v = buckets[i];
+          // Stub height so empty hours still show a hairline baseline
+          const h = v === 0 ? 1 : Math.max(2, (v / max) * 22);
+          const y = 24 - h;
+          const hoursAgo = BUCKETS - 1 - i;
+          const isCurrent = hoursAgo === 0;
+          const opacity = v === 0 ? 0.18 : (isCurrent ? 1 : 0.45 + i * 0.02);
+          const label = v + ' signal' + (v === 1 ? '' : 's') + ' · ' + (isCurrent ? 'this hour' : hoursAgo + 'h ago');
+          bars += '<rect x="' + (i * (barW + gap)) + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="' + color + '" opacity="' + opacity.toFixed(2) + '"><title>' + label + '</title></rect>';
+        }
+        return '<svg class="beat-tile-spark" viewBox="0 0 ' + totalW + ' 24" preserveAspectRatio="none">' + bars + '</svg>';
+      }
+
+      // Sanitize beat colors before they reach any HTML sink. Colors come
+      // from /api/beats — trusted in steady state, but a future malicious or
+      // misconfigured editor row could carry a string that breaks out of the
+      // SVG fill="…" attribute. Validate against the hex / named-color shape
+      // we actually use; reject anything else to a safe fallback.
+      // Defense-in-depth against the CodeQL js/xss-through-dom flow that
+      // would otherwise round-trip the color through a data-* attribute.
+      function safeBeatColor(raw) {
+        if (typeof raw !== 'string') return '#1a1a1a';
+        return /^#[0-9a-fA-F]{3,8}$|^[a-zA-Z]+$/.test(raw) ? raw : '#1a1a1a';
+      }
+
+      // Closure-local color lookup so phase 2's sparkline replacement can
+      // re-derive the color without round-tripping through a DOM attribute
+      // (CodeQL js/xss-through-dom). Keys by slug — the slug also lives on
+      // the tile as data-beat-slug, but slugs are validated server-side and
+      // we use CSS.escape() before passing to querySelector, so the slug
+      // round-trip is safe; the color one is not.
+      const colorBySlug = {};
+
+      const tileHTML = top.map((b, i) => {
+        const color = safeBeatColor(b.color || getBeatColor((b.name || '').toUpperCase()) || '#1a1a1a');
+        colorBySlug[b.slug] = color;
+        const c = perBeatCounts[i] || {};
+        // approved + brief_included = editorially accepted in the window.
+        // submitted = awaiting editor review (pending). Pull from the counts
+        // endpoint so the numbers are accurate even when the beat files more
+        // signals than fit in a single /api/signals page.
+        const approved = (c.approved || 0) + (c.brief_included || 0);
+        const pending = c.submitted || 0;
 
         const editorAddr = (b.editor && b.editor.address) || null;
         const editor = editorAddr ? (correspondentsList || []).find(c => c.address === editorAddr) : null;
         const editorName = (editor && editor.display_name) || (editorAddr ? truncAddr(editorAddr) : 'Vacant');
 
-        return '<a class="beat-tile" href="/signals/?beat=' + encodeURIComponent(b.slug) + '">'
+        return '<a class="beat-tile" data-beat-slug="' + esc(b.slug) + '" href="/signals/?beat=' + encodeURIComponent(b.slug) + '">'
           + '<div class="beat-tile-head"><span class="pip" style="background:' + color + '"></span><span class="beat-tile-name">' + esc(b.name) + '</span></div>'
           + '<div class="beat-tile-editor">Editor: ' + esc(editorName) + '</div>'
           + '<div class="beat-tile-stats">'
             + '<span><span class="filed">' + approved + '</span> <span class="dim">approved</span></span>'
             + '<span><span class="pending">' + pending + '</span> <span class="dim">pending</span></span>'
           + '</div>'
-          + svg
+          + placeholderSparkSvg(color)
         + '</a>';
       }).join('');
 
       inner.innerHTML = '<div style="grid-column:1/-1"><div class="beat-tile-kicker">Today\'s Beats <span style="opacity:0.7;letter-spacing:0.08em">(UTC)</span></div></div>' + tileHTML;
 
-      // WIRE STATUS block — signals/hour and brief recency come from dedicated
-      // endpoints so they're accurate regardless of how many signals each beat
-      // files. agentsOnline still derives from the per-beat /api/signals fetch
-      // above (no unique-address counts endpoint exists), so it remains a floor
-      // estimate when high-volume beats truncate at the 200-row page cap.
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const [hourlyCounts, latestBrief] = await Promise.all([
-        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(oneHourAgo)),
-        fetchJSON('/api/brief?format=json'),
-      ]);
       const perHour = (hourlyCounts && typeof hourlyCounts.total === 'number') ? hourlyCounts.total : 0;
-      const agentsOnline = new Set(allSignals
-        .filter(s => s.timestamp && (Date.now() - new Date(s.timestamp).getTime()) < 24 * 3600 * 1000)
-        .map(s => s.btcAddress).filter(Boolean)).size;
+      // Initial agentsOnline placeholder — phase 2 swaps in the real number
+      // once /api/signals returns the per-beat signal records.
+      let agentsOnline = '…';
 
       // Last brief: prefer the latest archive date with a compiledAt; fall
       // back to today's brief object's compiledAt if today is already compiled.
@@ -4501,6 +4530,38 @@
       inner.querySelectorAll('.skeleton-tile').forEach(n => n.remove());
 
       rail.style.display = '';
+
+      // Phase 2 — replace placeholder sparklines with real hourly buckets and
+      // swap the agentsOnline placeholder for the real unique-address count
+      // once the heavy /api/signals payload arrives. This runs without
+      // blocking the rest of the page and updates the DOM in place.
+      phase2.then((perBeatSignals) => {
+        const allSignals = [];
+        for (let i = 0; i < top.length; i++) {
+          const sigData = perBeatSignals[i];
+          const sigs = (sigData && Array.isArray(sigData.signals)) ? sigData.signals : [];
+          allSignals.push(...sigs);
+          const tile = inner.querySelector('[data-beat-slug="' + CSS.escape(top[i].slug) + '"]');
+          if (!tile) continue;
+          const oldSvg = tile.querySelector('svg.beat-tile-spark');
+          if (!oldSvg) continue;
+          // Read color from the closure-local map, NOT from a DOM attribute,
+          // so we avoid the CodeQL js/xss-through-dom flow (DOM text → HTML).
+          // colorBySlug values are pre-validated by safeBeatColor().
+          const color = colorBySlug[top[i].slug] || '#1a1a1a';
+          const tmp = document.createElement('div');
+          tmp.innerHTML = bucketedSparkSvg(color, sigs);
+          oldSvg.replaceWith(tmp.firstChild);
+        }
+        const realAgents = new Set(allSignals
+          .filter(s => s.timestamp && (Date.now() - new Date(s.timestamp).getTime()) < 24 * 3600 * 1000)
+          .map(s => s.btcAddress).filter(Boolean)).size;
+        const agentsRow = status.querySelector('.wire-status-row');
+        if (agentsRow) {
+          const num = agentsRow.querySelector('span:nth-child(2)');
+          if (num) num.textContent = realAgents;
+        }
+      }).catch(() => { /* sparklines stay as placeholders on error — no fatal UX impact */ });
     }
 
     // ── The Wire (dense signal rows below the brief) ──
