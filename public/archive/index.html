@@ -991,20 +991,25 @@
     }
 
     async function init() {
-      // /api/signals is capped at 200 rows server-side regardless of the
-      // requested limit. Fetch authoritative aggregates in parallel via
-      // /api/signals/counts so the time + status facets reflect the full
-      // archive instead of being truncated to ≤200.
-      // Day-aligned `since=` values so each cache entry is reused for the
+      // Phase 1 (render-blocking, critical) — listing + subtitle + facet
+      // labels (statuses) need beats, signals listing, and total counts.
+      // Fire the cheaper facet-count window calls as phase 2 (background)
+      // so the listing renders the moment phase 1 lands instead of waiting
+      // on 4 extra round-trips for sidebar labels that don't gate the
+      // primary content. Phase 3 (briefs sidebar) defers until that rail
+      // section nears the viewport.
+      // Day-aligned `since=` values keep every cache entry reused for the
       // entire UTC day instead of producing a fresh URL on every navigation.
-      const [beatsData, signalsData, totalCounts, todayCounts, weekCounts, monthCounts, quarterCounts] = await Promise.all([
-        fetchJSON('/api/beats'),
-        fetchJSON('/api/signals?limit=200'),
-        fetchJSON('/api/signals/counts'),
+      const phase2 = Promise.all([
         fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceUtcMidnightIso())),
         fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(7))),
         fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(30))),
         fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(90))),
+      ]);
+      const [beatsData, signalsData, totalCounts] = await Promise.all([
+        fetchJSON('/api/beats'),
+        fetchJSON('/api/signals?limit=200'),
+        fetchJSON('/api/signals/counts'),
       ]);
       state.allBeats = (Array.isArray(beatsData) ? beatsData : []).filter(b => (b.status || 'active').toLowerCase() !== 'retired');
       state.allSignals = (signalsData && Array.isArray(signalsData.signals)) ? signalsData.signals : [];
@@ -1013,19 +1018,36 @@
         state.allSignals.length >= state.pageSize &&
         (!totalCounts || state.allSignals.length < totalCounts.total);
       state.totalCounts = totalCounts || null;
-      state.timeRangeCounts = {
-        today: todayCounts && todayCounts.total,
-        week: weekCounts && weekCounts.total,
-        month: monthCounts && monthCounts.total,
-        quarter: quarterCounts && quarterCounts.total,
-        all: totalCounts && totalCounts.total,
-      };
+      // Facet counts will populate from phase 2; render now with empties
+      // so the labels show "0" briefly rather than blanking the section.
+      state.timeRangeCounts = { all: totalCounts && totalCounts.total };
 
       renderSubtitle();
       bindSearch();
       rerender();
       renderSaved();
-      loadBriefs();
+
+      // Phase 2 — facet count labels populate without blocking the listing.
+      phase2.then(([todayCounts, weekCounts, monthCounts, quarterCounts]) => {
+        state.timeRangeCounts = {
+          today: todayCounts && todayCounts.total,
+          week: weekCounts && weekCounts.total,
+          month: monthCounts && monthCounts.total,
+          quarter: quarterCounts && quarterCounts.total,
+          all: totalCounts && totalCounts.total,
+        };
+        renderFacets();
+      });
+
+      // Phase 3 — briefs sidebar lazy-loads when its rail section nears the
+      // viewport. On screens where the rail is below the fold this skips
+      // a fetch entirely until the user scrolls there.
+      const rail = document.querySelector('.arc-rail');
+      if (typeof whenVisible === 'function') {
+        whenVisible(rail, loadBriefs);
+      } else {
+        loadBriefs();
+      }
     }
 
     // Subtitle reflects the true archive total + currently-loaded slice.
