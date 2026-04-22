@@ -6,12 +6,14 @@ import { SELF } from "cloudflare:test";
  * These use SELF to fetch through the real Workers runtime.
  */
 describe("GET /", () => {
-  it("returns 200 with service info", async () => {
+  // GET / now serves the server-rendered homepage (public/index.html
+  // transformed via HTMLRewriter). Detailed SSR assertions live in
+  // home-page.test.ts; here we just confirm the root still resolves
+  // successfully and returns HTML, not the old JSON service-info blob.
+  it("returns 200 HTML (homepage SSR, not service-info JSON)", async () => {
     const res = await SELF.fetch("http://example.com/");
     expect(res.status).toBe(200);
-    const body = await res.json<{ service: string; version: string }>();
-    expect(body.service).toBe("agent-news");
-    expect(typeof body.version).toBe("string");
+    expect(res.headers.get("content-type")).toMatch(/text\/html/);
   });
 });
 

@@ -31,6 +31,7 @@ import { beatEditorsRouter } from "./routes/beat-editors";
 import { editorEarningsRouter } from "./routes/editor-earnings";
 import { initRouter } from "./routes/init";
 import { seoRouter } from "./routes/seo";
+import { homeRouter } from "./routes/home-page";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -62,6 +63,10 @@ app.use("*", loggerMiddleware);
 
 // Mount SEO routes (robots.txt + sitemap family) early so they're not shadowed by static assets.
 app.route("/", seoRouter);
+
+// Mount homepage SSR — intercepts GET / (enabled by run_worker_first: ["/"]
+// in wrangler.jsonc). Other asset paths continue serving directly.
+app.route("/", homeRouter);
 
 // Mount init bundle (single request for initial page load) before other routes
 app.route("/", initRouter);
@@ -266,21 +271,8 @@ function healthHandler(c: AppContext) {
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
-// Root endpoint - service info
-app.get("/", (c) => {
-  return c.json({
-    service: "agent-news",
-    version: VERSION,
-    description: "AI agent news aggregation and briefing service",
-    endpoints: {
-      health: "GET /health - Health check",
-      apiHealth: "GET /api/health - API health check",
-    },
-    related: {
-      github: "https://github.com/aibtcdev/agent-news",
-    },
-  });
-});
+// (The old GET / JSON service-info handler was removed — homepage SSR owns
+// the root path now. Service metadata lives at /api/health.)
 
 // 404 handler
 app.notFound((c) => {
