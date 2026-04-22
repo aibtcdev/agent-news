@@ -439,7 +439,7 @@
       return svg;
     }
 
-    function renderBeatCards(beats, signalsByBeat, correspondents) {
+    function renderBeatCards(beats, countsBySlug, correspondents) {
       const container = document.getElementById('beat-cards');
       if (!beats.length) {
         container.innerHTML = '<div class="empty">No beats found.</div>';
@@ -448,16 +448,23 @@
       container.innerHTML = beats.map(b => {
         const color = b.color || BEAT_FALLBACK_COLORS[b.slug] || '#1a1a1a';
         const memberCount = b.memberCount || 0;
-        const sigs = signalsByBeat[b.slug] || [];
-        // Editorial state: `brief_included`/`approved` are the "made it" states
-        // in this data model (no raw `inscribed` per-signal).
-        const todayStart = new Date();
-        todayStart.setUTCHours(0, 0, 0, 0);
-        const approvedOrInBriefToday = sigs.filter(s => {
-          if (!s.timestamp || new Date(s.timestamp) < todayStart) return false;
-          const st = (s.status || '').toLowerCase();
-          return st === 'approved' || st === 'brief_included' || st === 'inscribed';
-        }).length;
+
+        // Counts come from /api/signals/counts (purpose-built, not row-capped).
+        // Previously we computed both numbers by client-filtering /api/signals
+        // (server-capped at 200 rows total across all beats), which silently
+        // undercounted "Signals · 7d" by 30-40× whenever a high-volume beat
+        // like bitcoin-macro filled the window. weekTotal is the full 7-day
+        // pipeline (any status); approvedToday is the editorially-accepted
+        // count for the current UTC day.
+        //
+        // Show '—' (em dash) when counts haven't landed yet — hard-coding 0
+        // would imply "no signals" when really we just don't know yet. The
+        // dash gets swapped for the real number by fillBeatCardCounts() once
+        // the per-beat /api/signals/counts response lands.
+        const counts = countsBySlug[b.slug];
+        const weekTotal = counts ? counts.week : '—';
+        const approvedToday = counts ? counts.approvedToday : '—';
+
         const active = (b.status || 'active') === 'active';
         const retired = (b.status || '').toLowerCase() === 'retired';
         // Real editor from the beats API (beat.editor.address), falling back gracefully
@@ -467,7 +474,7 @@
           || (editorAddr ? truncAddr(editorAddr) : 'Vacant');
 
         return ''
-          + '<a class="beat-card" href="/signals/?beat=' + encodeURIComponent(b.slug) + '">'
+          + '<a class="beat-card" data-beat-slug="' + esc(b.slug) + '" href="/signals/?beat=' + encodeURIComponent(b.slug) + '">'
             + '<div class="beat-card-head">'
               + '<span class="pip --lg" style="background:' + color + '"></span>'
               + '<span class="name">' + esc(b.name) + '</span>'
@@ -480,8 +487,8 @@
             + '<div class="beat-card-desc">' + esc(b.description || '—') + '</div>'
             + '<div class="beat-card-stats">'
               + '<div><div class="beat-card-stat-num">' + memberCount + '</div><div class="beat-card-stat-label">Agents</div></div>'
-              + '<div><div class="beat-card-stat-num">' + sigs.length + '</div><div class="beat-card-stat-label">Signals · 7d</div></div>'
-              + '<div><div class="beat-card-stat-num --good">' + approvedOrInBriefToday + '</div><div class="beat-card-stat-label">In Brief · Today</div></div>'
+              + '<div><div class="beat-card-stat-num" data-stat="week">' + weekTotal + '</div><div class="beat-card-stat-label">Signals · 7d</div></div>'
+              + '<div><div class="beat-card-stat-num --good" data-stat="approvedToday">' + approvedToday + '</div><div class="beat-card-stat-label">Approved · Today</div></div>'
             + '</div>'
             + '<div class="beat-card-editor">'
               + '<span class="label">Editor</span>'
@@ -489,6 +496,18 @@
             + '</div>'
           + '</a>';
       }).join('');
+    }
+
+    // Update an already-rendered beat card's counts in place once /api/signals/counts
+    // returns for that beat. Avoids a full container re-render and lets each beat's
+    // numbers fill in as its responses land instead of waiting on the slowest one.
+    function fillBeatCardCounts(slug, counts) {
+      const card = document.querySelector('.beat-card[data-beat-slug="' + CSS.escape(slug) + '"]');
+      if (!card) return;
+      const weekEl = card.querySelector('[data-stat="week"]');
+      const todayEl = card.querySelector('[data-stat="approvedToday"]');
+      if (weekEl) weekEl.textContent = counts.week;
+      if (todayEl) todayEl.textContent = counts.approvedToday;
     }
 
     function renderRosterChips(beats, correspondents) {
@@ -634,29 +653,48 @@
       const sevenDaysAgo = (typeof sinceDaysAgoIso === 'function')
         ? sinceDaysAgoIso(7)
         : new Date(Date.now() - 7 * 86400000).toISOString();
-      const [beatsData, corrData, signalsData] = await Promise.all([
+      const todayUtcMidnight = (typeof sinceUtcMidnightIso === 'function')
+        ? sinceUtcMidnightIso()
+        : new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+
+      const [beatsData, corrData] = await Promise.all([
         fetchJSON('/api/beats'),
         fetchJSON('/api/correspondents'),
-        fetchJSON('/api/signals?since=' + encodeURIComponent(sevenDaysAgo) + '&limit=500'),
       ]);
 
       const allBeats = Array.isArray(beatsData) ? beatsData : [];
       const activeBeats = allBeats.filter(b => (b.status || 'active').toLowerCase() !== 'retired');
       const correspondents = (corrData && corrData.correspondents) ? corrData.correspondents : [];
-      const signals = (signalsData && Array.isArray(signalsData.signals)) ? signalsData.signals : [];
-
-      // Partition signals by beat slug
-      const signalsByBeat = {};
-      for (const s of signals) {
-        const slug = s.beatSlug || (s.beat || '').toLowerCase().replace(/\s+/g, '-');
-        if (!signalsByBeat[slug]) signalsByBeat[slug] = [];
-        signalsByBeat[slug].push(s);
-      }
 
       // Subtitle
       document.getElementById('bureau-updated').textContent = 'Updated just now';
 
-      renderBeatCards(activeBeats, signalsByBeat, correspondents);
+      // Render cards immediately with "—" placeholders for counts. Numbers
+      // fill in below as each per-beat /api/signals/counts response lands —
+      // no need to block the whole page on the slowest count call. Cards
+      // for retired/inactive beats render with their final numbers because
+      // we don't query counts for them.
+      renderBeatCards(activeBeats, {}, correspondents);
+
+      // Per-beat counts via /api/signals/counts (purpose-built, not row-capped).
+      // Two calls per active beat — week-window total + today-window approved
+      // (approved + brief_included). Fired in parallel; each beat's counts
+      // patch into its already-rendered card the moment they arrive instead
+      // of all cards waiting on the slowest beat.
+      activeBeats.forEach(async (b) => {
+        const [weekCounts, todayCounts] = await Promise.all([
+          fetchJSON('/api/signals/counts?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(sevenDaysAgo)),
+          fetchJSON('/api/signals/counts?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(todayUtcMidnight)),
+        ]);
+        // Only patch if both responses succeeded — if either fetch returned
+        // null (network error), leave the "—" placeholder in place rather
+        // than misleading the user with a partial 0.
+        if (!weekCounts || !todayCounts) return;
+        fillBeatCardCounts(b.slug, {
+          week: weekCounts.total || 0,
+          approvedToday: (todayCounts.approved || 0) + (todayCounts.brief_included || 0),
+        });
+      });
 
       // Render roster BEFORE chips so chip counts can read data-role from rows
       const beatsBySlug = {};
