@@ -25,12 +25,9 @@
  * `Cache-Control` `s-maxage` directive at edge level. Browser revalidation
  * still honours `max-age` independently.
  */
-import type { Context } from "hono";
-import type { Env, AppVariables } from "./types";
+import type { AppContext } from "./types";
 
-type Ctx = Context<{ Bindings: Env; Variables: AppVariables }>;
-
-function buildCacheKey(c: Ctx): Request {
+function buildCacheKey(c: AppContext): Request {
   return new Request(new URL(c.req.url).toString(), { method: "GET" });
 }
 
@@ -39,7 +36,7 @@ function buildCacheKey(c: Ctx): Request {
  * (with an `X-Edge-Cache: HIT` header attached for observability) or `null`
  * on miss. Safe to call from any GET handler.
  */
-export async function edgeCacheMatch(c: Ctx): Promise<Response | null> {
+export async function edgeCacheMatch(c: AppContext): Promise<Response | null> {
   const cached = await caches.default.match(buildCacheKey(c));
   if (!cached) return null;
   // Clone-via-Response constructor so we can mutate the headers without
@@ -55,10 +52,18 @@ export async function edgeCacheMatch(c: Ctx): Promise<Response | null> {
  * response we return to the client (so the caller can confirm the write
  * happened). The actual cache write runs via `executionCtx.waitUntil` so
  * the user doesn't pay any latency for it.
+ *
+ * The `MISS` header is set on the live response *after* cloning the
+ * about-to-be-stored copy, so the cached entry at rest does not carry the
+ * misleading `X-Edge-Cache: MISS` header — only what comes back from the
+ * subsequent edgeCacheMatch() call has the status header (overwritten to
+ * `HIT` there). Inspecting the raw cache entry now shows the response as
+ * the route originally produced it.
  */
-export function edgeCachePut(c: Ctx, response: Response): void {
+export function edgeCachePut(c: AppContext, response: Response): void {
+  const cacheCopy = response.clone();
   response.headers.set("X-Edge-Cache", "MISS");
   c.executionCtx.waitUntil(
-    caches.default.put(buildCacheKey(c), response.clone())
+    caches.default.put(buildCacheKey(c), cacheCopy)
   );
 }

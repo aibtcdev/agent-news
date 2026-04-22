@@ -72,19 +72,29 @@ classifiedsRouter.get("/api/classifieds/rotation", async (c) => {
 
 // GET /api/classifieds — list classifieds
 // Default: active approved ads. With ?agent=ADDRESS: all submissions for that agent.
-// Edge-cached: anomalously slow in production (~5.8s for ~2.6 KB output) so
-// the cache fix delivers an outsized win on top of the standard pattern.
-// Per-agent and per-category variants get separate cache entries via the URL.
+// Edge-cached for the public default path — anomalously slow in production
+// (~5.8s for ~2.6 KB output) so the cache fix delivers an outsized win.
+// Per-category variants get separate cache entries via the URL.
+//
+// We deliberately skip the edge cache for ?agent= queries: that mode returns
+// the agent's pending/rejected/expired submissions, and caching makes status
+// changes (approval, expiry) invisible for up to s-maxage. The agent is the
+// primary consumer of this view and likely needs immediate freshness on their
+// own submissions. The endpoint is already public (no auth gate today), so
+// skipping the cache changes nothing about visibility — just about staleness.
 classifiedsRouter.get("/api/classifieds", async (c) => {
-  const cached = await edgeCacheMatch(c);
-  if (cached) return cached;
-
   const category = c.req.query("category");
   const agent = c.req.query("agent");
   const limitParam = c.req.query("limit");
   const limit = limitParam
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 1000)
     : undefined;
+
+  const cacheable = !agent;
+  if (cacheable) {
+    const cached = await edgeCacheMatch(c);
+    if (cached) return cached;
+  }
 
   const classifieds = await listClassifieds(c.env, { category, agent, limit });
 
@@ -107,9 +117,14 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
     };
   });
 
-  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  // Per-agent views aren't cached (see above); send a private,no-store
+  // header so downstream caches don't independently snapshot them either.
+  c.header(
+    "Cache-Control",
+    cacheable ? "public, max-age=60, s-maxage=300" : "private, no-store"
+  );
   const response = c.json({ classifieds: withNames, total: withNames.length });
-  edgeCachePut(c, response);
+  if (cacheable) edgeCachePut(c, response);
   return response;
 });
 
