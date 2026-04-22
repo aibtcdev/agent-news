@@ -3077,6 +3077,13 @@
 
     let beats = [];
     let correspondentsList = [];
+    // beatStats: { [slug]: { approved, brief_included, submitted, ... } } —
+    // today's UTC-midnight counts, served by /api/init (replaces what used to
+    // be N × /api/signals/counts?beat=X fan-out on first paint).
+    // signalsCount1h: total signals in the last hour, for the Wire Status
+    // ticker (replaces the /api/signals/counts?since=1h call).
+    let beatStats = {};
+    let signalsCount1h = 0;
 
     // Top nav + LIVE ticker (shared.js provides renderTopNav / renderTicker).
     // Both are mounted before data loads so they appear instantly.
@@ -3130,6 +3137,11 @@
         const correspondentsData = data ? data.correspondents : null;
         correspondentsList = (correspondentsData && correspondentsData.correspondents) ? correspondentsData.correspondents : [];
         const signalsData = data ? data.signals : null;
+        // Per-beat counts + 1h total come from /api/init now (the handler
+        // bundles them from the same DO call). Fallback to empty/0 on the
+        // degraded path where data was stitched from individual endpoints.
+        beatStats = (data && data.beatStats && typeof data.beatStats === 'object') ? data.beatStats : {};
+        signalsCount1h = (data && typeof data.signalsCount1h === 'number') ? data.signalsCount1h : 0;
 
         const brief = data ? data.brief : null;
 
@@ -4414,21 +4426,23 @@
       const oneHourAgo = bucketedSinceIso(60 * 60 * 1000, 60 * 1000);
       const top = active.slice(0, 3);
 
-      // Fire EVERY rail fetch in parallel up front so cold-start latency on any
-      // single endpoint doesn't gate the rest. We then await two groups —
-      // phase 1 (cheap, render-blocking) and phase 2 (heavy, progressive fill).
-      const phase1 = Promise.all([
-        Promise.all(top.map(b =>
-          fetchJSON('/api/signals/counts?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(todayUtcMidnight))
-        )),
-        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(oneHourAgo)),
-        fetchJSON('/api/brief?format=json'),
-      ]);
-      const phase2 = Promise.all(top.map(b =>
-        fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since24h) + '&limit=200')
-      ));
+      // Phase 1 counts are now served inline from /api/init via the
+      // `beatStats` + `signalsCount1h` globals — the per-beat and ticker
+      // fan-out (4 × /api/signals/counts calls that serialized through the
+      // single DO) was the dominant source of initial-load latency on this
+      // rail. Only the brief fetch remains here (could also be sourced from
+      // /api/init.brief in a follow-up; left separate to limit blast radius).
+      const perBeatCounts = top.map(b => beatStats[b.slug] || {});
+      const hourlyCounts = { total: signalsCount1h };
+      const latestBrief = await fetchJSON('/api/brief?format=json');
 
-      const [perBeatCounts, hourlyCounts, latestBrief] = await phase1;
+      // limit=10 is plenty for the sparkline (24h hourly buckets show trend,
+      // not per-signal detail) and the agentsOnline gauge (distinct-address
+      // count tolerates sampling). 200 meant up to ~77KB × 3 beats = ~230KB
+      // per first load just to aggregate timestamps — pure waste.
+      const phase2 = Promise.all(top.map(b =>
+        fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since24h) + '&limit=10')
+      ));
 
       // Sparkline geometry — used in both the placeholder render and the lazy
       // fill, so hoisted out of the per-tile loop.
