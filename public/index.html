@@ -4434,15 +4434,26 @@
       // /api/init.brief in a follow-up; left separate to limit blast radius).
       const perBeatCounts = top.map(b => beatStats[b.slug] || {});
       const hourlyCounts = { total: signalsCount1h };
-      const latestBrief = await fetchJSON('/api/brief?format=json');
 
-      // limit=10 is plenty for the sparkline (24h hourly buckets show trend,
-      // not per-signal detail) and the agentsOnline gauge (distinct-address
-      // count tolerates sampling). 200 meant up to ~77KB × 3 beats = ~230KB
-      // per first load just to aggregate timestamps — pure waste.
+      // Fire brief + phase2 simultaneously so the per-beat signals fetch
+      // isn't gated on brief latency. We only block on brief before render
+      // (phase2 progressively fills the sparklines + agentsOnline gauge
+      // later via phase2.then below — same pattern as the old phase1/phase2
+      // split).
+      const briefPromise = fetchJSON('/api/brief?format=json');
+
+      // limit=50 balances two consumers of this fetch: the 24-hour
+      // sparkline (24 hourly buckets — needs enough samples to span the
+      // window without clustering all points in the last few hours) and
+      // the agentsOnline gauge (distinct-address count across top beats).
+      // A busy beat with 40+ unique filers/day would undercount at
+      // limit=10; 50 covers realistic daily volume while still being 4×
+      // lighter than the old limit=200 (~77KB × 3 = ~230KB per first load).
       const phase2 = Promise.all(top.map(b =>
-        fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since24h) + '&limit=10')
+        fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since24h) + '&limit=50')
       ));
+
+      const latestBrief = await briefPromise;
 
       // Sparkline geometry — used in both the placeholder render and the lazy
       // fill, so hoisted out of the per-tile loop.

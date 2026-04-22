@@ -4745,6 +4745,15 @@ export class NewsDO extends DurableObject<Env> {
       // fan-out + the ticker's /api/signals/counts?since=1h call. Uses the
       // same windowing rule as /signals/counts (submitted → by created_at,
       // terminal statuses → by reviewed_at ?? created_at) so numbers match.
+      //
+      // IMPORTANT: the three-branch WHERE clause below is duplicated in
+      // the `signalsCount1h` query that follows AND mirrors the logic in
+      // the /signals/counts handler (~line 2220 in this file). Any change
+      // to status bucketing (e.g. a new SignalStatus value) must update
+      // all three sites together — the fall-through `NOT IN (...)` branch
+      // is a safety net for new statuses but won't catch a semantic
+      // re-grouping (e.g. moving `replaced` from terminal to creation-time
+      // bucketing). A CTE could unify these in a future refactor.
       const todayUtcMidnight = `${getUTCDate(new Date(now))}T00:00:00.000Z`;
       const oneHourAgo = new Date(now - 3600 * 1000).toISOString();
 
