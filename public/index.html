@@ -3084,23 +3084,19 @@
     // ticker (replaces the /api/signals/counts?since=1h call).
     let beatStats = {};
     let signalsCount1h = 0;
+    // ISO timestamp of when /api/init was generated server-side. The edge
+    // cache can serve a response up to s-maxage old; this lets the Wire
+    // Status block render "Counts: Xm ago" so the staleness is honest.
+    let initGeneratedAt = null;
+    // Latest brief (from /api/init.brief) — exposed as a global so
+    // renderBeatsRail can read compiledAt / archive without a second
+    // /api/brief?format=json round-trip.
+    let globalBrief = null;
 
     // Top nav + LIVE ticker (shared.js provides renderTopNav / renderTicker).
     // Both are mounted before data loads so they appear instantly.
     renderTopNav({ active: 'front', showUtility: false });
     renderTicker();
-
-    // /api/init returns a simplified beats shape that marks every beat as
-    // 'active' and omits the real editor field. /api/beats is the source of
-    // truth for status + editor. Override the `beats` global with it whenever
-    // available so every downstream renderer (Bureau Roster, Today's Beats
-    // rail, etc.) gets accurate statuses.
-    async function overrideBeatsWithCanonical() {
-      const canonical = await fetchJSON('/api/beats');
-      if (Array.isArray(canonical) && canonical.length) {
-        beats = canonical;
-      }
-    }
 
     async function init() {
       try {
@@ -3142,11 +3138,15 @@
         // degraded path where data was stitched from individual endpoints.
         beatStats = (data && data.beatStats && typeof data.beatStats === 'object') ? data.beatStats : {};
         signalsCount1h = (data && typeof data.signalsCount1h === 'number') ? data.signalsCount1h : 0;
+        initGeneratedAt = (data && typeof data.generatedAt === 'string') ? data.generatedAt : null;
 
         const brief = data ? data.brief : null;
+        globalBrief = brief;
 
-        // Override with canonical beats data (/api/init has stale status field)
-        await overrideBeatsWithCanonical();
+        // (Previously called overrideBeatsWithCanonical here to get editor +
+        // proper retired status. /api/init now returns the full canonical
+        // beat shape including `editor`, `dailyApprovedLimit`, and respects
+        // the retired flag — so the second /api/beats round-trip is gone.)
 
         // Seed agentCache from correspondents data (no extra network call needed)
         for (const c of correspondentsList) {
@@ -4426,34 +4426,23 @@
       const oneHourAgo = bucketedSinceIso(60 * 60 * 1000, 60 * 1000);
       const top = active.slice(0, 3);
 
-      // Phase 1 counts are now served inline from /api/init via the
-      // `beatStats` + `signalsCount1h` globals — the per-beat and ticker
-      // fan-out (4 × /api/signals/counts calls that serialized through the
-      // single DO) was the dominant source of initial-load latency on this
-      // rail. Only the brief fetch remains here (could also be sourced from
-      // /api/init.brief in a follow-up; left separate to limit blast radius).
+      // Phase 1 counts + the brief come from /api/init (see the `beatStats`,
+      // `signalsCount1h`, and brief globals populated in init()). This used
+      // to do 4 extra /api/signals/counts fetches + 1 /api/brief fetch — all
+      // eliminated now that /api/init bundles everything in one DO call.
       const perBeatCounts = top.map(b => beatStats[b.slug] || {});
       const hourlyCounts = { total: signalsCount1h };
+      const latestBrief = globalBrief;
 
-      // Fire brief + phase2 simultaneously so the per-beat signals fetch
-      // isn't gated on brief latency. We only block on brief before render
-      // (phase2 progressively fills the sparklines + agentsOnline gauge
-      // later via phase2.then below — same pattern as the old phase1/phase2
-      // split).
-      const briefPromise = fetchJSON('/api/brief?format=json');
-
-      // limit=50 balances two consumers of this fetch: the 24-hour
-      // sparkline (24 hourly buckets — needs enough samples to span the
-      // window without clustering all points in the last few hours) and
-      // the agentsOnline gauge (distinct-address count across top beats).
-      // A busy beat with 40+ unique filers/day would undercount at
-      // limit=10; 50 covers realistic daily volume while still being 4×
-      // lighter than the old limit=200 (~77KB × 3 = ~230KB per first load).
+      // Phase 2: sparklines + agentsOnline still need per-beat signal records.
+      // limit=50 balances two consumers: the 24-hour sparkline (24 hourly
+      // buckets — needs enough samples to span the window without clustering
+      // in the last few hours) and the agentsOnline gauge (distinct-address
+      // count across top beats). Fires immediately now that there's no brief
+      // await blocking it.
       const phase2 = Promise.all(top.map(b =>
         fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since24h) + '&limit=50')
       ));
-
-      const latestBrief = await briefPromise;
 
       // Sparkline geometry — used in both the placeholder render and the lazy
       // fill, so hoisted out of the per-tile loop.
@@ -4570,10 +4559,21 @@
       const mins = Math.floor((next - Date.now()) / 60000);
       const nextLabel = mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm';
 
+      // "Counts: Xm ago" — honest staleness indicator. The edge cache can
+      // serve /api/init up to s-maxage old; this shows the user exactly
+      // when the numbers above were computed, regardless of cache age.
+      let countsAgeLabel = 'just now';
+      if (initGeneratedAt) {
+        const ageMs = Date.now() - new Date(initGeneratedAt).getTime();
+        const ageMin = Math.floor(ageMs / 60000);
+        countsAgeLabel = ageMin < 1 ? 'just now' : ageMin + 'm ago';
+      }
+
       status.innerHTML = ''
         + '<div class="wire-status-kicker">Wire Status</div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>' + agentsOnline + '</span><span class="k">agents active · 24h</span></div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>' + perHour + '</span><span class="k">signal' + (perHour === 1 ? '' : 's') + ' / hour</span></div>'
+        + '<div class="wire-status-row"><span class="dot">●</span><span>Counts:</span><span class="k">' + countsAgeLabel + '</span></div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>Next brief:</span><span class="k">' + nextLabel + '</span></div>'
         + '<div class="wire-status-row"><span class="dot">●</span><span>Last brief:</span><span class="k">' + lastBriefLabel + '</span></div>';
 
