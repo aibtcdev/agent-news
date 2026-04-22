@@ -41,8 +41,18 @@
   // reducing Worker→DO network round-trip latency instead of running at the user's edge.
   "placement": { "mode": "smart" },
 
-  // Static frontend assets
-  "assets": { "directory": "./public" },
+  // Static frontend assets.
+  //   - binding: `env.ASSETS.fetch()` lets the Worker pull static files
+  //     (used by the homepage SSR handler to transform public/index.html).
+  //   - run_worker_first: ["/"]  → Worker intercepts ONLY the root. All other
+  //     asset paths (sections, CSS, JS) still serve directly from the static
+  //     asset server with zero Worker overhead. The `/` pattern is a literal
+  //     exact match per Cloudflare docs — it does NOT match `/signals/abc`.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/"]
+  },
 
   /**
    * Secrets (set via `wrangler secret put`):
@@ -96,7 +106,11 @@
       ],
 
       // No custom domain for staging — use workers.dev URL
-      "assets": { "directory": "./public" }
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": ["/"]
+      }
     },
 
     "production": {
@@ -131,7 +145,11 @@
       ],
 
       "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
-      "assets": { "directory": "./public" }
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": ["/"]
+      }
     }
   }
 }
