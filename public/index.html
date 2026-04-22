@@ -4368,20 +4368,21 @@
       const active = (beats || []).filter(b => (b.status || 'active').toLowerCase() === 'active');
       if (!active.length) return;
 
-      // 24h window. Tile numbers come from /api/signals/counts (purpose-built,
-      // not capped by row limits) so high-volume beats — bitcoin-macro currently
-      // files 600+ signals/24h, mostly rejected — don't crowd approved rows out
-      // of a 200-row /api/signals window and silently undercount the dashboard.
-      // /api/signals is still fetched, but only for the sparkline; for very
-      // active beats the sparkline reflects the most recent ~200 events.
-      const since = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      // Tile numbers anchor on UTC midnight so they match the homepage
+      // dateline ("N approved today"). Rolling-24h numbers caused a confusing
+      // apparent mismatch — the dateline could read 0 approved while the
+      // tiles showed yesterday-afternoon approvals lingering in the window.
+      // The sparkline still uses a rolling 24h fetch so the trend bars span
+      // across the midnight boundary (visualization intent != count intent).
+      const todayUtcMidnight = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+      const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const top = active.slice(0, 3);
       const [perBeatCounts, perBeatSignals] = await Promise.all([
         Promise.all(top.map(b =>
-          fetchJSON('/api/signals/counts?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since))
+          fetchJSON('/api/signals/counts?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(todayUtcMidnight))
         )),
         Promise.all(top.map(b =>
-          fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since) + '&limit=200')
+          fetchJSON('/api/signals?beat=' + encodeURIComponent(b.slug) + '&since=' + encodeURIComponent(since24h) + '&limit=200')
         )),
       ]);
 
@@ -4449,7 +4450,7 @@
         + '</a>';
       }).join('');
 
-      inner.innerHTML = '<div style="grid-column:1/-1"><div class="beat-tile-kicker">Today\'s Beats <span style="opacity:0.7;letter-spacing:0.08em">(24 hr)</span></div></div>' + tileHTML;
+      inner.innerHTML = '<div style="grid-column:1/-1"><div class="beat-tile-kicker">Today\'s Beats <span style="opacity:0.7;letter-spacing:0.08em">(UTC)</span></div></div>' + tileHTML;
 
       // WIRE STATUS block — signals/hour and brief recency come from dedicated
       // endpoints so they're accurate regardless of how many signals each beat

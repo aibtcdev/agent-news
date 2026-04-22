@@ -420,12 +420,16 @@
     };
 
     const STATUSES = [
-      { key: 'inscribed', label: 'Inscribed', color: 'var(--good)' },
-      { key: 'approved',  label: 'Approved' },
-      { key: 'submitted', label: 'Pending',   color: 'var(--warn)' },
-      { key: 'pending',   label: 'Pending',   color: 'var(--warn)' },
-      { key: 'retracted', label: 'Retracted', color: 'var(--accent)' },
-      { key: 'rejected',  label: 'Rejected',  color: 'var(--accent)' },
+      { key: 'brief_included', label: 'In Brief',   color: 'var(--good)' },
+      { key: 'approved',       label: 'Approved' },
+      { key: 'submitted',      label: 'Pending',    color: 'var(--warn)' },
+      { key: 'replaced',       label: 'Replaced',   color: 'var(--accent)' },
+      { key: 'rejected',       label: 'Rejected',   color: 'var(--accent)' },
+      // Legacy keys retained for backwards-compat with bookmarked filter URLs;
+      // never returned by the API, so their counts will always be 0.
+      { key: 'inscribed',      label: 'Inscribed',  color: 'var(--good)' },
+      { key: 'pending',        label: 'Pending',    color: 'var(--warn)' },
+      { key: 'retracted',      label: 'Retracted',  color: 'var(--accent)' },
     ];
 
     const TIME_RANGES = [
@@ -448,6 +452,11 @@
       allSignals: [],
       allBeats: [],
       allBriefs: [],
+      // Authoritative server counts (not capped by the 200-row signals page).
+      // Populated in init(); used by facet labels so the displayed counts match
+      // reality for high-volume archives instead of ceilinging at 200.
+      totalCounts: null,        // /api/signals/counts (all-time)
+      timeRangeCounts: {},      // { today, week, month, quarter, all } → total
     };
 
     async function fetchJSON(url) {
@@ -484,6 +493,12 @@
     function sinceForRange(rangeKey) {
       const r = TIME_RANGES.find(x => x.key === rangeKey);
       if (!r || r.key === 'all') return null;
+      // "Today" anchors at UTC midnight so the local listing filter matches
+      // the facet count (which the server computes against today UTC). Other
+      // ranges stay rolling — week/month/quarter is naturally a rolling window.
+      if (r.key === 'today') {
+        return new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+      }
       return new Date(Date.now() - r.days * 86400000);
     }
 
@@ -509,16 +524,30 @@
       const host = document.getElementById('arc-facets');
       const results = filtered();
 
-      // Beat counts
+      // Beat + agent counts are derived from the visible signal page (the
+      // 200-row /api/signals fetch), which is honest for the listing context
+      // — the user can only filter to what's loaded. Status counts override
+      // with server totals (state.totalCounts) when available so they reflect
+      // the full archive instead of ceilinging at 200.
       const beatCounts = {};
       const agentCounts = {};
-      const statusCounts = {};
+      const statusCounts = state.totalCounts
+        ? {
+            approved: state.totalCounts.approved || 0,
+            submitted: state.totalCounts.submitted || 0,
+            rejected: state.totalCounts.rejected || 0,
+            replaced: state.totalCounts.replaced || 0,
+            brief_included: state.totalCounts.brief_included || 0,
+          }
+        : {};
       for (const s of state.allSignals) {
         const slug = s.beatSlug || (s.beat || '').toLowerCase().replace(/\s+/g, '-');
         if (slug) beatCounts[slug] = (beatCounts[slug] || 0) + 1;
         if (s.btcAddress) agentCounts[s.btcAddress] = (agentCounts[s.btcAddress] || 0) + 1;
-        const st = (s.status || '').toLowerCase();
-        if (st) statusCounts[st] = (statusCounts[st] || 0) + 1;
+        if (!state.totalCounts) {
+          const st = (s.status || '').toLowerCase();
+          if (st) statusCounts[st] = (statusCounts[st] || 0) + 1;
+        }
       }
 
       const topAgents = Object.entries(agentCounts)
@@ -539,7 +568,11 @@
           }).join('')
         : '';
 
-      const statusKeys = ['inscribed', 'approved', 'submitted', 'pending', 'retracted', 'rejected']
+      // Real schema statuses (src/lib/constants.ts): submitted, approved,
+      // replaced, rejected, brief_included. Legacy 'inscribed'/'pending'/
+      // 'retracted' kept for backwards-compat with bookmarked filter URLs but
+      // hidden when their server count is 0.
+      const statusKeys = ['brief_included', 'approved', 'submitted', 'replaced', 'rejected', 'inscribed', 'pending', 'retracted']
         .filter(k => statusCounts[k]);
       const statusGroup = statusKeys.map(k => {
         const info = STATUSES.find(s => s.key === k) || { label: k };
@@ -589,6 +622,13 @@
     }
 
     function signalCountInRange(r) {
+      // Prefer the authoritative server-side count when available — local
+      // computation off state.allSignals would ceiling at the 200-row page
+      // limit on /api/signals and report misleadingly low totals for the
+      // 7d/30d/90d ranges.
+      if (state.timeRangeCounts && typeof state.timeRangeCounts[r.key] === 'number') {
+        return state.timeRangeCounts[r.key];
+      }
       if (!state.allSignals.length) return 0;
       if (r.key === 'all') return state.allSignals.length;
       const since = new Date(Date.now() - r.days * 86400000);
@@ -885,18 +925,43 @@
     }
 
     async function init() {
-      const [beatsData, signalsData] = await Promise.all([
+      // /api/signals is capped at 200 rows server-side regardless of the
+      // requested limit. Fetch authoritative aggregates in parallel via
+      // /api/signals/counts so the time + status facets reflect the full
+      // archive instead of being truncated to ≤200.
+      const todayUtcMidnight = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+      const sinceForDays = (n) => new Date(Date.now() - n * 86400000).toISOString();
+      const [beatsData, signalsData, totalCounts, todayCounts, weekCounts, monthCounts, quarterCounts] = await Promise.all([
         fetchJSON('/api/beats'),
-        fetchJSON('/api/signals?limit=500'),
+        fetchJSON('/api/signals?limit=200'),
+        fetchJSON('/api/signals/counts'),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(todayUtcMidnight)),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceForDays(7))),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceForDays(30))),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceForDays(90))),
       ]);
       state.allBeats = (Array.isArray(beatsData) ? beatsData : []).filter(b => (b.status || 'active').toLowerCase() !== 'retired');
       state.allSignals = (signalsData && Array.isArray(signalsData.signals)) ? signalsData.signals : [];
+      state.totalCounts = totalCounts || null;
+      state.timeRangeCounts = {
+        today: todayCounts && todayCounts.total,
+        week: weekCounts && weekCounts.total,
+        month: monthCounts && monthCounts.total,
+        quarter: quarterCounts && quarterCounts.total,
+        all: totalCounts && totalCounts.total,
+      };
 
-      const total = state.allSignals.length;
-      const briefs = 0;
-      const inscribed = state.allSignals.filter(s => (s.status || '').toLowerCase() === 'inscribed').length;
+      // Subtitle now reflects the true archive total (not the visible page
+      // size). "brief_included" is the closest analog to the legacy
+      // "inscribed" tally — signals that made it into a published brief.
+      const total = (totalCounts && totalCounts.total) || state.allSignals.length;
+      const inBrief = (totalCounts && totalCounts.brief_included) || 0;
+      const visible = state.allSignals.length;
+      const truncationNote = total > visible
+        ? ' · showing newest ' + visible.toLocaleString()
+        : '';
       document.getElementById('arc-subtitle').textContent =
-        total.toLocaleString() + ' signals · ' + inscribed.toLocaleString() + ' inscribed';
+        total.toLocaleString() + ' signals · ' + inBrief.toLocaleString() + ' in brief' + truncationNote;
 
       bindSearch();
       rerender();
