@@ -742,7 +742,11 @@
         state.duplicate = null;
         return;
       }
-      const sinceIso = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      // 5-min bucket so consecutive duplicate-checks hit the cached page
+      // instead of producing a new URL on every keystroke debounce.
+      const sinceIso = (typeof bucketedSinceIso === 'function')
+        ? bucketedSinceIso(24 * 3600 * 1000, 5 * 60 * 1000)
+        : new Date(Date.now() - 24 * 3600 * 1000).toISOString();
       const data = await fetchJSON('/api/signals?beat=' + encodeURIComponent(state.selectedBeat) + '&since=' + encodeURIComponent(sinceIso) + '&limit=100');
       if (!data || !Array.isArray(data.signals)) return;
       const qTerms = q.toLowerCase().split(/\s+/).filter(t => t.length >= 4);

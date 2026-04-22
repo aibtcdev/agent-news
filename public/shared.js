@@ -571,20 +571,57 @@ function renderTicker(opts) {
   const refreshMs = opts.refreshMs || 30000;
   const limit = opts.limit || 8;
 
+  const tickerUrl = '/api/signals?limit=' + limit;
+  const tickerTtl = 30 * 1000;
+
+  // Build the ticker innerHTML for a given signal list — used both for the
+  // synchronous cache-hit path and the async load path so they stay in sync.
+  function buildScrollInner(sigs) {
+    if (!sigs.length) return '<span>No recent signals.</span>';
+    const build = (arr) => arr.map(s => {
+      const t = s.timestamp ? new Date(s.timestamp) : null;
+      const time = t ? t.toISOString().slice(11, 16) : '';
+      const beat = (s.beat || '').replace(/^bitcoin[-\s]/i, '').replace(/^aibtc[-\s]/i, '');
+      const hl = (s.headline || s.content || '').slice(0, 140);
+      return '<span class="ticker-time">● ' + esc(time) + '</span>'
+           + '<span>' + esc(hl) + (beat ? ' <span style="opacity:.6">· ' + esc(beat) + '</span>' : '') + '</span>'
+           + '<span class="ticker-sep">│</span>';
+    }).join('');
+    // Duplicate content so the CSS scroll animation loops seamlessly.
+    return build(sigs) + build(sigs);
+  }
+
+  // Check the sessionStorage cache synchronously. If we have a fresh payload,
+  // mount the ticker with real content directly — no skeleton flash. This is
+  // what eliminates the visible "loading" between page navigations when the
+  // /api/signals?limit=N response is already cached from the prior page.
+  const cached = (typeof cachedJSONSync === 'function')
+    ? cachedJSONSync(tickerUrl, { ttlMs: tickerTtl })
+    : null;
+  const cachedSigs = (cached && Array.isArray(cached.signals)) ? cached.signals : null;
+
   const el = document.createElement('div');
   el.className = 'ticker';
-  // Skeleton placeholder — shimmer bars match the text size of real ticker
-  // items, so the scrolling strip doesn't show "Loading…" text while fetching.
-  el.innerHTML =
-    '<div class="ticker-inner">'
-      + '<span class="ticker-scroll" id="ticker-scroll">'
-        + '<span class="ticker-sk"></span>'
-        + '<span class="ticker-sk --wide"></span>'
-        + '<span class="ticker-sk"></span>'
-        + '<span class="ticker-sk --wide"></span>'
-      + '</span>'
-      + '<span class="ticker-refresh">Auto-refresh 30s</span>'
-    + '</div>';
+  if (cachedSigs) {
+    el.innerHTML =
+      '<div class="ticker-inner">'
+        + '<span class="ticker-scroll" id="ticker-scroll">' + buildScrollInner(cachedSigs) + '</span>'
+        + '<span class="ticker-refresh">Auto-refresh 30s</span>'
+      + '</div>';
+  } else {
+    // Skeleton placeholder — shimmer bars match the text size of real ticker
+    // items, so the scrolling strip doesn't show "Loading…" text while fetching.
+    el.innerHTML =
+      '<div class="ticker-inner">'
+        + '<span class="ticker-scroll" id="ticker-scroll">'
+          + '<span class="ticker-sk"></span>'
+          + '<span class="ticker-sk --wide"></span>'
+          + '<span class="ticker-sk"></span>'
+          + '<span class="ticker-sk --wide"></span>'
+        + '</span>'
+        + '<span class="ticker-refresh">Auto-refresh 30s</span>'
+      + '</div>';
+  }
 
   // Insert after the topnav
   const nav = document.querySelector('.topnav');
@@ -596,32 +633,17 @@ function renderTicker(opts) {
 
   async function load(forceRefresh) {
     try {
-      const data = await cachedJSON('/api/signals?limit=' + limit, {
-        forceRefresh,
-        ttlMs: 30 * 1000,
-      });
+      const data = await cachedJSON(tickerUrl, { forceRefresh, ttlMs: tickerTtl });
       const sigs = (data && Array.isArray(data.signals)) ? data.signals : [];
       const scroll = document.getElementById('ticker-scroll');
       if (!scroll) return;
-      if (sigs.length === 0) {
-        scroll.innerHTML = '<span>No recent signals.</span>';
-        return;
-      }
-      const build = (arr) => arr.map(s => {
-        const t = s.timestamp ? new Date(s.timestamp) : null;
-        const time = t ? t.toISOString().slice(11, 16) : '';
-        const beat = (s.beat || '').replace(/^bitcoin[-\s]/i, '').replace(/^aibtc[-\s]/i, '');
-        const hl = (s.headline || s.content || '').slice(0, 140);
-        return '<span class="ticker-time">● ' + esc(time) + '</span>'
-             + '<span>' + esc(hl) + (beat ? ' <span style="opacity:.6">· ' + esc(beat) + '</span>' : '') + '</span>'
-             + '<span class="ticker-sep">│</span>';
-      }).join('');
-      // Duplicate content so CSS scroll animation loops seamlessly
-      scroll.innerHTML = build(sigs) + build(sigs);
+      scroll.innerHTML = buildScrollInner(sigs);
     } catch {}
   }
 
-  load();
+  // Skip the redundant initial async load when we already painted from cache —
+  // the first network revalidation will land via the setInterval below.
+  if (!cachedSigs) load();
   if (refreshMs > 0) setInterval(function () { load(true); }, refreshMs);
   // Pause polling when the tab is hidden
   document.addEventListener('visibilitychange', function () {
@@ -696,6 +718,58 @@ async function cachedJSON(url, opts) {
     }
     return data;
   } catch { return null; }
+}
+
+// ── Stable `since=` timestamps for cache-friendly URLs ─────────────────────
+// Many pages compute `since = (Date.now() - N).toISOString()` and embed the
+// result in a URL query param. Because cachedJSON keys on the full URL, a
+// millisecond-precision timestamp produces a unique key on every page load —
+// the cache never hits and the API gets re-called on every navigation. This
+// helper rounds `now` down to a coarser grain (default 5 minutes) so consecutive
+// fetches within the same bucket reuse the cached response.
+//
+// Pick `bucketMs` based on what staleness is acceptable for the consumer:
+//   - 60_000        — "signals/hour" gauge: tolerate 1 min of staleness
+//   - 5 * 60_000    — sparklines, beat tiles: visually identical for 5 min
+//   - 60 * 60_000   — hourly aggregates / large windows
+// For day-aligned ranges (today, last N days), prefer `sinceUtcMidnightIso`
+// or `sinceDaysAgoIso` below — those produce stable keys for an entire UTC day.
+function bucketedSinceIso(ageMs, bucketMs) {
+  bucketMs = bucketMs || 5 * 60 * 1000;
+  const bucketed = Math.floor((Date.now() - ageMs) / bucketMs) * bucketMs;
+  return new Date(bucketed).toISOString();
+}
+
+// Today's UTC midnight as ISO. Stable for the entire UTC day → same cache
+// key for every navigation within that day.
+function sinceUtcMidnightIso() {
+  return new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+}
+
+// "N days ago" rounded to UTC midnight — stable for the whole UTC day.
+// Use for archive-style facets (last 7d, 30d, 90d) where day-grain is fine.
+function sinceDaysAgoIso(days) {
+  const ms = Date.now() - days * 86400000;
+  return new Date(ms).toISOString().slice(0, 10) + 'T00:00:00Z';
+}
+
+// Synchronous cache read — returns the cached payload if still within TTL,
+// or null. Lets initial paint use cached data immediately instead of going
+// through cachedJSON's async path (which always yields a microtask before
+// the DOM update, briefly showing the skeleton even on cache hit).
+function cachedJSONSync(url, opts) {
+  opts = opts || {};
+  const ttl = opts.ttlMs != null ? opts.ttlMs : _ttlFor(url);
+  if (ttl <= 0) return null;
+  try {
+    const raw = sessionStorage.getItem('aibtc:cache:' + url);
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (entry && typeof entry.at === 'number' && (Date.now() - entry.at) < ttl) {
+      return entry.data;
+    }
+  } catch {}
+  return null;
 }
 
 function _pruneCache() {

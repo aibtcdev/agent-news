@@ -929,16 +929,16 @@
       // requested limit. Fetch authoritative aggregates in parallel via
       // /api/signals/counts so the time + status facets reflect the full
       // archive instead of being truncated to ≤200.
-      const todayUtcMidnight = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
-      const sinceForDays = (n) => new Date(Date.now() - n * 86400000).toISOString();
+      // Day-aligned `since=` values so each cache entry is reused for the
+      // entire UTC day instead of producing a fresh URL on every navigation.
       const [beatsData, signalsData, totalCounts, todayCounts, weekCounts, monthCounts, quarterCounts] = await Promise.all([
         fetchJSON('/api/beats'),
         fetchJSON('/api/signals?limit=200'),
         fetchJSON('/api/signals/counts'),
-        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(todayUtcMidnight)),
-        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceForDays(7))),
-        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceForDays(30))),
-        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceForDays(90))),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceUtcMidnightIso())),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(7))),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(30))),
+        fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(90))),
       ]);
       state.allBeats = (Array.isArray(beatsData) ? beatsData : []).filter(b => (b.status || 'active').toLowerCase() !== 'retired');
       state.allSignals = (signalsData && Array.isArray(signalsData.signals)) ? signalsData.signals : [];

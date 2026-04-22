@@ -1078,9 +1078,15 @@
     // ── Fetch beats for filter ──
     async function loadBeats() {
       try {
-        const res = await fetch('/api/beats?status=active');
-        if (!res.ok) return;
-        const data = await res.json();
+        // Use cachedJSON so the result is reused across same-tab navigations
+        // (5-min TTL — beats rarely change). Raw fetch() bypassed the cache.
+        const data = (typeof cachedJSON === 'function')
+          ? await cachedJSON('/api/beats?status=active')
+          : await (async () => {
+              const r = await fetch('/api/beats?status=active');
+              return r.ok ? r.json() : null;
+            })();
+        if (!data) return;
         allBeats = Array.isArray(data) ? data : (data.beats || []);
         renderBeatFilter();
       } catch (err) {

@@ -628,7 +628,12 @@
     }
 
     async function init() {
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+      // Day-aligned `since=` so the URL stays stable across navigations
+      // and the sessionStorage cache actually hits (ms-precision would
+      // produce a unique key on every page load — no cache hit ever).
+      const sevenDaysAgo = (typeof sinceDaysAgoIso === 'function')
+        ? sinceDaysAgoIso(7)
+        : new Date(Date.now() - 7 * 86400000).toISOString();
       const [beatsData, corrData, signalsData] = await Promise.all([
         fetchJSON('/api/beats'),
         fetchJSON('/api/correspondents'),

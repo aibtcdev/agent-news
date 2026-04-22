@@ -4382,9 +4382,13 @@
       // tiles showed yesterday-afternoon approvals lingering in the window.
       // The sparkline still uses a rolling 24h fetch so the trend bars span
       // across the midnight boundary (visualization intent != count intent).
-      const todayUtcMidnight = new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
-      const since24h = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      // Bucket the rolling timestamps so consecutive navigations hit the
+      // cachedJSON sessionStorage cache instead of re-fetching every time
+      // (URL = cache key; ms-precision timestamps make every key unique).
+      // 5-min bucket on the 24h sparkline window, 1-min on the per-hour gauge.
+      const todayUtcMidnight = sinceUtcMidnightIso();
+      const since24h = bucketedSinceIso(24 * 3600 * 1000, 5 * 60 * 1000);
+      const oneHourAgo = bucketedSinceIso(60 * 60 * 1000, 60 * 1000);
       const top = active.slice(0, 3);
 
       // Fire EVERY rail fetch in parallel up front so cold-start latency on any
