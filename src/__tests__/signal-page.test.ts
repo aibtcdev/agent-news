@@ -10,10 +10,12 @@ import { SELF } from "cloudflare:test";
 
 const APPROVED_ID = "sigpage-approved-001";
 const DRAFT_ID = "sigpage-submitted-002";
+const HOSTILE_SOURCE_ID = "sigpage-hostile-003";
 const MISSING_ID = "00000000-0000-0000-0000-000000000000";
 
 const APPROVED_ADDR = "bc1qsigpageapproved0000000000000000000000000";
 const DRAFT_ADDR = "bc1qsigpagedraft00000000000000000000000000000";
+const HOSTILE_ADDR = "bc1qsigpagehostile00000000000000000000000000";
 
 beforeAll(async () => {
   await SELF.fetch("http://example.com/api/test-seed", {
@@ -44,6 +46,19 @@ beforeAll(async () => {
           sources: "[]",
           created_at: "2026-04-20T11:00:00Z",
           status: "submitted",
+          disclosure: "",
+        },
+        {
+          id: HOSTILE_SOURCE_ID,
+          beat_slug: "bitcoin-macro",
+          btc_address: HOSTILE_ADDR,
+          headline: "Signal with a javascript: source URL",
+          body: "Source-URL guard coverage.",
+          sources: JSON.stringify([
+            { url: "javascript:alert(1)", title: "Evil link" },
+          ]),
+          created_at: "2026-04-20T12:00:00Z",
+          status: "approved",
           disclosure: "",
         },
       ],
@@ -138,6 +153,25 @@ describe("GET /signals/:id — draft (submitted)", () => {
     const body = await res.text();
     expect(body).toMatch(/<meta name="robots" content="noindex,nofollow">/);
     expect(res.headers.get("x-robots-tag")).toBe("noindex");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Source URL hardening — reject non-http(s) hrefs at render time
+// ---------------------------------------------------------------------------
+
+describe("GET /signals/:id — hostile source URL", () => {
+  it("strips javascript: URLs from source hrefs", async () => {
+    const res = await SELF.fetch(
+      `http://example.com/signals/${HOSTILE_SOURCE_ID}`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.text();
+    // The source link must not carry the hostile protocol into the DOM.
+    expect(body).not.toContain("javascript:alert(1)");
+    expect(body).not.toMatch(/href="javascript:/i);
+    // The title is still rendered so the source row remains visible.
+    expect(body).toContain("Evil link");
   });
 });
 

@@ -44,6 +44,17 @@ function esc(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Return `url` if it is an http(s) URL, otherwise null.
+ * `validateSources` checks length but not protocol, so `javascript:` payloads
+ * can reach us. Callers rendering an `href` or emitting into JSON-LD should
+ * route through this.
+ */
+function safeHttpUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
 /** Safely embed a value inside a `<script type="application/ld+json">` block. */
 function escJsonLd(s: string): string {
   // The dangerous sequence inside a JSON-LD <script> is `</script>` or `<!--`.
@@ -189,13 +200,20 @@ function buildNewsArticle(
     article.archivedAt = provenance.inscriptionUrl;
   }
 
-  if (signal.sources && signal.sources.length > 0) {
-    article.citation = signal.sources.map((s) => ({
-      "@type": "CreativeWork",
-      name: s.title || s.url,
-      url: s.url,
-    }));
-  }
+  // Only include sources with http(s) URLs in structured data — drop anything
+  // else silently so we don't emit `javascript:` payloads into JSON-LD.
+  const citations = (signal.sources ?? [])
+    .map((s) => {
+      const safeUrl = safeHttpUrl(s.url);
+      if (!safeUrl) return null;
+      return {
+        "@type": "CreativeWork",
+        name: s.title || safeUrl,
+        url: safeUrl,
+      } as Jsonish;
+    })
+    .filter((c): c is Jsonish => c !== null);
+  if (citations.length > 0) article.citation = citations;
 
   // Drop undefined keys so the JSON-LD stays clean.
   for (const k of Object.keys(article)) {
@@ -263,7 +281,11 @@ function renderSources(sources: Source[]): string {
   if (!sources || sources.length === 0) return "";
   const items = sources
     .map((s) => {
-      const href = esc(s.url || "#");
+      // Defense in depth: `validateSources` checks length but not protocol.
+      // Non-http(s) URLs render as "#" so `javascript:` payloads never reach
+      // the DOM, but the title still shows so the reader sees the citation.
+      const safeUrl = safeHttpUrl(s.url) ?? "#";
+      const href = esc(safeUrl);
       const title = esc(s.title || s.url || "Source");
       return `          <li><a href="${href}" rel="nofollow noopener" target="_blank">${title}</a></li>`;
     })
