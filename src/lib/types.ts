@@ -95,6 +95,10 @@ export interface Logger {
 export interface Env {
   NEWS_KV: KVNamespace;
   NEWS_DO: DurableObjectNamespace;
+  // Static assets fetcher — bound via wrangler `assets.binding = "ASSETS"`.
+  // Used by the homepage SSR handler to fetch public/index.html before
+  // transforming it with HTMLRewriter.
+  ASSETS: Fetcher;
   // LOGS is a service binding to worker-logs RPC, typed loosely to avoid complex Service<> generics
   LOGS?: unknown;
   // X402_RELAY is a service binding to x402-sponsor-relay RPC (RelayRPC WorkerEntrypoint)

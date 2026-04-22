@@ -30,6 +30,7 @@ function makeEnv(
     // Stubs for required Env fields that are not exercised by verifyPayment
     NEWS_KV: {} as unknown as KVNamespace,
     NEWS_DO: {} as unknown as DurableObjectNamespace,
+    ASSETS: {} as unknown as Fetcher,
   };
 }
 
