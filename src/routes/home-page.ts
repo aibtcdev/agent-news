@@ -21,13 +21,17 @@
  *      pass through the untouched asset — SEO takes a hit but UX is fine.
  *   4. HTMLRewriter only targets specific head tags + the closing </head>.
  *      Body DOM / scripts are not touched.
- *   5. Explicit Cache-Control — Cloudflare does NOT auto-cache Worker
- *      responses, so we set public,s-maxage=300 (matches signal-page).
+ *   5. Actually cache at the edge via the Workers Cache API (caches.default
+ *      through src/lib/edge-cache.ts). `Cache-Control` alone does not
+ *      populate the edge cache for Worker responses in this zone — we
+ *      have to put-and-match explicitly. Matches the pattern used by
+ *      /api/init and /api/beats.
  */
 
 import { Hono } from "hono";
 import type { Env, AppVariables, Signal, Brief } from "../lib/types";
 import { getLatestBrief, listFrontPage } from "../lib/do-client";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const SITE_URL = "https://aibtc.news";
 const SITE_NAME = "AIBTC News";
@@ -73,7 +77,11 @@ function truncate(s: string, max: number): string {
 function buildTitle(data: HomepageData): string {
   const lead = data.signals[0];
   if (lead?.headline) {
-    return `${truncate(lead.headline, 70)} — ${SITE_NAME}`;
+    // Cap the headline at 55 chars so the full title (+" — AIBTC News")
+    // stays under ~68 chars and fits Google's desktop display window
+    // (which truncates around 60-65). Longer headlines would otherwise
+    // get cut mid-word in SERPs.
+    return `${truncate(lead.headline, 55)} — ${SITE_NAME}`;
   }
   return DEFAULT_TITLE;
 }
@@ -94,9 +102,7 @@ function buildDescription(data: HomepageData): string {
 // JSON-LD builders
 // ---------------------------------------------------------------------------
 
-interface Jsonish {
-  [k: string]: unknown;
-}
+type Jsonish = Record<string, unknown>;
 
 function buildOrganizationJsonLd(): Jsonish {
   return {
@@ -168,11 +174,27 @@ function buildJsonLdBlocks(data: HomepageData): string {
 // Response helpers
 // ---------------------------------------------------------------------------
 
-/** Copy headers, set Cache-Control, force text/html. Worker responses are
- *  not auto-cached at the edge, so this is the only thing that keeps the
- *  homepage fast under load. Matches the signal-page pattern. */
+/**
+ * Rebuild the response with our Cache-Control + text/html content type.
+ *
+ * Validator headers (ETag, Last-Modified, Content-Length) are explicitly
+ * stripped because HTMLRewriter modifies the body — those values refer to
+ * the *original* static asset and would otherwise make conditional
+ * requests serve stale bytes (304 Not Modified with the old HTML) or
+ * make the Content-Length mismatch the actual payload.
+ *
+ * Cache-Control here is advisory — it tells browsers + downstream caches
+ * how long the response is valid. Actual edge caching happens via
+ * `edgeCachePut` in the route handler (Workers Cache API), since
+ * `Cache-Control` alone doesn't populate the Cloudflare edge cache for
+ * Worker responses.
+ */
 function withCacheHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
+  // Drop original-asset validators — the transformed body won't match.
+  headers.delete("ETag");
+  headers.delete("Last-Modified");
+  headers.delete("Content-Length");
   headers.set("Cache-Control", "public, max-age=60, s-maxage=300");
   headers.set("Content-Type", "text/html; charset=utf-8");
   return new Response(res.body, {
@@ -189,7 +211,12 @@ function withCacheHeaders(res: Response): Response {
 homeRouter.get("/", async (c) => {
   const logger = c.get("logger");
 
-  // 1. Fetch the static shell. If this fails we have nothing to serve.
+  // 1. Edge cache short-circuit. Keeps the homepage at <50ms TTFB on
+  //    warm hits under load. Cache key is the canonical request URL.
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
+  // 2. Fetch the static shell. If this fails we have nothing to serve.
   let assetResponse: Response;
   try {
     assetResponse = await c.env.ASSETS.fetch(c.req.raw);
@@ -200,26 +227,29 @@ homeRouter.get("/", async (c) => {
     return c.text("Service unavailable", 503);
   }
 
-  // 2. Only transform successful HTML responses. Anything else (404,
+  // 3. Only transform successful HTML responses. Anything else (404,
   //    redirect, binary asset) passes through unmodified.
   const contentType = assetResponse.headers.get("content-type") ?? "";
   if (!assetResponse.ok || !contentType.includes("text/html")) {
     return assetResponse;
   }
 
-  // 3. Fetch dynamic data. On ANY failure we pass through the untouched
-  //    shell — SEO loses freshness but the page still works perfectly.
+  // 4. Fetch dynamic data. `fetchHomepageData` uses Promise.allSettled
+  //    internally and degrades to null/empty on per-source failures, so
+  //    it cannot reject under normal conditions. The try/catch below is
+  //    defensive against *synchronous* throws (e.g. if a DO binding is
+  //    ever missing at boot) — rare but cheap to guard.
   let data: HomepageData;
   try {
     data = await fetchHomepageData(c.env);
   } catch (err) {
-    logger.warn("homepage: data fetch failed, passing through shell", {
+    logger.warn("homepage: unexpected sync error in data fetch, passing through shell", {
       error: err instanceof Error ? err.message : String(err),
     });
     return withCacheHeaders(assetResponse);
   }
 
-  // 4. Transform the head. Body, scripts, and placeholder divs are not
+  // 5. Transform the head. Body, scripts, and placeholder divs are not
   //    touched — the client-side boot code runs unchanged.
   const title = buildTitle(data);
   const description = buildDescription(data);
@@ -251,7 +281,15 @@ homeRouter.get("/", async (c) => {
     });
 
   const transformed = rewriter.transform(assetResponse);
-  return withCacheHeaders(transformed);
+  const response = withCacheHeaders(transformed);
+
+  // 6. Store in the edge cache so subsequent hits within s-maxage skip
+  //    the ASSETS fetch + DO calls + HTMLRewriter pipeline. edgeCachePut
+  //    uses `executionCtx.waitUntil` so we don't pay any latency for the
+  //    store. Cache entry at rest doesn't carry the X-Edge-Cache: MISS
+  //    marker (only the live response the caller receives does).
+  edgeCachePut(c, response);
+  return response;
 });
 
 export { homeRouter };
