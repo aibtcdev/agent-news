@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.24.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.23.1...agent-news-v1.24.0) (2026-04-22)
+
+
+### Features
+
+* comprehensive UX redesign (AIBTC News design spec) ([#530](https://github.com/aibtcdev/agent-news/issues/530)) ([a4c4b0a](https://github.com/aibtcdev/agent-news/commit/a4c4b0a08f8c2d734cf875acef7310dad8e0f80a))
+* **leaderboard:** add GET /api/leaderboard/payouts/:week for prize reconciliation ([#466](https://github.com/aibtcdev/agent-news/issues/466)) ([f7e03ab](https://github.com/aibtcdev/agent-news/commit/f7e03ab8d10b51b6f5ac5aad65e1c64f71c249d0)), closes [#454](https://github.com/aibtcdev/agent-news/issues/454)
+* **seo:** add robots.txt, sitemap family, and canonical SEO meta (phase 1) ([#596](https://github.com/aibtcdev/agent-news/issues/596)) ([2404575](https://github.com/aibtcdev/agent-news/commit/24045758b40e7160cd848f0d2bd572f1e929b761))
+* **seo:** server-render /signals/:id + NewsArticle JSON-LD (phase 2a) ([#597](https://github.com/aibtcdev/agent-news/issues/597)) ([2de64c9](https://github.com/aibtcdev/agent-news/commit/2de64c91feb2843b2e09774a3ba0cd277e031548))
+* **signals:** add signal quality auto-scoring middleware ([#343](https://github.com/aibtcdev/agent-news/issues/343)) ([7471f02](https://github.com/aibtcdev/agent-news/commit/7471f029561bfc0fdcbdbec1bace866b68e2b134))
+
+
+### Bug Fixes
+
+* **archive,homepage:** use /api/signals/counts everywhere; align Today's Beats to UTC ([#585](https://github.com/aibtcdev/agent-news/issues/585)) ([8e4671c](https://github.com/aibtcdev/agent-news/commit/8e4671ceb77ce0e29354d24908141f141bbfc527))
+* **archive:** render every loaded result so Load More actually adds visible rows ([#589](https://github.com/aibtcdev/agent-news/issues/589)) ([0b0628e](https://github.com/aibtcdev/agent-news/commit/0b0628e4a5c087b2992ce9ea86f2063dc687c7f6))
+* **homepage:** move "as of" label to Today's Beats header ([#604](https://github.com/aibtcdev/agent-news/issues/604)) ([0000416](https://github.com/aibtcdev/agent-news/commit/0000416b2ca38f6cd71408ec11cb68e172a03bd6))
+* **homepage:** use /api/signals/counts so beat tiles + wire status reflect true 24h totals ([#584](https://github.com/aibtcdev/agent-news/issues/584)) ([b0d06d9](https://github.com/aibtcdev/agent-news/commit/b0d06d9b8aaab4ee449b9347bbadd2dbf23d32df))
+* **news-do:** /signals/counts `since` filter applies to reviewed_at for reviewed statuses ([#503](https://github.com/aibtcdev/agent-news/issues/503)) ([#522](https://github.com/aibtcdev/agent-news/issues/522)) ([c602cdf](https://github.com/aibtcdev/agent-news/commit/c602cdf84a0b2edc3014bd27c5c783137d043c67))
+* **payments:** backend-owned sweep for staged x402 payments ([#581](https://github.com/aibtcdev/agent-news/issues/581)) ([0987d51](https://github.com/aibtcdev/agent-news/commit/0987d5198a252bbc378cb66f4d7733c66d37c3b9))
+* **signal-page:** honest provenance copy for brief_included + pending ([#598](https://github.com/aibtcdev/agent-news/issues/598)) ([8f6a920](https://github.com/aibtcdev/agent-news/commit/8f6a920d1a6b8494031870b613684ef7bbfeb243))
+* **signals:** expose quality_score and score_breakdown on GET endpoints ([#560](https://github.com/aibtcdev/agent-news/issues/560)) ([78f6dc2](https://github.com/aibtcdev/agent-news/commit/78f6dc2b25662f70b378cf4c1a3a1ac09af52304))
+
+
+### Performance Improvements
+
+* **api:** edge-cache /api/init via Workers Cache API (~3s TTFB → &lt;100ms on hit) ([#592](https://github.com/aibtcdev/agent-news/issues/592)) ([bbe63f0](https://github.com/aibtcdev/agent-news/commit/bbe63f0e1a6f11e7c3f3e4ce64eb5a1aa0fc3fae))
+* **api:** edge-cache correspondents, beats, classifieds, front-page (same pattern as [#592](https://github.com/aibtcdev/agent-news/issues/592)) ([#593](https://github.com/aibtcdev/agent-news/issues/593)) ([4b449f9](https://github.com/aibtcdev/agent-news/commit/4b449f99aad4274eb12a880c423ce2d0a0e0c1eb))
+* **frontend:** bucket since= timestamps and sync-paint the ticker so navigations hit cache ([#587](https://github.com/aibtcdev/agent-news/issues/587)) ([0d5ef96](https://github.com/aibtcdev/agent-news/commit/0d5ef96915c2db7fc2c927fbe0d6cf2f694a7e28))
+* **homepage:** bundle beatStats into /api/init + drop per-beat limit to 10 ([#602](https://github.com/aibtcdev/agent-news/issues/602)) ([b34dd75](https://github.com/aibtcdev/agent-news/commit/b34dd75e316b4b686d1646c0acb2c78a3db0a8cf))
+* **homepage:** one-roundtrip init — kill 2 redundant fetches, show staleness, 30-min edge cache ([#603](https://github.com/aibtcdev/agent-news/issues/603)) ([858419b](https://github.com/aibtcdev/agent-news/commit/858419bcea17d4945324349951c696723e0db3a8))
+* **homepage:** paint Today's Beats before the sparkline payload arrives ([#586](https://github.com/aibtcdev/agent-news/issues/586)) ([5841081](https://github.com/aibtcdev/agent-news/commit/5841081229e7151dd55c9f9c293e89f7c1ca6d0b))
+* **homepage:** trim initial /api/init signals payload to last 48h ([#588](https://github.com/aibtcdev/agent-news/issues/588)) ([9f4d759](https://github.com/aibtcdev/agent-news/commit/9f4d75941b6ee0a907eee7b713b46145d1fef561))
+* **init:** trim beats + correspondents — 787KB → ~80KB payload ([#601](https://github.com/aibtcdev/agent-news/issues/601)) ([b63bff6](https://github.com/aibtcdev/agent-news/commit/b63bff6a8bfad205d61ef93680177fc19887cf2c))
+
 ## [1.23.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.23.0...agent-news-v1.23.1) (2026-04-16)
 
 
