@@ -457,6 +457,13 @@
       // reality for high-volume archives instead of ceilinging at 200.
       totalCounts: null,        // /api/signals/counts (all-time)
       timeRangeCounts: {},      // { today, week, month, quarter, all } → total
+      // Progressive loading state. The /api/signals page caps at 200 rows;
+      // loadMore() walks the offset window (max 10_000) appending pages so
+      // the user can scroll past the initial chunk.
+      pageSize: 200,
+      nextOffset: 200,
+      hasMore: false,
+      loading: false,
     };
 
     async function fetchJSON(url) {
@@ -740,6 +747,34 @@
         + '<span style="color:var(--text-secondary)">' + esc(fmt(now)) + '</span>';
     }
 
+    // ── Progressive load: fetch the next page of /api/signals (max 200 rows
+    // per request, max offset 10_000 server-side) and append to allSignals.
+    // No-ops while a fetch is in-flight or after we've exhausted what the
+    // offset-paginated endpoint can serve. Filtering re-runs over the larger
+    // set after each page lands.
+    const MAX_OFFSET = 10000;
+    async function loadMore() {
+      if (state.loading || !state.hasMore) return;
+      state.loading = true;
+      renderResults();
+      try {
+        const offset = Math.min(state.nextOffset, MAX_OFFSET);
+        const data = await fetchJSON('/api/signals?limit=' + state.pageSize + '&offset=' + offset);
+        const next = (data && Array.isArray(data.signals)) ? data.signals : [];
+        // De-dupe defensively in case the cursor + new writes cause overlap.
+        const seen = new Set(state.allSignals.map(s => s.id));
+        for (const s of next) if (!seen.has(s.id)) state.allSignals.push(s);
+        state.nextOffset += next.length;
+        state.hasMore =
+          next.length === state.pageSize &&
+          state.nextOffset < MAX_OFFSET &&
+          (!state.totalCounts || state.allSignals.length < state.totalCounts.total);
+      } finally {
+        state.loading = false;
+        rerender();
+      }
+    }
+
     function renderResults() {
       const list = document.getElementById('arc-results-list');
       const results = filtered();
@@ -791,7 +826,37 @@
             + '<div class="arc-result-author">' + esc(agent) + ' · <span style="font-family:var(--mono)">view inscription</span></div>'
           + '</a>';
       }).join('');
-      list.innerHTML = rows + (results.length > 50 ? '<div class="empty">Showing first 50 of ' + results.length + '. Narrow your filters to see more.</div>' : '');
+      // Tail: page indicator + Load More. Two distinct cases:
+      //   1. Filtered set has > 50 visible rows on the loaded page.
+      //   2. The archive itself has more pages we haven't fetched yet.
+      // Both can be true at once — show whichever is relevant.
+      const grandTotal = state.totalCounts && state.totalCounts.total;
+      let tail = '';
+      if (results.length > 50) {
+        tail += '<div class="empty">Showing first 50 of ' + results.length.toLocaleString() + ' filtered results.</div>';
+      }
+      if (state.hasMore || state.loading) {
+        const loadedNote = grandTotal
+          ? state.allSignals.length.toLocaleString() + ' of ' + grandTotal.toLocaleString() + ' loaded'
+          : state.allSignals.length.toLocaleString() + ' loaded';
+        const cappedNote = state.nextOffset >= MAX_OFFSET
+          ? '<div class="empty" style="margin-top:6px">Pagination capped at ' + MAX_OFFSET.toLocaleString() + ' — older signals require date filtering.</div>'
+          : '';
+        tail += ''
+          + '<div class="empty" style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:18px 0">'
+          +   '<span style="font-family:var(--mono);font-size:11px;color:var(--text-faint)">' + loadedNote + '</span>'
+          +   (state.hasMore
+              ? '<button id="arc-load-more" type="button" style="font-family:var(--sans);font-size:12px;font-weight:600;padding:8px 18px;border:1px solid var(--text);background:var(--bg-card);color:var(--text);cursor:pointer"' + (state.loading ? ' disabled' : '') + '>'
+                + (state.loading ? 'Loading…' : 'Load more') + '</button>'
+              : '')
+          + cappedNote
+          + '</div>';
+      } else if (grandTotal && state.allSignals.length >= grandTotal) {
+        tail += '<div class="empty" style="padding:14px 0">All ' + grandTotal.toLocaleString() + ' signals loaded.</div>';
+      }
+      list.innerHTML = rows + tail;
+      const loadMoreBtn = document.getElementById('arc-load-more');
+      if (loadMoreBtn) loadMoreBtn.addEventListener('click', () => loadMore());
     }
 
     function renderApiSnippet() {
@@ -889,6 +954,7 @@
     }
 
     function rerender() {
+      renderSubtitle();
       renderActiveChips();
       renderFacets();
       renderResults();
@@ -942,6 +1008,10 @@
       ]);
       state.allBeats = (Array.isArray(beatsData) ? beatsData : []).filter(b => (b.status || 'active').toLowerCase() !== 'retired');
       state.allSignals = (signalsData && Array.isArray(signalsData.signals)) ? signalsData.signals : [];
+      state.nextOffset = state.allSignals.length;
+      state.hasMore =
+        state.allSignals.length >= state.pageSize &&
+        (!totalCounts || state.allSignals.length < totalCounts.total);
       state.totalCounts = totalCounts || null;
       state.timeRangeCounts = {
         today: todayCounts && todayCounts.total,
@@ -951,9 +1021,20 @@
         all: totalCounts && totalCounts.total,
       };
 
-      // Subtitle now reflects the true archive total (not the visible page
-      // size). "brief_included" is the closest analog to the legacy
-      // "inscribed" tally — signals that made it into a published brief.
+      renderSubtitle();
+      bindSearch();
+      rerender();
+      renderSaved();
+      loadBriefs();
+    }
+
+    // Subtitle reflects the true archive total + currently-loaded slice.
+    // Recomputed after each loadMore() so the "showing newest N" note keeps
+    // pace with the user's progressive load. "brief_included" is the closest
+    // analog to the legacy "inscribed" tally — signals that made it into a
+    // published brief.
+    function renderSubtitle() {
+      const totalCounts = state.totalCounts;
       const total = (totalCounts && totalCounts.total) || state.allSignals.length;
       const inBrief = (totalCounts && totalCounts.brief_included) || 0;
       const visible = state.allSignals.length;
@@ -962,11 +1043,6 @@
         : '';
       document.getElementById('arc-subtitle').textContent =
         total.toLocaleString() + ' signals · ' + inBrief.toLocaleString() + ' in brief' + truncationNote;
-
-      bindSearch();
-      rerender();
-      renderSaved();
-      loadBriefs();
     }
 
     init();
