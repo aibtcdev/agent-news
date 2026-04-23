@@ -21,6 +21,7 @@ import {
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
 import { toUTCDate, resolveNamesWithTimeout } from "../lib/helpers";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -43,6 +44,14 @@ const signalReadRateLimit = createRateLimitMiddleware({
 
 // GET /api/signals — list signals with optional filters
 signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
+  // Edge-cache short-circuit. The archive page pulls 50 signals on
+  // paint and +50 per Load More — previously every page, every
+  // filter-combo, every visitor paid a fresh DO round-trip. Cache key
+  // is the full request URL so ?beat=X&status=approved and
+  // ?agent=Y&limit=50 live as separate entries.
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   const beat = c.req.query("beat");
   const agent = c.req.query("agent");
   const tag = c.req.query("tag");
@@ -123,17 +132,22 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   c.header("X-Timezone", "UTC");
-  return c.json({
+  const response = c.json({
     signals: transformed,
     total: transformed.length,
     filtered: transformed.length,
     limit: resolvedLimit,
     offset: resolvedOffset,
   });
+  edgeCachePut(c, response);
+  return response;
 });
 
 // GET /api/signals/:id — get a single signal
 signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   const id = c.req.param("id");
   if (!id) {
     return c.json({ error: "Signal ID is required" }, 400);
@@ -152,7 +166,7 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
   const sInfo = singleNameMap.get(s.btc_address);
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({
+  const response = c.json({
     id: s.id,
     btcAddress: s.btc_address,
     displayName: sInfo?.name ?? null,
@@ -171,6 +185,8 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
     quality_score: s.quality_score ?? null,
     score_breakdown: s.score_breakdown ?? null,
   });
+  edgeCachePut(c, response);
+  return response;
 });
 
 // POST /api/signals — submit a new signal (rate limited, BIP-322 auth required)
