@@ -35,7 +35,8 @@ const beatPageRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 /**
  * Beat slugs in this project are lowercase kebab-case (`bitcoin-macro`,
  * `ordinals`, etc.). Anything outside [a-z0-9-] is not a slug we serve;
- * reject before the DO round-trip so /beats/foo.php 404s instantly.
+ * reject before the DO round-trip so scanner junk like `/beats/.env`
+ * or `/beats/../etc/passwd` 404s instantly.
  */
 function isValidSlug(raw: string): boolean {
   if (!raw) return false;

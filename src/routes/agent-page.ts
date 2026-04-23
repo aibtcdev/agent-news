@@ -41,8 +41,9 @@ const agentPageRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 /**
  * Return the canonical form if the input looks like a BTC address we serve,
- * else null. This gates the DO round-trip so random junk like `/agents/foo.php`
- * doesn't pay for a DO query before 404-ing.
+ * else null. This gates the DO round-trip so random scanner junk like
+ * `/agents/.env` or `/agents/wp-admin` doesn't pay for a DO query before
+ * 404-ing.
  *
  * We accept the permissive character class used everywhere else in the code
  * (bech32 + legacy base58 both fit 26–90 chars in [a-zA-Z0-9]) — deep
