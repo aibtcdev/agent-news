@@ -15,8 +15,9 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, AppVariables, Signal } from "../lib/types";
-import { listFrontPage } from "../lib/do-client";
+import type { Env, AppVariables, Beat, Signal } from "../lib/types";
+import { listFrontPage, listBeats, listCorrespondents } from "../lib/do-client";
+import type { CorrespondentRow } from "../lib/do-client";
 
 const SITE_URL = "https://aibtc.news";
 const SITE_NAME = "AIBTC News";
@@ -96,7 +97,7 @@ seoRouter.get("/robots.txt", (c) => {
 
 seoRouter.get("/sitemap.xml", (c) => {
   const now = new Date().toISOString();
-  const children = ["pages", "signals"];
+  const children = ["pages", "signals", "beats", "agents"];
 
   const entries = children
     .map(
@@ -183,6 +184,88 @@ ${urls}
 `;
 
   return xmlResponse(c, body, 600);
+});
+
+// ---------------------------------------------------------------------------
+// Beats sitemap — one URL per non-retired beat. Small (tens of URLs), safe
+// to inline. Retired beats serve noindex at the page level but stay out
+// of the sitemap entirely to avoid mixed signals.
+// ---------------------------------------------------------------------------
+
+async function fetchSitemapBeats(c: AppCtx): Promise<Beat[]> {
+  try {
+    const all = await listBeats(c.env);
+    return all.filter((b) => b.status !== "retired");
+  } catch {
+    return [];
+  }
+}
+
+seoRouter.get("/sitemap/beats.xml", async (c) => {
+  const beats = await fetchSitemapBeats(c);
+  const urls = beats
+    .map((b) => {
+      const lastmod = new Date(b.updated_at || b.created_at).toISOString();
+      return `  <url>
+    <loc>${SITE_URL}/beats/${encodeURIComponent(b.slug)}</loc>
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.7</priority>
+  </url>`;
+    })
+    .join("\n");
+
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>
+`;
+
+  return xmlResponse(c, body, 3600);
+});
+
+// ---------------------------------------------------------------------------
+// Agents sitemap — one URL per correspondent. Capped at 50k (spec limit),
+// though the list is much smaller in practice. Correspondents with zero
+// signals are excluded to avoid indexing empty profile pages.
+// ---------------------------------------------------------------------------
+
+const AGENTS_MAX_URLS = 50000;
+
+async function fetchSitemapAgents(c: AppCtx): Promise<CorrespondentRow[]> {
+  try {
+    const all = await listCorrespondents(c.env);
+    return all
+      .filter((r) => (r.total_signals ?? r.signal_count ?? 0) > 0)
+      .slice(0, AGENTS_MAX_URLS);
+  } catch {
+    return [];
+  }
+}
+
+seoRouter.get("/sitemap/agents.xml", async (c) => {
+  const agents = await fetchSitemapAgents(c);
+  const urls = agents
+    .map((a) => {
+      const lastmod = a.last_signal
+        ? new Date(a.last_signal).toISOString()
+        : new Date().toISOString();
+      return `  <url>
+    <loc>${SITE_URL}/agents/${encodeURIComponent(a.btc_address)}</loc>
+    <lastmod>${lastmod}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.5</priority>
+  </url>`;
+    })
+    .join("\n");
+
+  const body = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>
+`;
+
+  return xmlResponse(c, body, 3600);
 });
 
 // ---------------------------------------------------------------------------
