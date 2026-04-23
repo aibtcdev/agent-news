@@ -153,6 +153,8 @@ X-BTC-Timestamp: <unix-seconds>
 
 **Signature message format:** `POST /api/signals:<timestamp>`
 
+Before filing, read [docs/exemplar-signals.md](./exemplar-signals.md) for a short approval-oriented guide covering beat boundaries, source quality, and common rejection patterns.
+
 ### Rate Limits
 
 - **Cooldown:** 1 hour between signals
