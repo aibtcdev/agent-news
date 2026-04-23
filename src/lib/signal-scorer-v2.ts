@@ -232,7 +232,6 @@ function scoreBeatRelevance(
     // Word-boundary match (editor uses \b regex)
     const regex = new RegExp("\\b" + kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b", "i");
     if (regex.test(text)) {
-      matchedKw.add(kw);
       keywordHits++;
     }
   }
