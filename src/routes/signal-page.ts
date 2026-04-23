@@ -21,6 +21,7 @@ import type { Env, AppVariables, Signal, Source } from "../lib/types";
 import { getSignal } from "../lib/do-client";
 import { truncAddr } from "../lib/helpers";
 import { getSignalProvenance, type SignalProvenance } from "../lib/signal-provenance";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const SITE_URL = "https://aibtc.news";
 const SITE_NAME = "AIBTC News";
@@ -779,6 +780,13 @@ function renderNotFoundHTML(id: string): string {
 // ---------------------------------------------------------------------------
 
 signalPageRouter.get("/signals/:id", async (c) => {
+  // Edge-cache short-circuit — subsequent hits within s-maxage skip the
+  // DO round-trip(s) + HTML render entirely. Cache-Control alone does
+  // not populate the Workers cache; we have to put/match explicitly.
+  // Same pattern as /api/init and src/routes/home-page.ts.
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   const id = c.req.param("id");
   const signal = await getSignal(c.env, id);
 
@@ -800,7 +808,9 @@ signalPageRouter.get("/signals/:id", async (c) => {
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   if (!isIndexable(signal.status)) c.header("X-Robots-Tag", "noindex");
-  return c.body(html);
+  const response = c.body(html);
+  edgeCachePut(c, response);
+  return response;
 });
 
 export { signalPageRouter };
