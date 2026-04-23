@@ -468,11 +468,12 @@
       // reality for high-volume archives instead of ceilinging at 200.
       totalCounts: null,        // /api/signals/counts (all-time)
       timeRangeCounts: {},      // { today, week, month, quarter, all } → total
-      // Progressive loading state. The /api/signals page caps at 200 rows;
-      // loadMore() walks the offset window (max 10_000) appending pages so
-      // the user can scroll past the initial chunk.
-      pageSize: 200,
-      nextOffset: 200,
+      // Progressive loading state. Initial load is 50; loadMore() walks
+      // the offset window (max 10_000) appending pages of the same size
+      // so the user can scroll past the initial chunk on demand. The
+      // /api/signals page caps at 200 rows, so 50 is well under the cap.
+      pageSize: 50,
+      nextOffset: 50,
       hasMore: false,
       loading: false,
     };
@@ -1021,7 +1022,7 @@
       ]);
       const [beatsData, signalsData, totalCounts] = await Promise.all([
         fetchJSON('/api/beats'),
-        fetchJSON('/api/signals?limit=200'),
+        fetchJSON('/api/signals?limit=50'),
         fetchJSON('/api/signals/counts'),
       ]);
       state.allBeats = (Array.isArray(beatsData) ? beatsData : []).filter(b => (b.status || 'active').toLowerCase() !== 'retired');
