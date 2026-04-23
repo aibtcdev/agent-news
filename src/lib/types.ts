@@ -71,11 +71,14 @@ export type PaymentTrackedState = TrackedPaymentState;
  * Defined locally since x402-sponsor-relay isn't a published package.
  * Matches the WorkerEntrypoint methods exposed by RelayRPC in x402-sponsor-relay/src/rpc.ts.
  *
- * submitPayment(txHex, settle) — enqueue a sponsored transaction, returns immediately with paymentId.
+ * submitPayment(txHex, settle, paymentIdentifier) — enqueue a sponsored transaction, returns immediately with paymentId.
+ *   paymentIdentifier is an optional caller-controlled idempotency key (pay_<28-hex-chars>).
+ *   Same identifier + same tx hex → relay returns cached paymentId (idempotent retry).
+ *   Same identifier + different tx hex → relay rejects with PAYMENT_IDENTIFIER_CONFLICT.
  * checkPayment(paymentId)      — poll for settlement result.
  */
 export interface RelayRPC {
-  submitPayment(txHex: string, settle?: SettleOptions): Promise<SubmitPaymentResult>;
+  submitPayment(txHex: string, settle?: SettleOptions, paymentIdentifier?: string): Promise<SubmitPaymentResult>;
   checkPayment(paymentId: string): Promise<CheckPaymentResult>;
 }
 

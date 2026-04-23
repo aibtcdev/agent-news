@@ -31,7 +31,7 @@
     "vite": "8.0.5"
   },
   "dependencies": {
-    "@aibtc/tx-schemas": "^0.5.2",
+    "@aibtc/tx-schemas": "^1.1.0",
     "@noble/curves": "^2.0.1",
     "@noble/hashes": "^2.0.1",
     "@noble/secp256k1": "^2.1.0",

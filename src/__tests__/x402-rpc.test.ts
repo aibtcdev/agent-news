@@ -22,7 +22,7 @@ function makePaymentHeader(txHex = "deadbeefdeadbeef"): string {
 
 /** Build a minimal Env mock with a mocked X402_RELAY binding. */
 function makeEnv(
-  submitPayment: (txHex: string, settle?: unknown) => Promise<SubmitPaymentResult>,
+  submitPayment: (txHex: string, settle?: unknown, paymentIdentifier?: string) => Promise<SubmitPaymentResult>,
   checkPayment: (paymentId: string) => Promise<CheckPaymentResult>
 ): Env {
   return {
@@ -379,5 +379,93 @@ describe("verifyPayment — RPC path — relay errors", () => {
     expect(second.paymentId).toBe("pay_duplicate");
     expect(first.paymentStatus).toBe("pending");
     expect(second.paymentStatus).toBe("pending");
+  });
+});
+
+// =============================================================================
+// Payment identifier — V2 RPC idempotency
+// =============================================================================
+
+describe("verifyPayment — RPC path — payment identifier", () => {
+  it("passes a pay_<hex> paymentIdentifier as third arg to submitPayment", async () => {
+    vi.useFakeTimers();
+
+    const txHex = "deadbeef0123456789abcdef";
+    const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
+      accepted: true,
+      paymentId: "pay_ident_001",
+      status: "queued",
+    });
+
+    const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
+      paymentId: "pay_ident_001",
+      status: "confirmed",
+      txid: "d".repeat(64),
+    });
+
+    const env = makeEnv(submitPayment, checkPayment);
+    const resultPromise = verifyPayment(makePaymentHeader(txHex), 100, env);
+    await vi.runAllTimersAsync();
+    await resultPromise;
+
+    expect(submitPayment).toHaveBeenCalledOnce();
+    const [calledTxHex, _settle, calledIdentifier] = submitPayment.mock.calls[0];
+    expect(calledTxHex).toBe(txHex);
+    // Identifier must match pay_<28-hex-chars> and be deterministic for this txHex
+    expect(calledIdentifier).toMatch(/^pay_[a-f0-9]{28}$/);
+  });
+
+  it("derives the same identifier for the same txHex (deterministic across retries)", async () => {
+    vi.useFakeTimers();
+
+    const txHex = "cafebabe0000000011111111";
+    const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
+      accepted: true,
+      paymentId: "pay_retry_001",
+      status: "queued",
+    });
+
+    const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>().mockResolvedValue({
+      paymentId: "pay_retry_001",
+      status: "confirmed",
+      txid: "e".repeat(64),
+    });
+
+    const env = makeEnv(submitPayment, checkPayment);
+
+    const firstPromise = verifyPayment(makePaymentHeader(txHex), 100, env);
+    await vi.runAllTimersAsync();
+    await firstPromise;
+
+    const secondPromise = verifyPayment(makePaymentHeader(txHex), 100, env);
+    await vi.runAllTimersAsync();
+    await secondPromise;
+
+    const [, , firstIdentifier] = submitPayment.mock.calls[0];
+    const [, , secondIdentifier] = submitPayment.mock.calls[1];
+    // Both calls derive the same identifier from the same txHex
+    expect(firstIdentifier).toBe(secondIdentifier);
+    expect(firstIdentifier).toMatch(/^pay_[a-f0-9]{28}$/);
+  });
+
+  it("maps PAYMENT_IDENTIFIER_CONFLICT to 402 non-retryable", async () => {
+    const submitPayment = vi.fn<Parameters<typeof makeEnv>[0]>().mockResolvedValue({
+      accepted: false,
+      code: "PAYMENT_IDENTIFIER_CONFLICT",
+      error: "Same identifier submitted with a different transaction",
+      retryable: false,
+    });
+
+    const checkPayment = vi.fn<Parameters<typeof makeEnv>[1]>();
+
+    const env = makeEnv(submitPayment, checkPayment);
+    const result = await verifyPayment(makePaymentHeader(), 100, env);
+
+    expect(result.valid).toBe(false);
+    expect(result.errorCode).toBe("PAYMENT_IDENTIFIER_CONFLICT");
+    expect(result.retryable).toBe(false);
+    // Should NOT be treated as a relay error
+    expect(result.relayError).toBeUndefined();
+    expect(checkPayment).not.toHaveBeenCalled();
   });
 });

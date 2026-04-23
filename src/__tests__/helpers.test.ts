@@ -8,6 +8,7 @@ import {
   generateId,
   formatUTCShort,
   toUTCDate,
+  derivePaymentIdentifier,
 } from "../lib/helpers";
 
 describe("getUTCDate", () => {
@@ -193,5 +194,37 @@ describe("toUTCDate", () => {
   it("returns a string in YYYY-MM-DD format", () => {
     const result = toUTCDate("2024-06-15T12:00:00Z");
     expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe("derivePaymentIdentifier", () => {
+  it("produces a pay_<28-hex-char> string", async () => {
+    const id = await derivePaymentIdentifier("bitcoin", "SP1PMPPVCMVW96FSWFV30KJQ4MNBMZ8MRWR3JWQ7", "42");
+    expect(id).toMatch(/^pay_[a-f0-9]{28}$/);
+  });
+
+  it("is deterministic for the same inputs", async () => {
+    const id1 = await derivePaymentIdentifier("bitcoin", "SP1PMPPVCMVW96FSWFV30KJQ4MNBMZ8MRWR3JWQ7", "42");
+    const id2 = await derivePaymentIdentifier("bitcoin", "SP1PMPPVCMVW96FSWFV30KJQ4MNBMZ8MRWR3JWQ7", "42");
+    expect(id1).toBe(id2);
+  });
+
+  it("produces different identifiers for different inputs", async () => {
+    const id1 = await derivePaymentIdentifier("bitcoin", "SP1PMPPVCMVW96FSWFV30KJQ4MNBMZ8MRWR3JWQ7", "42");
+    const id2 = await derivePaymentIdentifier("ethereum", "SP1PMPPVCMVW96FSWFV30KJQ4MNBMZ8MRWR3JWQ7", "42");
+    expect(id1).not.toBe(id2);
+  });
+
+  it("satisfies PaymentIdentifierSchema constraints: [a-zA-Z0-9_-]{16,128}", async () => {
+    const id = await derivePaymentIdentifier("deadbeef0123456789abcdef");
+    // pay_ (4) + 28 hex chars = 32 total
+    expect(id.length).toBe(32);
+    expect(id).toMatch(/^[a-zA-Z0-9_-]{16,128}$/);
+  });
+
+  it("works with a single long tx hex input (covers the RPC submitPayment use case)", async () => {
+    const txHex = "0".repeat(128);
+    const id = await derivePaymentIdentifier(txHex);
+    expect(id).toMatch(/^pay_[a-f0-9]{28}$/);
   });
 });
