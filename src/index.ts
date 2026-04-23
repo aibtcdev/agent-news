@@ -33,6 +33,7 @@ import { initRouter } from "./routes/init";
 import { seoRouter } from "./routes/seo";
 import { homeRouter } from "./routes/home-page";
 import { agentPageRouter } from "./routes/agent-page";
+import { beatPageRouter } from "./routes/beat-page";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -73,6 +74,11 @@ app.route("/", homeRouter);
 // at /agents/ is a static asset and is not intercepted (no static match for
 // /agents/:addr, so the Worker naturally owns it without run_worker_first).
 app.route("/", agentPageRouter);
+
+// Mount beat page SSR — GET /beats/:slug (path-param). Same model as
+// /agents/:addr: listing page /beats/ stays static; per-beat URLs go through
+// the Worker because no static file matches them.
+app.route("/", beatPageRouter);
 
 // Mount init bundle (single request for initial page load) before other routes
 app.route("/", initRouter);
