@@ -198,7 +198,7 @@ ${items}
 
 const PAGE_STYLES = `
     .bp-page {
-      max-width: 720px;
+      max-width: var(--page-width, 1100px);
       width: 100%;
       margin: 0 auto;
       padding: var(--space-6) var(--page-padding) var(--space-7);
