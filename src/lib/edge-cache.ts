@@ -32,11 +32,23 @@ function buildCacheKey(c: AppContext): Request {
 }
 
 /**
+ * Is the current request running inside the test runtime?
+ * vitest-pool-workers shares `caches.default` across tests in the same file,
+ * so multiple tests hitting the same URL with different DO state would get
+ * the cached first-run response — silently masking handler regressions.
+ * Skipping cache in test keeps filter / status tests deterministic.
+ */
+function isTestEnv(c: AppContext): boolean {
+  return c.env.ENVIRONMENT === "test";
+}
+
+/**
  * Look up the current request in the edge cache. Returns the cached Response
  * (with an `X-Edge-Cache: HIT` header attached for observability) or `null`
  * on miss. Safe to call from any GET handler.
  */
 export async function edgeCacheMatch(c: AppContext): Promise<Response | null> {
+  if (isTestEnv(c)) return null;
   const cached = await caches.default.match(buildCacheKey(c));
   if (!cached) return null;
   // Clone-via-Response constructor so we can mutate the headers without
@@ -61,6 +73,7 @@ export async function edgeCacheMatch(c: AppContext): Promise<Response | null> {
  * the route originally produced it.
  */
 export function edgeCachePut(c: AppContext, response: Response): void {
+  if (isTestEnv(c)) return;
   const cacheCopy = response.clone();
   response.headers.set("X-Edge-Cache", "MISS");
   c.executionCtx.waitUntil(
