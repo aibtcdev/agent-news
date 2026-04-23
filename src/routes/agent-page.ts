@@ -508,7 +508,13 @@ agentPageRouter.get("/agents/:addr", async (c) => {
 
   const status = await getAgentStatus(c.env, addr);
 
-  if (!status) {
+  // `getAgentStatus` returns a populated object even for addresses that
+  // have never filed — empty beats, empty signals, zero totals. Treat a
+  // zero-signal address as "no profile page to show" so we don't emit an
+  // empty indexable URL for every random address that gets visited.
+  const totalSignals = status?.totalSignals ?? 0;
+  const signals = status?.signals ?? [];
+  if (!status || (totalSignals === 0 && signals.length === 0)) {
     c.header("Content-Type", "text/html; charset=utf-8");
     c.header("Cache-Control", "public, max-age=60, s-maxage=300");
     c.header("X-Robots-Tag", "noindex");
@@ -517,8 +523,8 @@ agentPageRouter.get("/agents/:addr", async (c) => {
 
   const html = renderProfileHTML({
     addr,
-    signals: status.signals ?? [],
-    totalSignals: status.totalSignals ?? 0,
+    signals,
+    totalSignals,
     currentStreak: status.streak?.current_streak ?? 0,
     longestStreak: status.streak?.longest_streak ?? 0,
   });
