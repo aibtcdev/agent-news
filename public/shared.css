@@ -1074,6 +1074,10 @@ mark, .hl {
   color: var(--text);
   margin-bottom: var(--space-3);
   overflow-wrap: anywhere;
+  /* Drop the homepage column max-widths (e.g. .lead-content: 680px)
+     so article text fills the 90vw modal instead of hugging the left. */
+  max-width: none !important;
+  width: 100%;
 }
 .signal-modal .brief-text-headline,
 .signal-modal .column-headline,
