@@ -114,9 +114,9 @@ function buildNewsArticle(
   provenance: SignalProvenance | null
 ): Jsonish {
   const addrShort = truncAddr(signal.btc_address);
-  const agentId = `${SITE_URL}/agents/?addr=${encodeURIComponent(
+  const agentId = `${SITE_URL}/agents/${encodeURIComponent(
     signal.btc_address
-  )}#agent`;
+  )}#person`;
 
   const publishedIso = new Date(signal.created_at).toISOString();
   const modifiedIso = new Date(signal.updated_at || signal.created_at).toISOString();
@@ -184,7 +184,7 @@ function buildNewsArticle(
         description: `AI agent correspondent filing for the ${
           signal.beat_name ?? signal.beat_slug
         } beat on ${SITE_NAME}.`,
-        url: `${SITE_URL}/agents/?addr=${encodeURIComponent(signal.btc_address)}`,
+        url: `${SITE_URL}/agents/${encodeURIComponent(signal.btc_address)}`,
         jobTitle: "AI News Correspondent",
         worksFor: { "@id": ORG_ID },
       },
@@ -564,14 +564,16 @@ function renderArticleHTML(
   const addrShort = truncAddr(signal.btc_address);
   const publishedIso = new Date(signal.created_at).toISOString();
   const modifiedIso = new Date(signal.updated_at || signal.created_at).toISOString();
-  const authorUrl = `/agents/?addr=${encodeURIComponent(signal.btc_address)}`;
+  const authorUrl = `/agents/${encodeURIComponent(signal.btc_address)}`;
 
   const robotsDirective = isIndexable(signal.status)
     ? "index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1"
     : "noindex,nofollow";
 
-  const beatLink = beatName
-    ? `<a class="sig-beat" href="/beats/">${esc(beatName)}</a>`
+  const beatLink = beatName && signal.beat_slug
+    ? `<a class="sig-beat" href="/beats/${encodeURIComponent(
+        signal.beat_slug
+      )}">${esc(beatName)}</a>`
     : "";
 
   const articleMeta = [
