@@ -1027,8 +1027,8 @@ mark, .hl {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   justify-content: center;
-  align-items: flex-start;
-  padding: 5vh 16px;
+  align-items: center;
+  padding: 5vh 5vw;
   overflow-y: auto;
 }
 .signal-modal-overlay.open {
@@ -1038,8 +1038,10 @@ mark, .hl {
   background: var(--bg);
   border: 1px solid var(--rule-light);
   border-radius: 4px;
-  max-width: 640px;
-  width: 100%;
+  width: 90vw;
+  max-width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
   padding: var(--space-5);
   position: relative;
   box-shadow: 0 20px 60px rgba(0,0,0,0.4);
