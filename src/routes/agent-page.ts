@@ -25,6 +25,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables, Signal } from "../lib/types";
 import { getAgentStatus } from "../lib/do-client";
 import { truncAddr } from "../lib/helpers";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const SITE_URL = "https://aibtc.news";
 const SITE_NAME = "AIBTC News";
@@ -496,6 +497,14 @@ function renderNotFoundHTML(addrRaw: string): string {
 // ---------------------------------------------------------------------------
 
 agentPageRouter.get("/agents/:addr", async (c) => {
+  // Edge-cache short-circuit. Without this, every hit went to the DO
+  // (~1-2s warm, up to 30s cold), so the first visitor to each agent
+  // URL paid the full round-trip and every subsequent visitor in the
+  // same PoP repaid it. Now subsequent hits within s-maxage=300 serve
+  // from the PoP cache with no DO call.
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   const raw = c.req.param("addr");
   const addr = normalizeAddr(raw);
 
@@ -532,7 +541,9 @@ agentPageRouter.get("/agents/:addr", async (c) => {
 
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.body(html);
+  const response = c.body(html);
+  edgeCachePut(c, response);
+  return response;
 });
 
 export { agentPageRouter };
