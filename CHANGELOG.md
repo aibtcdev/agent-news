@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.25.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.24.0...agent-news-v1.25.0) (2026-04-23)
+
+
+### Features
+
+* **news:** derive paymentIdentifier from txHex for V2 RPC idempotency ([#626](https://github.com/aibtcdev/agent-news/issues/626)) ([e132c08](https://github.com/aibtcdev/agent-news/commit/e132c0885e41e11458ed4649d5fa39a53764f721))
+* **seo:** server-render /agents/:addr + /beats/:slug (phase 3) ([#614](https://github.com/aibtcdev/agent-news/issues/614)) ([dbc02dc](https://github.com/aibtcdev/agent-news/commit/dbc02dcdc08665ed69cc403fe975f48f434fa6e5))
+* **seo:** server-render homepage with HTMLRewriter + JSON-LD (phase 2b) ([#600](https://github.com/aibtcdev/agent-news/issues/600)) ([0514ad8](https://github.com/aibtcdev/agent-news/commit/0514ad8822330309c4b139e4bd3a3a8593773335))
+
+
+### Bug Fixes
+
+* **archive:** initial page size 200 → 50, same for loadMore() ([#618](https://github.com/aibtcdev/agent-news/issues/618)) ([864b368](https://github.com/aibtcdev/agent-news/commit/864b368f96c2623b1f1dddcf07b36741f3b0366c))
+* **beat-page:** query signals by status directly ([#615](https://github.com/aibtcdev/agent-news/issues/615)) ([d75db32](https://github.com/aibtcdev/agent-news/commit/d75db327b86b26c4cdfa362f2b4bf89c7028684c))
+* **modal:** let article text fill the full modal width ([#617](https://github.com/aibtcdev/agent-news/issues/617)) ([660548e](https://github.com/aibtcdev/agent-news/commit/660548edda992cdcd25ac34557a0f8ad108cc7b5))
+
+
+### Performance Improvements
+
+* edge-cache SSR pages + /api/signals + /api/signals/counts ([#620](https://github.com/aibtcdev/agent-news/issues/620)) ([1c58f0c](https://github.com/aibtcdev/agent-news/commit/1c58f0c8cddf163aad2cc06c1cc346489754f33a))
+
 ## [1.24.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.23.1...agent-news-v1.24.0) (2026-04-22)
 
 
