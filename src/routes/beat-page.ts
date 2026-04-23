@@ -18,6 +18,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, Beat, Signal } from "../lib/types";
 import { getBeat, listSignals } from "../lib/do-client";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const SITE_URL = "https://aibtc.news";
 const SITE_NAME = "AIBTC News";
@@ -490,6 +491,15 @@ async function fetchBeatSignals(
 // ---------------------------------------------------------------------------
 
 beatPageRouter.get("/beats/:slug", async (c) => {
+  // Edge-cache short-circuit. This route was the worst offender of
+  // the three SSR pages — it makes three DO calls per request (getBeat
+  // plus two parallel listSignals status queries). Each DO call
+  // serializes through a single isolate, so cold-DO cases compounded
+  // into the 30s+ loads we saw on real traffic. Caching the rendered
+  // HTML at the edge turns every-visitor cost into once-per-PoP cost.
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   const raw = c.req.param("slug");
 
   if (!isValidSlug(raw)) {
@@ -515,7 +525,9 @@ beatPageRouter.get("/beats/:slug", async (c) => {
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   if (beat.status === "retired") c.header("X-Robots-Tag", "noindex");
-  return c.body(html);
+  const response = c.body(html);
+  edgeCachePut(c, response);
+  return response;
 });
 
 export { beatPageRouter };
