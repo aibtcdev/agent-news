@@ -465,15 +465,24 @@ async function fetchBeatSignals(
   env: Env,
   slug: string
 ): Promise<Signal[]> {
-  try {
-    const signals = await listSignals(env, {
-      beat: slug,
-      limit: SIGNAL_LIST_CAP * 2,
-    });
-    return signals.filter((s) => isPubliclyVisible(s.status));
-  } catch {
-    return [];
-  }
+  // Query by status directly — a generic `?beat=slug` query sorted by
+  // created_at DESC returns the N most-recent rows including all the
+  // in-review `submitted` signals, which would push older approved +
+  // brief_included ones out of the window and leave the beat page
+  // showing "No signals" on active beats. Two parallel status-scoped
+  // calls → merged, sorted, capped.
+  const [approvedRes, briefRes] = await Promise.allSettled([
+    listSignals(env, { beat: slug, status: "approved", limit: SIGNAL_LIST_CAP }),
+    listSignals(env, { beat: slug, status: "brief_included", limit: SIGNAL_LIST_CAP }),
+  ]);
+  const approved = approvedRes.status === "fulfilled" ? approvedRes.value : [];
+  const brief = briefRes.status === "fulfilled" ? briefRes.value : [];
+  // Defensive re-filter: `isPubliclyVisible` still runs in case the DO
+  // ever returns a status we didn't ask for.
+  return [...approved, ...brief]
+    .filter((s) => isPubliclyVisible(s.status))
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+    .slice(0, SIGNAL_LIST_CAP);
 }
 
 // ---------------------------------------------------------------------------
