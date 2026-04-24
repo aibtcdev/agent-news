@@ -1,32 +1,43 @@
 /**
  * Correspondents route — list active agents with signal counts and resolved names.
+ *
+ * Edge-cached with stale-while-revalidate. This endpoint ships a ~370 KB
+ * payload built from a Durable Object query that can take 3–130s depending
+ * on whether the DO is warm, warming, or cold-booting after a quiet window.
+ *
+ * Cache layout:
+ *   - s-maxage=1800 — Cloudflare holds the entry at the edge for 30 minutes.
+ *   - freshSeconds=300 — within 5 minutes of writing, served as a plain HIT.
+ *   - 300s < age ≤ 1800s — served immediately as a STALE hit, AND a
+ *     background rebuild fires (guarded by a KV lock so concurrent stale
+ *     hits don't all hammer the DO). User never waits for the cold boot.
+ *   - age > 1800s — CF evicts the entry; next request pays the MISS cost.
  */
 
 import { Hono } from "hono";
-import type { Env, AppVariables } from "../lib/types";
+import type { Env, AppVariables, AppContext } from "../lib/types";
 import { getCorrespondentsBundle } from "../lib/do-client";
 import { truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
-import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
+import {
+  edgeCacheMatchSWR,
+  edgeCachePut,
+  triggerSWRRefresh,
+} from "../lib/edge-cache";
 
 const correspondentsRouter = new Hono<{
   Bindings: Env;
   Variables: AppVariables;
 }>();
 
-// GET /api/correspondents — ranked correspondents with signal counts, streaks, and names.
-// Edge-cached: production response is ~371 KB and the DO round-trip costs ~3s
-// without the cache. Single put per s-maxage window then sub-100ms thereafter.
-correspondentsRouter.get("/api/correspondents", async (c) => {
-  const cached = await edgeCacheMatch(c);
-  if (cached) return cached;
+const FRESH_SECONDS = 300;
 
-  // Single DO round-trip fetches correspondents, beats, and leaderboard together
+async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
   const bundle = await getCorrespondentsBundle(c.env);
   const rows = bundle.correspondents;
   const beats = bundle.beats;
   const leaderboardEntries = bundle.leaderboard;
 
-  // Build address → leaderboard score map and earnings map
+  // Build address → leaderboard score / earnings maps
   const scoreMap = new Map<string, number>();
   const earningsMap = new Map<string, number>();
   const unpaidMap = new Map<string, number>();
@@ -44,7 +55,6 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
     (p) => c.executionCtx.waitUntil(p)
   );
 
-  // Transform to match frontend expectations (camelCase, computed fields)
   const correspondents = rows.map((row) => {
     const signalCount = Number(row.signal_count) || 0;
     const streak = Number(row.current_streak) || 0;
@@ -66,7 +76,11 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
       daysActive,
       lastActive: row.last_signal_date ?? null,
       score,
-      earnings: { total: earningsMap.get(row.btc_address) ?? 0, unpaidSats: unpaidMap.get(row.btc_address) ?? 0, recentPayments: [] as unknown[] },
+      earnings: {
+        total: earningsMap.get(row.btc_address) ?? 0,
+        unpaidSats: unpaidMap.get(row.btc_address) ?? 0,
+        recentPayments: [] as unknown[],
+      },
       display_name: info?.name ?? null,
       avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
       registered: info?.name !== null && info?.name !== undefined,
@@ -82,10 +96,27 @@ correspondentsRouter.get("/api/correspondents", async (c) => {
       a.address.localeCompare(b.address),
   );
 
-  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  const response = c.json({ correspondents, total: correspondents.length });
+  const body = JSON.stringify({ correspondents, total: correspondents.length });
+  const response = new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json; charset=UTF-8",
+      "Cache-Control": "public, max-age=60, s-maxage=1800",
+    },
+  });
   edgeCachePut(c, response);
   return response;
+}
+
+// GET /api/correspondents — ranked correspondents with signal counts, streaks, and names.
+correspondentsRouter.get("/api/correspondents", async (c) => {
+  const hit = await edgeCacheMatchSWR(c, { freshSeconds: FRESH_SECONDS });
+  if (hit && !hit.stale) return hit.response;
+  if (hit && hit.stale) {
+    triggerSWRRefresh(c, "correspondents", () => buildCorrespondentsResponse(c));
+    return hit.response;
+  }
+  return buildCorrespondentsResponse(c);
 });
 
 export { correspondentsRouter };

@@ -612,6 +612,21 @@
       root.innerHTML = html;
     }
 
+    function paintListLoading(root) {
+      let html = '<div class="list-hero">'
+        + '<h1>Correspondents</h1>'
+        + '<span class="subtitle">Loading roster…</span>'
+        + '</div>'
+        + '<div class="list-table-wrap"><table class="list-table"><thead><tr>'
+        + '<th>#</th><th>Agent</th><th>Beat</th><th>Signals</th><th>Streak</th><th>Earned</th><th>Score</th>'
+        + '</tr></thead><tbody>';
+      for (let i = 0; i < 8; i++) {
+        html += '<tr><td colspan="7" style="padding:0"><div class="sk-stack"><div class="sk sk-row"></div></div></td></tr>';
+      }
+      html += '</tbody></table></div>';
+      root.innerHTML = html;
+    }
+
     async function renderList() {
       document.title = 'Correspondents — AIBTC News';
       const root = document.getElementById('root');
@@ -624,7 +639,21 @@
         paintCorrespondentList(root, cached);
         return;
       }
+      // No sync cache — paint a loading state while we wait on the network
+      // so the page never shows "No correspondents yet" during a cold-PoP
+      // fetch. The endpoint is edge-cached with SWR on the server side, so
+      // most real visits will land on a warm cache; this skeleton only
+      // shows for the first visitor to a given PoP after the 30-min edge
+      // TTL expires.
+      paintListLoading(root);
       const data = await fetchJSON('/api/correspondents');
+      if (data === null) {
+        root.innerHTML = '<div class="list-hero"><h1>Correspondents</h1></div>'
+          + '<div class="dash-err"><h2>Couldn\'t load correspondents</h2>'
+          + '<p>The roster service didn\'t respond in time. Try a reload in a moment.</p>'
+          + '<p><button class="btn" onclick="renderList()">Retry</button></p></div>';
+        return;
+      }
       paintCorrespondentList(root, data);
     }
 
