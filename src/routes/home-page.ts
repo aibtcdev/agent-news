@@ -77,11 +77,12 @@ function truncate(s: string, max: number): string {
 function buildTitle(data: HomepageData): string {
   const lead = data.signals[0];
   if (lead?.headline) {
-    // Cap the headline at 55 chars so the full title (+" — AIBTC News")
-    // stays under ~68 chars and fits Google's desktop display window
-    // (which truncates around 60-65). Longer headlines would otherwise
-    // get cut mid-word in SERPs.
-    return `${truncate(lead.headline, 55)} — ${SITE_NAME}`;
+    // Brand first, headline second. The browser tab + SERP display the
+    // start of the title, and the homepage should read as "AIBTC News"
+    // before any specific signal — it's the brand landing, not an
+    // individual article. Headline gets capped so the full title fits
+    // the ~68-char SERP display window ("AIBTC News — " is 13 chars).
+    return `${SITE_NAME} — ${truncate(lead.headline, 55)}`;
   }
   return DEFAULT_TITLE;
 }

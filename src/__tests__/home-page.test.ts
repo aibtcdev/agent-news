@@ -99,10 +99,11 @@ describe("GET / — dynamic head", () => {
   it("rewrites <title> to include the lead headline", async () => {
     const res = await SELF.fetch("http://example.com/");
     const body = await res.text();
-    // Title format: "<truncated headline> — AIBTC News".
+    // Title format: "AIBTC News — <truncated headline>". Brand-first so the
+    // browser tab + SERP read as "AIBTC News" before any specific signal.
     // The seeded lead headline is short enough to appear verbatim.
     expect(body).toMatch(
-      /<title>Homepage SSR lead — today's biggest story on AIBTC News — AIBTC News<\/title>/
+      /<title>AIBTC News — Homepage SSR lead — today's biggest story on AIBTC News<\/title>/
     );
   });
 
@@ -110,10 +111,10 @@ describe("GET / — dynamic head", () => {
     const res = await SELF.fetch("http://example.com/");
     const body = await res.text();
     expect(body).toMatch(
-      /<meta property="og:title" content="Homepage SSR lead — today's biggest story on AIBTC News — AIBTC News">/
+      /<meta property="og:title" content="AIBTC News — Homepage SSR lead — today's biggest story on AIBTC News">/
     );
     expect(body).toMatch(
-      /<meta name="twitter:title" content="Homepage SSR lead — today's biggest story on AIBTC News — AIBTC News">/
+      /<meta name="twitter:title" content="AIBTC News — Homepage SSR lead — today's biggest story on AIBTC News">/
     );
   });
 
