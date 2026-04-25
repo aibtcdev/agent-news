@@ -13,25 +13,34 @@
  *   - Once the client JS boots, it overrides the DOM as usual — users see
  *     the same interactive homepage they always have.
  *
- * Safety model:
- *   1. Fetch shell via env.ASSETS.fetch(). If that fails → 503.
- *   2. Only transform 2xx + text/html responses. 404 / redirects pass through.
- *   3. Fetch brief + signals in parallel with Promise.allSettled so one
- *      slow or failing DO call does not block the other. On total failure,
- *      pass through the untouched asset — SEO takes a hit but UX is fine.
- *   4. HTMLRewriter only targets specific head tags + the closing </head>.
- *      Body DOM / scripts are not touched.
- *   5. Actually cache at the edge via the Workers Cache API (caches.default
- *      through src/lib/edge-cache.ts). `Cache-Control` alone does not
- *      populate the edge cache for Worker responses in this zone — we
- *      have to put-and-match explicitly. Matches the pattern used by
- *      /api/init and /api/beats.
+ * Cold-DO safety:
+ *
+ *   The Durable Object that backs getLatestBrief / listFrontPage hibernates
+ *   during quiet windows and can take 10–130s to cold-boot. Without
+ *   protection, a fresh deploy (which wipes the edge cache) or a period of
+ *   low traffic would force the next visitor per PoP to wait for that
+ *   cold boot before seeing any HTML.
+ *
+ *   Fail-fast pattern: on cache miss we race the DO fetch against a 500ms
+ *   timeout. If the DO answers in time, we do the full rewrite + cache.
+ *   If it doesn't, we serve the un-rewritten static shell immediately
+ *   (~50ms TTFB) and kick off a background rebuild via waitUntil that
+ *   populates the cache for the next visitor. The user gets a working
+ *   page now; SEO metadata upgrades with the first cache hit.
+ *
+ *   Stale-while-revalidate on hits: entries past 5 min old are served
+ *   immediately AND kick off a background refresh. A KV lock keeps
+ *   concurrent stale hits from stampeding the DO.
  */
 
 import { Hono } from "hono";
-import type { Env, AppVariables, Signal, Brief } from "../lib/types";
+import type { Env, AppVariables, AppContext, Signal, Brief } from "../lib/types";
 import { getLatestBrief, listFrontPage } from "../lib/do-client";
-import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
+import {
+  edgeCacheMatchSWR,
+  edgeCachePut,
+  triggerSWRRefresh,
+} from "../lib/edge-cache";
 
 const SITE_URL = "https://aibtc.news";
 const SITE_NAME = "AIBTC News";
@@ -45,10 +54,20 @@ const DEFAULT_DESCRIPTION =
 // of today's top stories" without turning JSON-LD into a firehose.
 const ITEM_LIST_CAP = 10;
 
+// How long we'll wait for the DO before giving up and serving the static
+// shell. Warm DO returns in <100ms; cold boots can take 10–130s. 500ms is
+// a loose ceiling on warm performance that still punishes cold boots with
+// a fallback, never with a 30-second user-facing stall.
+const DO_FRESH_TIMEOUT_MS = 500;
+
+// SWR freshness — entries this young are served as HIT; older entries are
+// served as STALE + trigger a background refresh.
+const FRESH_SECONDS = 300;
+
 const homeRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Data
 // ---------------------------------------------------------------------------
 
 interface HomepageData {
@@ -67,6 +86,10 @@ async function fetchHomepageData(env: Env): Promise<HomepageData> {
       signalsResult.status === "fulfilled" ? signalsResult.value : [],
   };
 }
+
+// ---------------------------------------------------------------------------
+// Head content
+// ---------------------------------------------------------------------------
 
 function truncate(s: string, max: number): string {
   const clean = s.replace(/\s+/g, " ").trim();
@@ -176,27 +199,23 @@ function buildJsonLdBlocks(data: HomepageData): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Rebuild the response with our Cache-Control + text/html content type.
+ * Wrap an asset response with the caching + content-type headers we
+ * actually want to ship. Validator headers (ETag, Last-Modified,
+ * Content-Length) are explicitly stripped because HTMLRewriter modifies
+ * the body — those values refer to the *original* static asset and would
+ * otherwise make conditional requests serve stale bytes (304 Not Modified
+ * with the old HTML) or make Content-Length mismatch the actual payload.
  *
- * Validator headers (ETag, Last-Modified, Content-Length) are explicitly
- * stripped because HTMLRewriter modifies the body — those values refer to
- * the *original* static asset and would otherwise make conditional
- * requests serve stale bytes (304 Not Modified with the old HTML) or
- * make the Content-Length mismatch the actual payload.
- *
- * Cache-Control here is advisory — it tells browsers + downstream caches
- * how long the response is valid. Actual edge caching happens via
- * `edgeCachePut` in the route handler (Workers Cache API), since
- * `Cache-Control` alone doesn't populate the Cloudflare edge cache for
- * Worker responses.
+ * `s-maxage=1800` (30 min) plus SWR freshness of 300s means every PoP
+ * pays at most one cold-miss per 30 min; reads between 300–1800s serve
+ * instantly as STALE while a background refresh runs.
  */
 function withCacheHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
-  // Drop original-asset validators — the transformed body won't match.
   headers.delete("ETag");
   headers.delete("Last-Modified");
   headers.delete("Content-Length");
-  headers.set("Cache-Control", "public, max-age=60, s-maxage=300");
+  headers.set("Cache-Control", "public, max-age=60, s-maxage=1800");
   headers.set("Content-Type", "text/html; charset=utf-8");
   return new Response(res.body, {
     status: res.status,
@@ -205,53 +224,7 @@ function withCacheHeaders(res: Response): Response {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Route
-// ---------------------------------------------------------------------------
-
-homeRouter.get("/", async (c) => {
-  const logger = c.get("logger");
-
-  // 1. Edge cache short-circuit. Keeps the homepage at <50ms TTFB on
-  //    warm hits under load. Cache key is the canonical request URL.
-  const cached = await edgeCacheMatch(c);
-  if (cached) return cached;
-
-  // 2. Fetch the static shell. If this fails we have nothing to serve.
-  let assetResponse: Response;
-  try {
-    assetResponse = await c.env.ASSETS.fetch(c.req.raw);
-  } catch (err) {
-    logger.error("homepage: ASSETS.fetch failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return c.text("Service unavailable", 503);
-  }
-
-  // 3. Only transform successful HTML responses. Anything else (404,
-  //    redirect, binary asset) passes through unmodified.
-  const contentType = assetResponse.headers.get("content-type") ?? "";
-  if (!assetResponse.ok || !contentType.includes("text/html")) {
-    return assetResponse;
-  }
-
-  // 4. Fetch dynamic data. `fetchHomepageData` uses Promise.allSettled
-  //    internally and degrades to null/empty on per-source failures, so
-  //    it cannot reject under normal conditions. The try/catch below is
-  //    defensive against *synchronous* throws (e.g. if a DO binding is
-  //    ever missing at boot) — rare but cheap to guard.
-  let data: HomepageData;
-  try {
-    data = await fetchHomepageData(c.env);
-  } catch (err) {
-    logger.warn("homepage: unexpected sync error in data fetch, passing through shell", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return withCacheHeaders(assetResponse);
-  }
-
-  // 5. Transform the head. Body, scripts, and placeholder divs are not
-  //    touched — the client-side boot code runs unchanged.
+function transformShell(assetResponse: Response, data: HomepageData): Response {
   const title = buildTitle(data);
   const description = buildDescription(data);
   const jsonLdBlocks = buildJsonLdBlocks(data);
@@ -275,22 +248,97 @@ homeRouter.get("/", async (c) => {
     .on('meta[name="twitter:description"]', setContent(description))
     .on("head", {
       element(el) {
-        // Append JSON-LD blocks at the end of <head> — after the existing
-        // canonical, OG, and stylesheet tags, before the body starts.
         el.append(jsonLdBlocks, { html: true });
       },
     });
 
-  const transformed = rewriter.transform(assetResponse);
-  const response = withCacheHeaders(transformed);
+  return rewriter.transform(assetResponse);
+}
 
-  // 6. Store in the edge cache so subsequent hits within s-maxage skip
-  //    the ASSETS fetch + DO calls + HTMLRewriter pipeline. edgeCachePut
-  //    uses `executionCtx.waitUntil` so we don't pay any latency for the
-  //    store. Cache entry at rest doesn't carry the X-Edge-Cache: MISS
-  //    marker (only the live response the caller receives does).
+/**
+ * Rebuild the homepage entry from scratch and write it to the edge cache.
+ * Used in two places: (1) SWR refresh when a stale hit is served, and
+ * (2) the background rebuild that follows the fail-fast timeout on a
+ * cold MISS. Re-fetches the static shell internally because the foreground
+ * response may have already consumed its body stream.
+ */
+async function rebuildAndCacheHomepage(c: AppContext): Promise<void> {
+  const assetResponse = await c.env.ASSETS.fetch(c.req.raw);
+  const contentType = assetResponse.headers.get("content-type") ?? "";
+  if (!assetResponse.ok || !contentType.includes("text/html")) return;
+  const data = await fetchHomepageData(c.env);
+  const transformed = transformShell(assetResponse, data);
+  const response = withCacheHeaders(transformed);
   edgeCachePut(c, response);
-  return response;
+}
+
+// ---------------------------------------------------------------------------
+// Route
+// ---------------------------------------------------------------------------
+
+homeRouter.get("/", async (c) => {
+  const logger = c.get("logger");
+
+  // 1. SWR match. Fresh hits return instantly. Stale hits return instantly
+  //    and fire a guarded background rebuild.
+  const hit = await edgeCacheMatchSWR(c, { freshSeconds: FRESH_SECONDS });
+  if (hit && !hit.stale) return hit.response;
+  if (hit && hit.stale) {
+    triggerSWRRefresh(c, "home", () => rebuildAndCacheHomepage(c));
+    return hit.response;
+  }
+
+  // 2. MISS — fetch the static shell (fast, served from CF's asset cache).
+  let assetResponse: Response;
+  try {
+    assetResponse = await c.env.ASSETS.fetch(c.req.raw);
+  } catch (err) {
+    logger.error("homepage: ASSETS.fetch failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return c.text("Service unavailable", 503);
+  }
+
+  const contentType = assetResponse.headers.get("content-type") ?? "";
+  if (!assetResponse.ok || !contentType.includes("text/html")) {
+    return assetResponse;
+  }
+
+  // 3. Race the DO fetch against a short timeout. Warm DO returns in
+  //    <100ms; cold DO can take >30s. Winner within DO_FRESH_TIMEOUT_MS:
+  //    we do the full rewrite. Loser: static shell now, background
+  //    rebuild populates the cache for the next visitor.
+  const dataPromise = fetchHomepageData(c.env).catch((err) => {
+    logger.warn("homepage: data fetch rejected", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null as HomepageData | null;
+  });
+
+  const raced = await Promise.race<HomepageData | null | "timeout">([
+    dataPromise,
+    new Promise<"timeout">((resolve) =>
+      setTimeout(() => resolve("timeout"), DO_FRESH_TIMEOUT_MS)
+    ),
+  ]);
+
+  if (raced !== "timeout" && raced !== null) {
+    // DO answered fast — full rewrite + cache, standard happy path.
+    const transformed = transformShell(assetResponse, raced);
+    const response = withCacheHeaders(transformed);
+    edgeCachePut(c, response);
+    return response;
+  }
+
+  // 4. DO slow — serve static shell immediately. Fire a background
+  //    rebuild so the next visitor gets the fully-rewritten cached copy.
+  //    The lock from triggerSWRRefresh keeps a flurry of concurrent
+  //    cold-miss visitors from each launching a DO call.
+  logger.warn("homepage: DO timeout, serving static shell", {
+    timeoutMs: DO_FRESH_TIMEOUT_MS,
+  });
+  triggerSWRRefresh(c, "home", () => rebuildAndCacheHomepage(c));
+  return withCacheHeaders(assetResponse);
 });
 
 export { homeRouter };
