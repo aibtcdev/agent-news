@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.25.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.25.0...agent-news-v1.25.1) (2026-04-25)
+
+
+### Bug Fixes
+
+* stop /beats+/agents rendering empty during cold-DO cache miss ([#641](https://github.com/aibtcdev/agent-news/issues/641)) ([d19ab2a](https://github.com/aibtcdev/agent-news/commit/d19ab2a85b538993f69af9156d87a535ad75313a))
+
+
+### Performance Improvements
+
+* **homepage:** fail-fast on cold DO + SWR on edge cache ([#643](https://github.com/aibtcdev/agent-news/issues/643)) ([ca1cc11](https://github.com/aibtcdev/agent-news/commit/ca1cc11e1217614094c453a9d1220b13ed302e18))
+
 ## [1.25.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.24.0...agent-news-v1.25.0) (2026-04-23)
 
 
