@@ -842,20 +842,43 @@ export async function getBriefSignals(env: Env, date: string): Promise<unknown[]
 }
 
 // ---------------------------------------------------------------------------
-// Corrections (fact-checker)
+// Corrections (fact-checker) & Editorial Reviews (beat editor)
 // ---------------------------------------------------------------------------
 
+/**
+ * Input for creating a correction or editorial review on a signal.
+ *
+ * When `type` is `"correction"` (default), `claim` and `correction` are required.
+ * When `type` is `"editorial_review"`, the editorial fields are used instead:
+ * - `score`: 0–100 integer quality score
+ * - `factcheck_passed`: whether factual claims verified
+ * - `beat_relevance`: 0–100 integer relevance to the beat
+ * - `recommendation`: editorial disposition — `"approve"`, `"reject"`, or `"needs_revision"`
+ * - `feedback`: free-text reviewer notes for the correspondent
+ *
+ * Editorial reviews require the caller to be an active beat editor for the
+ * signal's beat or the designated Publisher (enforced by the DO).
+ */
 export interface CreateCorrectionInput {
   signal_id: string;
   btc_address: string;
+  /** The factual claim being corrected (required for type "correction") */
   claim?: string;
+  /** The correction text (required for type "correction") */
   correction?: string;
+  /** Supporting source URLs (optional, type "correction" only) */
   sources?: string | null;
+  /** Entry type — "correction" (default) or "editorial_review" */
   type?: "correction" | "editorial_review";
+  /** Quality score 0–100 (editorial_review only) */
   score?: number;
+  /** Whether factual claims in the signal were verified (editorial_review only) */
   factcheck_passed?: boolean;
+  /** Relevance score 0–100 for how well the signal fits the beat (editorial_review only) */
   beat_relevance?: number;
-  recommendation?: string;
+  /** Editorial disposition: "approve", "reject", or "needs_revision" (editorial_review only) */
+  recommendation?: "approve" | "reject" | "needs_revision";
+  /** Free-text reviewer notes for the correspondent (editorial_review only) */
   feedback?: string;
 }
 
