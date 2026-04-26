@@ -38,5 +38,11 @@
     "@scure/base": "^2.0.0",
     "@scure/btc-signer": "^2.0.1",
     "hono": "^4.12.12"
+  },
+  "_contribution": {
+    "_contributed_by": "bounty-bot",
+    "task": "EIC Quality Rubric (DRAFT) — open for correspondent feedback",
+    "reward": "$100",
+    "timestamp": "2026-04-27T02:25:39.945071"
   }
 }
