@@ -1072,6 +1072,10 @@
 
     // ── Constants ──
     const PAGE_SIZE = 25;
+    // Cap the fetch when text search is active. We can't push free-text search
+    // to the API, so we widen the window to give the client filter something
+    // meaningful to scan. 200 matches the API's hard limit cap.
+    const SEARCH_FETCH_LIMIT = 200;
 
     // ── State ──
     let activeTab = 'all';
@@ -1082,6 +1086,7 @@
     let allBeats = [];
     let currentSignals = [];
     let currentPage = 1;
+    let totalCount = 0;
 
     // ── Fetch beats for filter ──
     async function loadBeats() {
@@ -1107,79 +1112,73 @@
       return `<div class="signal-loading">${card}${card}${card}</div>`;
     }
 
-    async function fetchJSON(url) {
-      // Delegates to shared cachedJSON so same-tab navigations re-use
-      // responses. Unwraps data.signals to preserve this page's contract.
-      const data = typeof cachedJSON === 'function'
-        ? await cachedJSON(url)
-        : await (async () => {
-            try { const r = await fetch(url); return r.ok ? r.json() : null; }
-            catch { return null; }
-          })();
-      if (!data) return [];
-      return data.signals || [];
+    // ── Build the /api/signals query string from current filter state ──
+    // Filters the API understands (status, beat, date range) are pushed
+    // server-side. Free-text search is the only purely client-side filter —
+    // the API has no full-text index, so when a query is active we widen
+    // the server window and paginate the matched subset locally.
+    function buildSignalsQuery() {
+      const p = new URLSearchParams();
+
+      if (activeQuery) {
+        p.set('limit', String(SEARCH_FETCH_LIMIT));
+      } else {
+        p.set('limit', String(PAGE_SIZE));
+        p.set('offset', String((currentPage - 1) * PAGE_SIZE));
+      }
+
+      if (activeTab && activeTab !== 'all') {
+        p.set('status', activeTab);
+      }
+      if (activeBeat) {
+        p.set('beat', activeBeat);
+      }
+      if (activeDate) {
+        p.set('date', activeDate);
+      } else if (activeRange === 'today') {
+        p.set('date', new Date().toISOString().slice(0, 10));
+      } else if (activeRange === 'week') {
+        // Round to UTC midnight so successive page loads share a cache key.
+        p.set('since', new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10) + 'T00:00:00Z');
+      }
+      return p.toString();
     }
 
-    // ── Fetch signals for a tab ──
-    // Note: /api/signals caps limit at 200 per request. Explicitly pass it
-    // so we render the full 200 instead of the API default (50).
-    async function fetchSignals(tab) {
+    // ── Fetch signals for the current filter + page state ──
+    async function fetchSignals() {
       const output = document.getElementById('signals-tabpanel');
       output.innerHTML = skeletonHTML();
       document.getElementById('count-bar').textContent = '';
 
-      let signals = [];
-
+      const url = '/api/signals?' + buildSignalsQuery();
       try {
-        if (tab === 'pending') {
-          const [submitted, inReview] = await Promise.all([
-            fetchJSON('/api/signals?status=submitted&limit=200'),
-            fetchJSON('/api/signals?status=in_review&limit=200'),
-          ]);
-          signals = [...submitted, ...inReview]
-            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-        } else {
-          const query = tab === 'all'
-            ? '?limit=200'
-            : '?status=' + encodeURIComponent(tab) + '&limit=200';
-          signals = await fetchJSON('/api/signals' + query);
-        }
+        const data = typeof cachedJSON === 'function'
+          ? await cachedJSON(url)
+          : await fetch(url).then(r => r.ok ? r.json() : null);
+        if (!data) throw new Error('empty response');
+        currentSignals = data.signals || [];
+        totalCount = typeof data.total === 'number' ? data.total : currentSignals.length;
       } catch (err) {
         console.error('Failed to fetch signals:', err);
         output.innerHTML = `<div class="signal-empty">Could not load signals. Try again later.</div>`;
         return;
       }
-
-      currentSignals = signals;
-      renderSignals(signals);
+      renderSignals();
     }
 
-    function renderSignals(signals) {
+    function renderSignals() {
       const output = document.getElementById('signals-tabpanel');
       const countBar = document.getElementById('count-bar');
 
-      let filtered = activeBeat
-        ? signals.filter(s => beatSlug(s.beat) === activeBeat)
-        : [...signals];
-
-      if (activeDate) {
-        filtered = filtered.filter(s => s.timestamp && s.timestamp.slice(0, 10) === activeDate);
-      }
-
-      // Time range filter (defaults to today)
-      if (activeRange === 'today') {
-        const utcToday = new Date().toISOString().slice(0, 10);
-        filtered = filtered.filter(s => s.timestamp && s.timestamp.slice(0, 10) === utcToday);
-      } else if (activeRange === 'week') {
-        const since = Date.now() - 7 * 86400000;
-        filtered = filtered.filter(s => s.timestamp && new Date(s.timestamp).getTime() >= since);
-      }
-
-      // Query filter: match headline / body / tags / agent display_name / address
-      if (activeQuery) {
+      // In search mode every fetched signal is a candidate for client-side
+      // text matching. In paged mode the server has already applied every
+      // filter and currentSignals IS the page \u2014 no further narrowing.
+      const inSearchMode = !!activeQuery;
+      let visible = currentSignals;
+      if (inSearchMode) {
         const terms = activeQuery.toLowerCase().split(/\s+/).filter(t => t.length >= 2);
         if (terms.length) {
-          filtered = filtered.filter(s => {
+          visible = currentSignals.filter(s => {
             const haystack = [
               s.headline || '',
               s.content || '',
@@ -1192,27 +1191,29 @@
         }
       }
 
-      if (activeTab !== 'pending') {
-        filtered.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      }
+      // Pagination: search mode counts the matched subset, paged mode trusts
+      // the server's `total` so we render "Page X of N" across the full set.
+      const totalForCount = inSearchMode ? visible.length : totalCount;
+      const totalPages = Math.max(1, Math.ceil(totalForCount / PAGE_SIZE));
 
-      const totalCount = filtered.length;
-      const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
-
-      // Clamp currentPage to valid range after filter changes
       if (currentPage > totalPages) currentPage = totalPages;
 
-      const countText = totalCount === 1 ? '1 signal' : `${totalCount} signals`;
-      countBar.textContent = totalPages > 1 ? `${countText} \u2014 Page ${currentPage} of ${totalPages}` : countText;
+      const countText = totalForCount === 1 ? '1 signal' : `${totalForCount.toLocaleString()} signals`;
+      const baseLabel = totalPages > 1 ? `${countText} \u2014 Page ${currentPage} of ${totalPages.toLocaleString()}` : countText;
+      countBar.textContent = inSearchMode
+        ? `${baseLabel} matching "${activeQuery}" in latest ${SEARCH_FETCH_LIMIT}`
+        : baseLabel;
 
-      if (totalCount === 0) {
+      if (totalForCount === 0) {
         output.innerHTML = `<div class="signal-empty">No signals found.</div>`;
         return;
       }
 
-      // Slice to current page
-      const start = (currentPage - 1) * PAGE_SIZE;
-      const pageItems = filtered.slice(start, start + PAGE_SIZE);
+      // Search mode slices the matched subset locally. Paged mode renders
+      // exactly what the server returned for this offset.
+      const pageItems = inSearchMode
+        ? visible.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+        : visible;
 
       const now = Date.now();
       const cards = pageItems.map(s => {
@@ -1270,16 +1271,21 @@
       output.innerHTML = `<div class="sig-wire">${cards}</div>${paginationHTML}`;
 
       if (totalPages > 1) {
-        document.getElementById('page-prev')?.addEventListener('click', () => {
-          currentPage--;
-          renderSignals(currentSignals);
+        // In paged mode each page is a separate server request keyed on
+        // offset. In search mode the entire matched set is in memory and
+        // we only need to re-render the visible slice.
+        const goTo = (delta) => {
+          currentPage += delta;
+          if (inSearchMode) {
+            renderSignals();
+          } else {
+            fetchSignals();
+            syncUrl();
+          }
           window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
-        document.getElementById('page-next')?.addEventListener('click', () => {
-          currentPage++;
-          renderSignals(currentSignals);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        });
+        };
+        document.getElementById('page-prev')?.addEventListener('click', () => goTo(-1));
+        document.getElementById('page-next')?.addEventListener('click', () => goTo(1));
       }
     }
 
@@ -1344,7 +1350,7 @@
 
       await Promise.all([
         loadBeats(),
-        fetchSignals(activeTab),
+        fetchSignals(),
       ]);
 
       if (signalParam) {
@@ -1396,13 +1402,16 @@
         }).join('');
       }
 
+      // Every filter change resets to page 1 and refetches: range/beat/status
+      // map to API query params, and toggling between search and paged modes
+      // changes the requested limit, so we always need a new server response.
       ranges.addEventListener('click', (e) => {
         const btn = e.target.closest('[data-range]');
         if (!btn) return;
         activeRange = btn.dataset.range;
         currentPage = 1;
         render();
-        renderSignals(currentSignals);
+        fetchSignals();
         syncUrl();
       });
 
@@ -1412,7 +1421,7 @@
         activeBeat = btn.dataset.beat || null;
         currentPage = 1;
         render();
-        renderSignals(currentSignals);
+        fetchSignals();
         syncUrl();
       });
 
@@ -1422,27 +1431,31 @@
         activeTab = btn.dataset.status;
         currentPage = 1;
         render();
-        fetchSignals(activeTab);
+        fetchSignals();
         syncUrl();
       });
 
       input.value = activeQuery || '';
       let debounce;
+      // Search input toggles between paged and search modes (different
+      // server limits), so we refetch instead of just re-rendering — typing
+      // a query, clearing it, or switching the term all need a new response.
+      const onSearchChange = () => {
+        const next = input.value.trim();
+        if (next === activeQuery) return;
+        activeQuery = next;
+        currentPage = 1;
+        fetchSignals();
+        syncUrl();
+      };
       input.addEventListener('input', () => {
         clearTimeout(debounce);
-        debounce = setTimeout(() => {
-          activeQuery = input.value.trim();
-          currentPage = 1;
-          renderSignals(currentSignals);
-          syncUrl();
-        }, 180);
+        debounce = setTimeout(onSearchChange, 250);
       });
       form.addEventListener('submit', (e) => {
         e.preventDefault();
-        activeQuery = input.value.trim();
-        currentPage = 1;
-        renderSignals(currentSignals);
-        syncUrl();
+        clearTimeout(debounce);
+        onSearchChange();
       });
 
       render();
