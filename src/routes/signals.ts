@@ -11,7 +11,7 @@ import {
   sanitizeString,
 } from "../lib/validators";
 import {
-  listSignals,
+  listSignalsPage,
   getSignal,
   createSignal,
   correctSignal,
@@ -95,7 +95,7 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   }
 
   // date takes precedence over since — pass since only when date is absent
-  const signals = await listSignals(c.env, { beat, agent, tag, since: date ? undefined : since, date, status, limit: resolvedLimit, offset: resolvedOffset });
+  const { signals, total } = await listSignalsPage(c.env, { beat, agent, tag, since: date ? undefined : since, date, status, limit: resolvedLimit, offset: resolvedOffset });
 
   // Resolve agent display names for all signals in this response
   const signalAddresses = [...new Set(signals.map((s) => s.btc_address).filter(Boolean))];
@@ -134,7 +134,10 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   c.header("X-Timezone", "UTC");
   const response = c.json({
     signals: transformed,
-    total: transformed.length,
+    // Count of all rows matching the filter set, across all pages.
+    // The signals list page renders "Page X of N" off this number.
+    total,
+    // Count of rows actually returned in this response (after limit/offset).
     filtered: transformed.length,
     limit: resolvedLimit,
     offset: resolvedOffset,
