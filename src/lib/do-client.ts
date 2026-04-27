@@ -157,6 +157,19 @@ export async function listSignals(
   env: Env,
   filters: SignalFilters = {}
 ): Promise<Signal[]> {
+  const { signals } = await listSignalsPage(env, filters);
+  return signals;
+}
+
+/**
+ * Same query as `listSignals` but also returns the total count of matching
+ * rows (ignoring limit/offset) so the caller can paginate. Used by the
+ * public /api/signals route — clients render "Page X of N" off the total.
+ */
+export async function listSignalsPage(
+  env: Env,
+  filters: SignalFilters = {}
+): Promise<{ signals: Signal[]; total: number }> {
   const stub = getStub(env);
   const params = new URLSearchParams();
   if (filters.beat) params.set("beat", filters.beat);
@@ -171,7 +184,7 @@ export async function listSignals(
   const result = await doFetch<Signal[]>(stub, `/signals${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list signals");
   if (result.data === undefined) throw new Error("Missing data in response");
-  return result.data;
+  return { signals: result.data, total: result.total ?? result.data.length };
 }
 
 /** All data needed for the initial page load, fetched in a single DO call. */
