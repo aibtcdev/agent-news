@@ -2111,7 +2111,32 @@ export class NewsDO extends DurableObject<Env> {
 
       const signals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
 
-      return c.json({ ok: true, data: signals } satisfies DOResult<Signal[]>);
+      // Total count of all matching rows (for pagination on the client).
+      // The data query slices to LIMIT/OFFSET so its row count alone can't
+      // tell the UI how many pages exist.
+      const totalRows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as total
+           FROM signals s
+           WHERE (?1 IS NULL OR s.beat_slug = ?1)
+             AND (?2 IS NULL OR s.btc_address = ?2)
+             AND (?3 IS NULL OR s.created_at > ?3)
+             AND (?4 IS NULL OR s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?4))
+             AND (?5 IS NULL OR s.status = ?5)
+             AND (?6 IS NULL OR s.created_at >= ?6)
+             AND (?7 IS NULL OR s.created_at < ?7)`,
+          beat,
+          agent,
+          dateParam ? null : since,
+          tag,
+          status,
+          dateStart,
+          dateEnd
+        )
+        .toArray();
+      const total = (totalRows[0] as { total: number } | undefined)?.total ?? signals.length;
+
+      return c.json({ ok: true, data: signals, total } satisfies DOResult<Signal[]>);
     });
 
     // GET /signals/front-page — curated signals (approved + brief_included)
