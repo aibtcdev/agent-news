@@ -401,6 +401,8 @@ export interface DOResult<T> {
   status?: DOErrorStatus;
   /** Present on approval responses — current daily cap status */
   approval_cap?: ApprovalCapInfo;
+  /** Present on paginated list responses — count of matching rows ignoring limit/offset */
+  total?: number;
 }
 
 export type PaymentStageKind = "brief_access" | "classified_submission";
