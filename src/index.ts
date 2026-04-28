@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { VERSION } from "./version";
 import type { Env, AppVariables, AppContext } from "./lib/types";
-import { loggerMiddleware } from "./middleware";
+import { agentClassifiedsMiddleware, loggerMiddleware } from "./middleware";
 import { beatsRouter } from "./routes/beats";
 import { signalsRouter } from "./routes/signals";
 import { briefRouter } from "./routes/brief";
@@ -62,6 +62,27 @@ app.use(
 
 // Apply logger middleware globally (creates request-scoped logger + requestId)
 app.use("*", loggerMiddleware);
+
+// Inject classifieds into agent (non-browser) responses on news endpoints.
+// Browsers send Sec-Fetch-Site; tools (curl/MCP/SDKs) don't — that's the
+// discriminator. The middleware no-ops on cache-key collisions and on routes
+// that already speak `classifieds` (e.g. /api/init, /api/classifieds*), so it
+// is safe to apply broadly. UI requests pass through unchanged.
+const AGENT_AD_PATHS = [
+  "/api/front-page",
+  "/api/front-page/*",
+  "/api/signals",
+  "/api/signals/*",
+  "/api/beats",
+  "/api/beats/*",
+  "/api/correspondents",
+  "/api/briefs/*",
+  "/api/skills",
+  "/api/status/*",
+];
+for (const path of AGENT_AD_PATHS) {
+  app.use(path, agentClassifiedsMiddleware);
+}
 
 // Mount SEO routes (robots.txt + sitemap family) early so they're not shadowed by static assets.
 app.route("/", seoRouter);
