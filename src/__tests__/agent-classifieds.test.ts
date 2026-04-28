@@ -1,7 +1,3 @@
-/**
- * Agent classifieds injection — verifies non-browser callers get classifieds
- * attached to news-endpoint responses, while browsers see no change.
- */
 import { describe, it, expect, beforeAll } from "vitest";
 import { SELF } from "cloudflare:test";
 
