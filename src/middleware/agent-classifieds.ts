@@ -73,7 +73,7 @@ export const agentClassifiedsMiddleware: MiddlewareHandler<{
   // /api/init's curated list or /api/classifieds*'s own response shape.
   if ("classifieds" in originalBody) return;
 
-  let rotation;
+  let rotation: Awaited<ReturnType<typeof getClassifiedsRotation>>;
   try {
     rotation = await getClassifiedsRotation(c.env);
   } catch {
