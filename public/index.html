@@ -3937,31 +3937,29 @@
 
       // Helper: convert signals array to section items for mosaic rendering
       function signalsToItems(sigs) {
-        const sections = sigs.map(s => ({
-          id: s.id || null,
-          beat: s.beat,
-          beatSlug: s.beatSlug || s.beat,
-          correspondent: s.btcAddress,
-          correspondentName: s.displayName || null,
-          correspondentShort: truncAddr(s.btcAddress),
-          timestamp: s.timestamp,
-          headline: s.headline || null,
-          content: s.content,
-          sources: s.sources || null,
-          tags: s.tags || null,
-          streak: 0,
-          correction: s.correction || null,
-          correctedAt: s.correctedAt || null,
-          disclosure: s.disclosure || null,
-        }));
-        const grouped = groupByBeat(sections);
-        const items = [];
-        for (const [key, group] of Object.entries(grouped)) {
-          for (const section of group.sections) {
-            items.push({ section, beat: beatMap[section.beatSlug] || beatMap[key] });
-          }
-        }
-        return items;
+        return sigs.map(s => {
+          const beatSlug = s.beatSlug || s.beat;
+          return {
+            section: {
+              id: s.id || null,
+              beat: s.beat,
+              beatSlug,
+              correspondent: s.btcAddress,
+              correspondentName: s.displayName || null,
+              correspondentShort: truncAddr(s.btcAddress),
+              timestamp: s.timestamp,
+              headline: s.headline || null,
+              content: s.content,
+              sources: s.sources || null,
+              tags: s.tags || null,
+              streak: 0,
+              correction: s.correction || null,
+              correctedAt: s.correctedAt || null,
+              disclosure: s.disclosure || null,
+            },
+            beat: beatMap[beatSlug],
+          };
+        });
       }
 
       // Helper: render mosaic HTML from items array
