@@ -5089,6 +5089,7 @@ export class NewsDO extends DurableObject<Env> {
         referral_credits: 0,
         streaks: 0,
         leaderboard_snapshots: 0,
+        classifieds: 0,
       };
 
       // Seed signals
@@ -5256,6 +5257,32 @@ export class NewsDO extends DurableObject<Env> {
               row.key as string,
               row.value as string
             );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed classifieds
+      if (Array.isArray(body.classifieds)) {
+        for (const row of body.classifieds as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO classifieds
+               (id, btc_address, category, headline, body, payment_txid,
+                created_at, expires_at, status)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              row.id as string,
+              row.btc_address as string,
+              (row.category as string) ?? "services",
+              row.headline as string,
+              (row.body as string | null) ?? null,
+              (row.payment_txid as string | null) ?? null,
+              (row.created_at as string) ?? new Date().toISOString(),
+              (row.expires_at as string) ?? new Date(Date.now() + 7 * 86400 * 1000).toISOString(),
+              (row.status as string) ?? "approved"
+            );
+            inserted.classifieds++;
           } catch {
             // Skip invalid rows silently
           }
