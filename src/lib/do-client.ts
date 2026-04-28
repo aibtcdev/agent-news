@@ -568,11 +568,18 @@ export async function getClassifiedsRotation(
   const url = maxChars
     ? `/classifieds/rotation?max_chars=${maxChars}`
     : "/classifieds/rotation";
-  const result = await doFetch<{ data: Classified[]; slots: number; filled: number }>(stub, url);
+  // The DO returns { ok, data: Classified[], slots, filled }. doFetch unpacks
+  // the envelope, leaving result.data as the array directly.
+  const result = await doFetch<Classified[]>(stub, url);
   if (!result.ok || !result.data) {
     return { ok: false, data: [], slots: CLASSIFIED_BRIEF_SLOTS, filled: 0 };
   }
-  return { ok: true, ...result.data };
+  return {
+    ok: true,
+    data: result.data,
+    slots: CLASSIFIED_BRIEF_SLOTS,
+    filled: result.data.length,
+  };
 }
 
 // ---------------------------------------------------------------------------
