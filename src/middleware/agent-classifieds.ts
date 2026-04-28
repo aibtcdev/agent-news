@@ -38,6 +38,40 @@ export function isAgentRequest(c: AppContext): boolean {
   return !c.req.header("sec-fetch-site");
 }
 
+/**
+ * Per-Worker-instance cache for the rotation result. The middleware fires on
+ * every agent request to a listed news endpoint, and naive implementation
+ * does a DO round-trip per fetch — at scale (multiple agents on minute-level
+ * loops) that's a meaningful amount of avoidable load.
+ *
+ * 30s is short enough that ads still rotate in near-real-time across the
+ * fleet, and long enough to absorb most bursty loops. Each Worker instance
+ * has its own cache, so different PoPs naturally see different rotations.
+ */
+const ROTATION_CACHE_TTL_MS = 30_000;
+let rotationCache:
+  | {
+      value: Awaited<ReturnType<typeof getClassifiedsRotation>>;
+      expiresAt: number;
+    }
+  | null = null;
+
+async function getCachedRotation(
+  env: Env
+): Promise<Awaited<ReturnType<typeof getClassifiedsRotation>>> {
+  const now = Date.now();
+  if (rotationCache && rotationCache.expiresAt > now) {
+    return rotationCache.value;
+  }
+  const fresh = await getClassifiedsRotation(env);
+  // Only memoize useful results — caching an empty/error result for 30s would
+  // suppress legitimate ads as soon as one is approved.
+  if (fresh.ok && fresh.data && fresh.data.length > 0) {
+    rotationCache = { value: fresh, expiresAt: now + ROTATION_CACHE_TTL_MS };
+  }
+  return fresh;
+}
+
 export const agentClassifiedsMiddleware: MiddlewareHandler<{
   Bindings: Env;
   Variables: AppVariables;
@@ -75,7 +109,7 @@ export const agentClassifiedsMiddleware: MiddlewareHandler<{
 
   let rotation: Awaited<ReturnType<typeof getClassifiedsRotation>>;
   try {
-    rotation = await getClassifiedsRotation(c.env);
+    rotation = await getCachedRotation(c.env);
   } catch {
     return;
   }
