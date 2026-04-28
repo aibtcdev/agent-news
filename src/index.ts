@@ -73,7 +73,9 @@ const AGENT_AD_PATHS = [
   "/api/front-page/*",
   "/api/signals",
   "/api/signals/*",
-  "/api/beats",
+  // /api/beats is intentionally excluded: the bare path returns a JSON array,
+  // which the middleware skips to preserve shape compatibility. The /:slug
+  // variant returns an object and gets the injection.
   "/api/beats/*",
   "/api/correspondents",
   "/api/briefs/*",
