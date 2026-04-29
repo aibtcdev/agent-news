@@ -468,6 +468,9 @@
       // reality for high-volume archives instead of ceilinging at 200.
       totalCounts: null,        // /api/signals/counts (all-time)
       timeRangeCounts: {},      // { today, week, month, quarter, all } → total
+      // brief_date (YYYY-MM-DD) → inscription_id, populated from /api/inscriptions
+      // so brief_included rows can link to their on-chain ordinal.
+      inscriptionsByDate: {},
       // Progressive loading state. Initial load is 50; loadMore() walks
       // the offset window (max 10_000) appending pages of the same size
       // so the user can scroll past the initial chunk on demand. The
@@ -814,22 +817,35 @@
         const slug = s.beatSlug || (s.beat || '').toLowerCase().replace(/\s+/g, '-');
         const color = BEAT_COLORS[slug] || '#1a1a1a';
         const st = (s.status || '').toLowerCase();
+        // brief_included signals where the corresponding daily brief has an
+        // inscription_id are effectively on-chain — surface that as INSCRIBED
+        // and expose the ord.io link in the author line. Plain brief_included
+        // (brief not inscribed yet) reads as IN BRIEF without the link.
+        const briefDate = s.utcDate || (s.timestamp ? s.timestamp.slice(0, 10) : null);
+        const inscriptionId = (st === 'brief_included' && briefDate) ? state.inscriptionsByDate[briefDate] : null;
         const statusLabel =
-          st === 'inscribed' ? '● INSCRIBED' :
-          st === 'approved'  ? '○ APPROVED' :
+          inscriptionId                    ? '● INSCRIBED' :
+          st === 'brief_included'          ? '✓ IN BRIEF' :
+          st === 'inscribed'               ? '● INSCRIBED' :
+          st === 'approved'                ? '○ APPROVED' :
           st === 'submitted' || st === 'pending' ? '◔ PENDING' :
+          st === 'replaced'                ? '↻ REPLACED' :
           st === 'retracted' || st === 'rejected' ? '✕ RETRACTED' :
           '';
         const statusClass =
-          st === 'inscribed' ? 'status-inscribed' :
-          st === 'approved'  ? 'status-approved' :
+          inscriptionId || st === 'inscribed' ? 'status-inscribed' :
+          st === 'brief_included'              ? 'status-approved' :
+          st === 'approved'                    ? 'status-approved' :
           st === 'submitted' || st === 'pending' ? 'status-pending' :
-          (st === 'retracted' || st === 'rejected') ? 'status-retracted' : '';
+          (st === 'retracted' || st === 'rejected' || st === 'replaced') ? 'status-retracted' : '';
         const ts = s.timestamp ? new Date(s.timestamp) : null;
         const when = ts ? (ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' · ' + ts.toISOString().slice(11, 16)) : '';
         const agent = s.displayName || truncAddr(s.btcAddress || '');
         const headline = s.headline || (s.content || '').slice(0, 120);
         const snippet = (s.content || '').slice(0, 260);
+        const inscriptionTrail = inscriptionId
+          ? ' · <a href="https://ordinals.com/inscription/' + esc(inscriptionId) + '" target="_blank" rel="noopener" style="font-family:var(--mono);color:var(--cat-ordinals,#F7931A);text-decoration:none" onclick="event.stopPropagation()">view inscription ↗</a>'
+          : '';
 
         return ''
           + '<a class="arc-result" href="/signals/' + encodeURIComponent(s.id || '') + '">'
@@ -841,7 +857,7 @@
             + '</div>'
             + '<div class="arc-result-headline">' + highlight(headline, state.query) + '</div>'
             + '<div class="arc-result-snip">' + highlight(snippet, state.query) + '</div>'
-            + '<div class="arc-result-author">' + esc(agent) + ' · <span style="font-family:var(--mono)">view inscription</span></div>'
+            + '<div class="arc-result-author">' + esc(agent) + inscriptionTrail + '</div>'
           + '</a>';
       }).join('');
       // Tail: progress note + Load More button when more pages exist on the
@@ -1019,6 +1035,7 @@
         fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(7))),
         fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(30))),
         fetchJSON('/api/signals/counts?since=' + encodeURIComponent(sinceDaysAgoIso(90))),
+        fetchJSON('/api/inscriptions'),
       ]);
       const [beatsData, signalsData, totalCounts] = await Promise.all([
         fetchJSON('/api/beats'),
@@ -1042,7 +1059,10 @@
       renderSaved();
 
       // Phase 2 — facet count labels populate without blocking the listing.
-      phase2.then(([todayCounts, weekCounts, monthCounts, quarterCounts]) => {
+      // Inscriptions land here too so brief_included rows can hyperlink to
+      // ord.io. Re-render results once the map is built; until then the rows
+      // render without the link, which is the correct fallback.
+      phase2.then(([todayCounts, weekCounts, monthCounts, quarterCounts, inscriptionsData]) => {
         state.timeRangeCounts = {
           today: todayCounts && todayCounts.total,
           week: weekCounts && weekCounts.total,
@@ -1050,7 +1070,15 @@
           quarter: quarterCounts && quarterCounts.total,
           all: totalCounts && totalCounts.total,
         };
+        const insList = (inscriptionsData && Array.isArray(inscriptionsData.inscriptions))
+          ? inscriptionsData.inscriptions : [];
+        const insMap = {};
+        for (const row of insList) {
+          if (row && row.date && row.inscription_id) insMap[row.date] = row.inscription_id;
+        }
+        state.inscriptionsByDate = insMap;
         renderFacets();
+        renderResults();
       });
 
       // Phase 3 — briefs sidebar lazy-loads when its rail section nears the
