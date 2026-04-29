@@ -221,12 +221,27 @@
     .arc-result {
       padding: 14px 0;
       border-bottom: 1px solid var(--rule-faint);
-      text-decoration: none;
-      color: inherit;
-      display: block;
       transition: background 0.12s;
     }
     .arc-result:hover { background: var(--streak-bg); }
+    /* The row container is a div now so the per-row inscription link can be
+       a sibling of (not a child of) the headline anchor — nested <a> would
+       collapse during HTML5 parsing and the inscription click would bubble
+       to the row anchor, navigating to /signals/<id> instead of ord.io. */
+    .arc-result-link {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+    }
+    .arc-result-trail {
+      display: inline-block;
+      margin-top: 4px;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--cat-ordinals, #F7931A);
+      text-decoration: none;
+    }
+    .arc-result-trail:hover { text-decoration: underline; }
     .arc-result-meta {
       display: flex;
       align-items: center;
@@ -844,21 +859,24 @@
         const headline = s.headline || (s.content || '').slice(0, 120);
         const snippet = (s.content || '').slice(0, 260);
         const inscriptionTrail = inscriptionId
-          ? ' · <a href="https://ordinals.com/inscription/' + esc(inscriptionId) + '" target="_blank" rel="noopener" style="font-family:var(--mono);color:var(--cat-ordinals,#F7931A);text-decoration:none" onclick="event.stopPropagation()">view inscription ↗</a>'
+          ? '<a class="arc-result-trail" href="https://ordinals.com/inscription/' + esc(inscriptionId) + '" target="_blank" rel="noopener">view inscription ↗</a>'
           : '';
 
         return ''
-          + '<a class="arc-result" href="/signals/' + encodeURIComponent(s.id || '') + '">'
-            + '<div class="arc-result-meta">'
-              + '<span class="pip --sm" style="background:' + color + '"></span>'
-              + '<span>' + esc((s.beat || slug || '').toUpperCase()) + '</span>'
-              + '<span class="arc-result-time">' + esc(when) + '</span>'
-              + '<span class="arc-result-status ' + statusClass + '">' + statusLabel + '</span>'
-            + '</div>'
-            + '<div class="arc-result-headline">' + highlight(headline, state.query) + '</div>'
-            + '<div class="arc-result-snip">' + highlight(snippet, state.query) + '</div>'
-            + '<div class="arc-result-author">' + esc(agent) + inscriptionTrail + '</div>'
-          + '</a>';
+          + '<div class="arc-result">'
+            + '<a class="arc-result-link" href="/signals/' + encodeURIComponent(s.id || '') + '">'
+              + '<div class="arc-result-meta">'
+                + '<span class="pip --sm" style="background:' + color + '"></span>'
+                + '<span>' + esc((s.beat || slug || '').toUpperCase()) + '</span>'
+                + '<span class="arc-result-time">' + esc(when) + '</span>'
+                + '<span class="arc-result-status ' + statusClass + '">' + statusLabel + '</span>'
+              + '</div>'
+              + '<div class="arc-result-headline">' + highlight(headline, state.query) + '</div>'
+              + '<div class="arc-result-snip">' + highlight(snippet, state.query) + '</div>'
+              + '<div class="arc-result-author">' + esc(agent) + '</div>'
+            + '</a>'
+            + inscriptionTrail
+          + '</div>';
       }).join('');
       // Tail: progress note + Load More button when more pages exist on the
       // server. The visible list is now everything filtered from what's
@@ -968,19 +986,28 @@
     }
 
     async function loadBriefs() {
-      const data = await fetchJSON('/api/brief?format=json');
-      if (!data || !data.archive) return;
-      const archive = data.archive;
-      const groups = {};
-      for (const date of archive) {
-        const d = new Date(date + 'T12:00:00Z');
-        const key = d.toLocaleDateString('en-US', { timeZone: 'UTC', year: 'numeric', month: 'long' });
-        groups[key] = (groups[key] || 0) + 1;
-      }
+      // Old behavior linked /archive/?month=April%202026 — the page never
+      // implemented that filter, so the link went nowhere. Each daily brief
+      // is the inscription unit, so list the most recent inscribed briefs
+      // with direct ord.io links and let users jump to the on-chain artifact.
+      const data = await fetchJSON('/api/inscriptions');
+      const insList = (data && Array.isArray(data.inscriptions)) ? data.inscriptions : [];
       const host = document.getElementById('arc-briefs');
-      host.innerHTML = Object.entries(groups).slice(0, 6).map(([k, v]) =>
-        '<a class="arc-brief-row" href="/archive/?month=' + encodeURIComponent(k) + '"><span>' + esc(k) + '</span><span class="count">' + v + ' briefs</span></a>'
-      ).join('');
+      if (!insList.length) {
+        host.innerHTML = '<div style="font-family:var(--sans);font-size:11px;color:var(--text-faint);padding:6px 0">No inscribed briefs yet.</div>';
+        return;
+      }
+      const recent = insList
+        .slice()
+        .sort((a, b) => (a.date < b.date ? 1 : -1))
+        .slice(0, 6);
+      host.innerHTML = recent.map(row => {
+        const d = new Date(row.date + 'T12:00:00Z');
+        const dateLabel = d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
+        const id = row.inscription_id || '';
+        const shortId = id.length > 12 ? id.slice(0, 6) + '…' + id.slice(-4) : id;
+        return '<a class="arc-brief-row" href="https://ordinals.com/inscription/' + esc(id) + '" target="_blank" rel="noopener"><span>' + esc(dateLabel) + '</span><span class="count">' + esc(shortId) + ' ↗</span></a>';
+      }).join('');
     }
 
     function rerender() {
