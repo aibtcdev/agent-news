@@ -3937,7 +3937,7 @@
 
       // Helper: convert signals array to section items for mosaic rendering
       function signalsToItems(sigs) {
-        return sigs.map(s => {
+        const items = sigs.map(s => {
           const beatSlug = s.beatSlug || s.beat;
           return {
             section: {
@@ -3960,6 +3960,37 @@
             beat: beatMap[beatSlug],
           };
         });
+
+        // Pure timestamp DESC (the previous fix) interleaves beats only if
+        // every beat has filed recently. When one beat's freshest signal is
+        // hours older than the others — e.g. aibtc-network when macro and
+        // quantum dominate the latest hour — it falls off the visible mosaic
+        // entirely. Round-robin by beat keeps every active beat present in
+        // the first N cards, while still leading with the beat that filed
+        // most recently (so the lead remains the freshest story overall).
+        const groups = new Map();
+        for (const it of items) {
+          const slug = it.section.beatSlug;
+          if (!groups.has(slug)) groups.set(slug, []);
+          groups.get(slug).push(it);
+        }
+        const ts = (it) => it.section.timestamp ? new Date(it.section.timestamp).getTime() : 0;
+        const beatLists = [...groups.values()];
+        for (const list of beatLists) list.sort((a, b) => ts(b) - ts(a));
+        beatLists.sort((a, b) => ts(b[0]) - ts(a[0]));
+
+        const interleaved = [];
+        for (let i = 0; ; i++) {
+          let pushedThisRound = false;
+          for (const list of beatLists) {
+            if (i < list.length) {
+              interleaved.push(list[i]);
+              pushedThisRound = true;
+            }
+          }
+          if (!pushedThisRound) break;
+        }
+        return interleaved;
       }
 
       // Helper: render mosaic HTML from items array
