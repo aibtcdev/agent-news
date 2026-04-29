@@ -859,7 +859,7 @@
         const headline = s.headline || (s.content || '').slice(0, 120);
         const snippet = (s.content || '').slice(0, 260);
         const inscriptionTrail = inscriptionId
-          ? '<a class="arc-result-trail" href="https://ordinals.com/inscription/' + esc(inscriptionId) + '" target="_blank" rel="noopener">view inscription ↗</a>'
+          ? '<a class="arc-result-trail" href="https://ord.io/' + esc(inscriptionId) + '" target="_blank" rel="noopener">view inscription ↗</a>'
           : '';
 
         return ''
@@ -1006,7 +1006,7 @@
         const dateLabel = d.toLocaleDateString('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' });
         const id = row.inscription_id || '';
         const shortId = id.length > 12 ? id.slice(0, 6) + '…' + id.slice(-4) : id;
-        return '<a class="arc-brief-row" href="https://ordinals.com/inscription/' + esc(id) + '" target="_blank" rel="noopener"><span>' + esc(dateLabel) + '</span><span class="count">' + esc(shortId) + ' ↗</span></a>';
+        return '<a class="arc-brief-row" href="https://ord.io/' + esc(id) + '" target="_blank" rel="noopener"><span>' + esc(dateLabel) + '</span><span class="count">' + esc(shortId) + ' ↗</span></a>';
       }).join('');
     }
 
