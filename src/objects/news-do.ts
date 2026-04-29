@@ -2884,8 +2884,15 @@ export class NewsDO extends DurableObject<Env> {
             .toArray()
         : this.ctx.storage.sql
             .exec(
+              // expires_at is stored as ISO 8601 with 'T' and trailing 'Z'
+              // (e.g. '2026-04-29T10:00:00.000Z'); SQLite's datetime('now')
+              // returns 'YYYY-MM-DD HH:MM:SS' without T or Z, so a same-day
+              // string comparison incorrectly treats every ISO row as "greater"
+              // (because 'T' (0x54) > ' ' (0x20)) and lets already-expired rows
+              // pass the filter. Build the comparator in the same ISO format
+              // so the comparison is correct for intra-day expiries too.
               `SELECT * FROM classifieds
-               WHERE expires_at > datetime('now')
+               WHERE expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
                  AND status = 'approved'
                  AND (?1 IS NULL OR category = ?1)
                ORDER BY created_at DESC
@@ -2913,8 +2920,9 @@ export class NewsDO extends DurableObject<Env> {
       // become common and rejection rate rises, consider bumping to 10x.
       const rows = this.ctx.storage.sql
         .exec(
+          // ISO/datetime('now') format mismatch — see /classifieds list query above.
           `SELECT * FROM classifieds
-           WHERE expires_at > datetime('now')
+           WHERE expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              AND status = 'approved'
            ORDER BY RANDOM()
            LIMIT ?`,
@@ -4755,10 +4763,11 @@ export class NewsDO extends DurableObject<Env> {
       });
 
       // Classifieds (active approved only)
+      // ISO/datetime('now') format mismatch — see /classifieds list query above.
       const classifiedRows = this.ctx.storage.sql
         .exec(
           `SELECT * FROM classifieds
-           WHERE expires_at > datetime('now')
+           WHERE expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
              AND status = 'approved'
            ORDER BY created_at DESC
            LIMIT 50`
