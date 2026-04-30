@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "wrangler": "set -a && . ./.env && set +a && npx wrangler",
+    "build:frontend": "node scripts/build-frontend.mjs",
+    "predev": "npm run build:frontend",
+    "predeploy": "npm run build:frontend",
     "dev": "npm run wrangler -- dev",
     "deploy": "npm run wrangler -- deploy",
     "deploy:dry-run": "npm run wrangler -- deploy --dry-run",
@@ -22,6 +25,7 @@
     "@cloudflare/vitest-pool-workers": "^0.13.2",
     "@cloudflare/workers-types": "^4.20241205.0",
     "@types/node": "^25.3.3",
+    "esbuild": "^0.28.0",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0",
@@ -37,6 +41,9 @@
     "@noble/secp256k1": "^2.1.0",
     "@scure/base": "^2.0.0",
     "@scure/btc-signer": "^2.0.1",
+    "@stacks/blockchain-api-client": "^8.15.3",
+    "@stacks/connect": "^8.2.6",
+    "@stacks/transactions": "^7.4.0",
     "hono": "^4.12.12"
   }
 }
