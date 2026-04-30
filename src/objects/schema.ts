@@ -719,6 +719,17 @@ export const MIGRATION_SIGNAL_SCORING_SQL = [
  * audit trail reflects the migration's actual run time rather than the
  * author's wall clock at commit time.
  */
+/**
+ * MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL — replay protection across both
+ * payment paths. Partial UNIQUE index ignores rows where payment_txid IS NULL,
+ * so legacy rows that predate payment tracking are unaffected. Both the x402
+ * relay path and the new wallet path will hit this constraint, preventing the
+ * same on-chain transfer from minting two listings.
+ */
+export const MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL = [
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_classifieds_payment_txid_unique ON classifieds(payment_txid) WHERE payment_txid IS NOT NULL",
+] as const;
+
 export const MIGRATION_APR7_EARNINGS_SQL = [
   // Void earnings for the 14 re-curated signals NOT on-chain
   `UPDATE earnings SET voided_at = datetime('now')

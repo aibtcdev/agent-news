@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
@@ -522,7 +522,8 @@ export class NewsDO extends DurableObject<Env> {
     // 23 = Streak UTC migration (backfill last_signal_date from actual signal timestamps)
     // 24 = Signal quality auto-scoring — quality_score INTEGER, score_breakdown TEXT (#343)
     // 25 = Publisher payout reconciliation — Apr 7 amendment + clear 8 RBF payout_txid + Mar 31 over-cap void (#502)
-    const CURRENT_MIGRATION_VERSION = 25;
+    // 26 = Partial UNIQUE index on classifieds.payment_txid for replay protection across both placement paths
+    const CURRENT_MIGRATION_VERSION = 26;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -887,6 +888,23 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(stmt);
           } catch (e) {
             console.error("Apr 7 earnings amendment migration failed:", e);
+          }
+        }
+      }
+
+      // Replay protection: same on-chain payment_txid cannot back two listings.
+      // Partial UNIQUE so legacy NULL rows survive. If existing duplicates exist
+      // the CREATE will fail — log and continue so the rest of the cold start
+      // succeeds; operator can clean up by hand.
+      if (appliedVersion < 26) {
+        for (const stmt of MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error("Classifieds payment_txid unique-index migration failed:", e);
+            }
           }
         }
       }
@@ -3039,6 +3057,25 @@ export class NewsDO extends DurableObject<Env> {
         ok: true,
         data: rows as unknown as Classified[],
       } satisfies DOResult<Classified[]>);
+    });
+
+    // GET /classifieds/by-txid/:txid — look up a classified by payment_txid.
+    // Used by the wallet flow to recover from POST retries: same on-chain txid
+    // hits the partial UNIQUE index, and the caller fetches the existing row
+    // instead of double-creating. Registered before /classifieds/:id so the
+    // wildcard doesn't capture "by-txid".
+    this.router.get("/classifieds/by-txid/:txid", (c) => {
+      const txid = c.req.param("txid");
+      const rows = this.ctx.storage.sql
+        .exec("SELECT * FROM classifieds WHERE payment_txid = ?", txid)
+        .toArray();
+      if (rows.length === 0) {
+        return c.json(
+          { ok: false, error: `No classified found for txid "${txid}"` } satisfies DOResult<Classified>,
+          404
+        );
+      }
+      return c.json({ ok: true, data: rows[0] as unknown as Classified } satisfies DOResult<Classified>);
     });
 
     // GET /classifieds/:id — get a single classified
