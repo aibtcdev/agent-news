@@ -382,7 +382,7 @@ export interface CompiledBriefData {
  * Generic result type for Durable Object operations
  */
 /** HTTP error status codes returned by DO handlers */
-export type DOErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500;
+export type DOErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503;
 
 export interface ApprovalCapInfo {
   limit: number;

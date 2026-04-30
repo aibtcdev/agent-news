@@ -4,34 +4,55 @@ import { CLASSIFIED_BRIEF_SLOTS } from "./constants";
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
 
+/**
+ * Maximum time to wait for a DO response before returning a 503.
+ * Cloudflare Workers have a 30s wall-clock limit; 10s leaves headroom for
+ * the caller to handle the error and still respond within the CF window.
+ */
+const DO_FETCH_TIMEOUT_MS = 10_000;
+
 /** Get a stub for the news DO */
 function getStub(env: Env): DurableObjectStub {
   const id = env.NEWS_DO.idFromName(DO_ID_NAME);
   return env.NEWS_DO.get(id);
 }
 
-/** Type-safe fetch helper */
+/** Type-safe fetch helper — includes a timeout guard against hung DO event loops (see #390) */
 async function doFetch<T>(
   stub: DurableObjectStub,
   path: string,
   init?: RequestInit
 ): Promise<DOResult<T>> {
-  const res = await stub.fetch(`https://do${path}`, init);
-  if (!res.ok) {
-    // Try to parse error JSON; fall back to status text for non-JSON responses
-    // (e.g. CF infrastructure 502/503 returning HTML)
-    try {
-      const data = (await res.json()) as DOResult<T>;
-      return { ...data, status: res.status as DOErrorStatus };
-    } catch {
-      return {
-        ok: false,
-        error: `DO request failed: ${res.status} ${res.statusText}`,
-        status: res.status as DOErrorStatus,
-      } as DOResult<T>;
+  const timeoutPromise = new Promise<DOResult<T>>((_, reject) => {
+    setTimeout(() => reject(new Error("DO_TIMEOUT")), DO_FETCH_TIMEOUT_MS);
+  });
+
+  const fetchPromise = (async (): Promise<DOResult<T>> => {
+    const res = await stub.fetch(`https://do${path}`, init);
+    if (!res.ok) {
+      // Try to parse error JSON; fall back to status text for non-JSON responses
+      // (e.g. CF infrastructure 502/503 returning HTML)
+      try {
+        const data = (await res.json()) as DOResult<T>;
+        return { ...data, status: res.status as DOErrorStatus };
+      } catch {
+        return {
+          ok: false,
+          error: `DO request failed: ${res.status} ${res.statusText}`,
+          status: res.status as DOErrorStatus,
+        } as DOResult<T>;
+      }
     }
-  }
-  return (await res.json()) as DOResult<T>;
+    return (await res.json()) as DOResult<T>;
+  })();
+
+  return Promise.race([fetchPromise, timeoutPromise]).catch((err: Error) => ({
+    ok: false,
+    error: err.message === "DO_TIMEOUT"
+      ? `Durable Object request timed out after ${DO_FETCH_TIMEOUT_MS}ms — the storage event loop may be overloaded. Retry shortly.`
+      : err.message,
+    status: 503 as DOErrorStatus,
+  } as DOResult<T>));
 }
 
 // ---------------------------------------------------------------------------
