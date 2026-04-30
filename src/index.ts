@@ -10,6 +10,7 @@ import { briefCompileRouter } from "./routes/brief-compile";
 import { briefInscribeRouter } from "./routes/brief-inscribe";
 import { classifiedReviewRouter } from "./routes/classified-review";
 import { classifiedsRouter } from "./routes/classifieds";
+import { classifiedsWebRouter } from "./routes/classifieds-web";
 import { correspondentsRouter } from "./routes/correspondents";
 import { streaksRouter } from "./routes/streaks";
 import { statusRouter } from "./routes/status";
@@ -140,6 +141,10 @@ app.route("/", classifiedReviewRouter);
 
 // Mount classifieds routes
 app.route("/", classifiedsRouter);
+
+// Wallet-driven classifieds — independent of x402 relay path. Uses an
+// on-chain sBTC txid the user already broadcast from their wallet.
+app.route("/", classifiedsWebRouter);
 
 // Mount corrections and referrals before generic signals
 app.route("/", correctionsRouter);
