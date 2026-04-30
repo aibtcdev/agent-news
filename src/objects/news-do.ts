@@ -623,6 +623,18 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Agent name on signals — store display name at filing time (closes #369).
+      if (appliedVersion < 24) {
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_AGENT_NAME_SQL);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!msg.includes("duplicate column")) {
+            console.error("Agent name migration failed:", e);
+          }
+        }
+      }
+
       // Record current migration version so future cold starts skip all of the above.
       // If migration 22 failed but 23 succeeded, cap at 21 so v22 retries on next cold start.
       const versionToWrite = migration22Ok ? CURRENT_MIGRATION_VERSION : 21;
@@ -2040,7 +2052,7 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      const { beat_slug, btc_address, headline, body: signalBody, sources, tags } = body;
+      const { beat_slug, btc_address, headline, body: signalBody, sources, tags, agent_name } = body;
 
       // Validate beat exists and is not retired
       const beatRows = this.ctx.storage.sql
@@ -2175,9 +2187,13 @@ export class NewsDO extends DurableObject<Env> {
       // Insert signal, tags, and streak as individual statements.
       // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
       // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
+      const sanitizedAgentName = typeof agent_name === "string" && agent_name.length > 0
+        ? sanitizeString(agent_name, 120)
+        : null;
+
       this.ctx.storage.sql.exec(
-        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?)`,
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, agent_name)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?, ?)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -2186,7 +2202,8 @@ export class NewsDO extends DurableObject<Env> {
         sourcesJson,
         nowIso,
         nowIso,
-        disclosure
+        disclosure,
+        sanitizedAgentName
       );
 
       for (const t of signalTags) {
