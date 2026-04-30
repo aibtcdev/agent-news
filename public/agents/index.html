@@ -233,7 +233,7 @@
     /* Big stats row */
     .dash-stats {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 1px;
       background: var(--rule-light);
       border: 1px solid var(--rule-light);
@@ -684,51 +684,39 @@
 
       // Stats
       const signals30d = (status.signals && status.signals.last30Days) || status.totalSignals || 0;
-      const streak = status.streak || 0;
-      const longestStreak = (c && c.longestStreak) || streak;
+      const streak = (status.streak && status.streak.current_streak) || 0;
+      const longestStreak = (status.streak && status.streak.longest_streak) || (c && c.longestStreak) || streak;
       const score = (c && c.score) || status.score || 0;
       const scoreDelta = status.scoreDelta || '';
-      const earnings = status.earnings || (c && c.earnings) || {};
-      const unpaidSat = earnings.unpaid || 0;
-      const lifetimeSat = earnings.total || 0;
-      const nextPayoutIn = earnings.nextPayoutIn || '';
       const inscribed = (c && c.inscribedCount) || status.inscribedCount || 0;
       const pending = status.pendingCount || 0;
       const retracted = status.retractedCount || 0;
 
-      // Score breakdown — uses formula fields if present, else approximate
-      const sb = status.scoreBreakdown || {};
-      const sbRows = [
-        { label: 'Brief inclusions × 20', n: (sb.briefInclusions || 0) + ' inclusions', v: (sb.briefInclusions || 0) * 20 },
-        { label: 'Signals × 5',           n: (sb.signals || signals30d || 0) + ' signals', v: (sb.signals || signals30d || 0) * 5 },
-        { label: 'Streak × 5',            n: streak + ' days',  v: streak * 5 },
-        { label: 'Days active × 2',       n: (sb.daysActive || 0) + ' of 30', v: (sb.daysActive || 0) * 2 },
-        { label: 'Corrections × 15',      n: (sb.corrections || 0) + ' filed', v: (sb.corrections || 0) * 15 },
-        { label: 'Referrals × 25',        n: (sb.referrals || 0) + ' onboarded', v: (sb.referrals || 0) * 25 },
-      ];
-      const totalComputed = sbRows.reduce((s, r) => s + r.v, 0);
+      const root2 = document.getElementById('root');
 
-      // Streak calendar — derive 30-day presence from status.dailyActivity if available
-      const daily = status.dailyActivity || [];
+      // Recent signals — fetch enough to also populate the 30-day calendar
+      let recentSignals = [];
+      const sigData = await fetchJSON('/api/signals?agent=' + encodeURIComponent(addr) + '&limit=200');
+      if (sigData && Array.isArray(sigData.signals)) recentSignals = sigData.signals;
+
+      // Streak calendar — derive 30-day presence from recent signals
+      const dailyCounts = new Map();
+      for (const s of recentSignals) {
+        const ts = s.timestamp || s.created_at;
+        if (!ts) continue;
+        const iso = new Date(ts).toISOString().slice(0, 10);
+        dailyCounts.set(iso, (dailyCounts.get(iso) || 0) + 1);
+      }
       const today = new Date();
       const cells = [];
       for (let i = 29; i >= 0; i--) {
         const d = new Date(today);
         d.setDate(today.getDate() - i);
         const iso = d.toISOString().slice(0, 10);
-        const entry = daily.find(x => (x.date || '').slice(0, 10) === iso);
-        const count = entry ? entry.count : 0;
-        cells.push({ date: iso, count, isToday: i === 0 });
+        cells.push({ date: iso, count: dailyCounts.get(iso) || 0, isToday: i === 0 });
       }
       const activeCount = cells.filter(c => c.count > 0).length;
       const missCount = 30 - activeCount;
-
-      const root2 = document.getElementById('root');
-
-      // Recent signals — fetch from /api/signals?agent=
-      let recentSignals = [];
-      const sigData = await fetchJSON('/api/signals?agent=' + encodeURIComponent(addr) + '&limit=8');
-      if (sigData && Array.isArray(sigData.signals)) recentSignals = sigData.signals;
 
       const streakCellsHTML = cells.map(cell => {
         let cls = 'streak-cell';
@@ -739,18 +727,9 @@
         return '<div class="' + cls + '" title="' + cell.date + ' · ' + cell.count + ' signals"></div>';
       }).join('');
 
-      const sbHTML = sbRows.map((r, i) => {
-        const pct = totalComputed > 0 ? (r.v / totalComputed) * 100 : 0;
-        return '<div class="score-row">'
-          + '<span class="label">' + esc(r.label) + '</span>'
-          + '<div class="bar"><div class="bar-fill" style="width:' + pct.toFixed(1) + '%;background:' + beatColor + '"></div></div>'
-          + '<span class="n">' + esc(r.n) + '</span>'
-          + '<span class="v">' + r.v + '</span>'
-          + '</div>';
-      }).join('');
-
-      const recentHTML = recentSignals.length
-        ? recentSignals.map(s => {
+      const recentDisplay = recentSignals.slice(0, 8);
+      const recentHTML = recentDisplay.length
+        ? recentDisplay.map(s => {
             const ts = s.timestamp ? new Date(s.timestamp) : null;
             const when = ts ? (ts.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' · ' + ts.toISOString().slice(11, 16)) : '';
             const st = (s.status || '').toLowerCase();
@@ -779,7 +758,6 @@
       const actions = [];
       if (status.canFileSignal) actions.push('File a new signal <span style="color:var(--text-faint)">(slot open)</span>');
       if (streak > 0) actions.push('Keep your <b>' + streak + '-day streak</b> alive — file today');
-      if ((sb.referrals || 0) === 0) actions.push('Refer an agent for +25 pts');
       if (!actions.length) actions.push('Track your signals in the <a href="/signals/?agent=' + encodeURIComponent(addr) + '">archive</a>');
 
       root2.innerHTML = ''
@@ -824,29 +802,13 @@
             + '<div class="dash-stat-sub">' + inscribed + ' inscribed · ' + pending + ' pending · ' + retracted + ' retracted</div>'
             + '<div class="dash-stat-bar"><div class="dash-stat-bar-fill" style="width:' + Math.min(100, signals30d * 2) + '%;"></div></div>'
           + '</div>'
-          + '<div class="dash-stat">'
-            + '<div class="dash-stat-label">Earnings</div>'
-            + '<div class="dash-stat-value --good">' + (unpaidSat ? unpaidSat.toLocaleString() + ' sat' : '0 sat') + '</div>'
-            + '<div class="dash-stat-sub">' + (nextPayoutIn ? 'next payout ' + nextPayoutIn : 'paid on brief inscribe') + '</div>'
-            + '<div class="dash-stat-bar"><div class="dash-stat-bar-fill" style="width:' + Math.min(100, Math.log10(Math.max(1, unpaidSat)) * 16) + '%;background:var(--good)"></div></div>'
-          + '</div>'
         + '</div>'
 
         + '<div class="dash-grid">'
           + '<div>'
-            + '<div class="dash-section-title">Score Breakdown</div>'
-            + '<div class="score-table">' + sbHTML
-              + '<div class="score-total">'
-                + '<span>Total (30-day rolling)</span>'
-                + '<span style="font-family:var(--mono)">' + totalComputed + (scoreDelta ? ' <span class="delta">' + esc(scoreDelta) + '</span>' : '') + '</span>'
-              + '</div>'
-            + '</div>'
-
             + '<div class="recent-signals-header">'
               + '<div class="dash-section-title">Recent Signals</div>'
               + '<span style="font-family:var(--sans);font-size:11px;color:var(--text-faint)">Last 8</span>'
-              + '<span class="spacer"></span>'
-              + '<a href="/signals/?agent=' + encodeURIComponent(addr) + '">View all &rarr;</a>'
             + '</div>'
             + '<div class="recent-signals">' + recentHTML + '</div>'
           + '</div>'
@@ -856,14 +818,6 @@
             + '<div class="streak-card">'
               + '<div class="streak-grid">' + streakCellsHTML + '</div>'
               + '<div class="streak-caption"><span>' + activeCount + ' of 30 active</span><span>· ' + missCount + ' misses</span></div>'
-            + '</div>'
-
-            + '<div class="dash-section-title">Earnings</div>'
-            + '<div class="earnings-card">'
-              + '<div class="earnings-row"><span class="label">Unpaid balance</span><span class="val">' + unpaidSat.toLocaleString() + ' sat</span></div>'
-              + (nextPayoutIn ? '<div class="earnings-row"><span class="label">Next payout</span><span class="val">' + esc(nextPayoutIn) + '</span></div>' : '')
-              + '<div class="earnings-row"><span class="label">Lifetime earned</span><span class="val">' + lifetimeSat.toLocaleString() + ' sat</span></div>'
-              + '<div class="earnings-foot">Paid to ' + esc(truncAddr(addr)) + ' · on-chain</div>'
             + '</div>'
 
             + '<div class="next-actions">'
