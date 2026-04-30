@@ -683,21 +683,25 @@
       const avatar = (c && c.avatar) || 'https://bitcoinfaces.xyz/api/get-image?name=' + encodeURIComponent(addr);
 
       // Stats
-      const signals30d = (status.signals && status.signals.last30Days) || status.totalSignals || 0;
       const streak = (status.streak && status.streak.current_streak) || 0;
       const longestStreak = (status.streak && status.streak.longest_streak) || (c && c.longestStreak) || streak;
       const score = (c && c.score) || status.score || 0;
       const scoreDelta = status.scoreDelta || '';
-      const inscribed = (c && c.inscribedCount) || status.inscribedCount || 0;
-      const pending = status.pendingCount || 0;
-      const retracted = status.retractedCount || 0;
 
       const root2 = document.getElementById('root');
 
-      // Recent signals — fetch enough to also populate the 30-day calendar
-      let recentSignals = [];
-      const sigData = await fetchJSON('/api/signals?agent=' + encodeURIComponent(addr) + '&limit=200');
-      if (sigData && Array.isArray(sigData.signals)) recentSignals = sigData.signals;
+      // Fetch recent signals (for the calendar + Recent Signals list) and
+      // authoritative per-status counts in parallel.
+      const [sigData, countsRes] = await Promise.all([
+        fetchJSON('/api/signals?agent=' + encodeURIComponent(addr) + '&limit=200'),
+        fetchJSON('/api/signals/counts?agent=' + encodeURIComponent(addr)),
+      ]);
+      const recentSignals = (sigData && Array.isArray(sigData.signals)) ? sigData.signals : [];
+      const counts = (countsRes && countsRes.data) || {};
+      const totalSignals = counts.total ?? status.totalSignals ?? (c && c.signalCount) ?? 0;
+      const inscribed = counts.brief_included ?? 0;
+      const pending = counts.submitted ?? 0;
+      const retracted = (counts.rejected ?? 0) + (counts.replaced ?? 0);
 
       // Streak calendar — derive 30-day presence from recent signals
       const dailyCounts = new Map();
@@ -797,10 +801,10 @@
             + '<div class="dash-stat-bar"><div class="dash-stat-bar-fill" style="width:' + Math.min(100, streak * 3) + '%;background:var(--accent)"></div></div>'
           + '</div>'
           + '<div class="dash-stat">'
-            + '<div class="dash-stat-label">Signals · 30d</div>'
-            + '<div class="dash-stat-value">' + signals30d + '</div>'
+            + '<div class="dash-stat-label">Signals</div>'
+            + '<div class="dash-stat-value">' + totalSignals + '</div>'
             + '<div class="dash-stat-sub">' + inscribed + ' inscribed · ' + pending + ' pending · ' + retracted + ' retracted</div>'
-            + '<div class="dash-stat-bar"><div class="dash-stat-bar-fill" style="width:' + Math.min(100, signals30d * 2) + '%;"></div></div>'
+            + '<div class="dash-stat-bar"><div class="dash-stat-bar-fill" style="width:' + Math.min(100, totalSignals * 2) + '%;"></div></div>'
           + '</div>'
         + '</div>'
 
