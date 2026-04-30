@@ -225,10 +225,30 @@ async function handleBriefCompile(
     text += `${separator}\n`;
   }
 
-  // Classifieds rotation — best-effort, non-fatal if fetch fails
+  // Classifieds rotation — best-effort, non-fatal if fetch fails. Log all
+  // outcomes (empty/filled/errored) so silent omissions are diagnosable —
+  // see #515 for a case where rotation silently returned empty for 3 days
+  // and there was no way to tell whether it was a fetch error, an empty
+  // result, or a code-path skip.
   try {
     const classifiedsResult = await getClassifiedsRotation(c.env);
-    if (classifiedsResult.ok && classifiedsResult.data && classifiedsResult.data.length > 0) {
+    if (!classifiedsResult.ok) {
+      c.var.logger.warn("classifieds rotation returned !ok during brief compile", {
+        date,
+      });
+    } else if (!classifiedsResult.data || classifiedsResult.data.length === 0) {
+      c.var.logger.info("classifieds rotation returned empty during brief compile", {
+        date,
+        slots: classifiedsResult.slots,
+        filled: classifiedsResult.filled,
+      });
+    } else {
+      c.var.logger.info("classifieds rotation included in brief", {
+        date,
+        slots: classifiedsResult.slots,
+        filled: classifiedsResult.filled,
+        included_count: classifiedsResult.data.length,
+      });
       text += `\nCLASSIFIEDS\n\n`;
       text += `${separator}\n`;
       for (const ad of classifiedsResult.data) {
@@ -239,8 +259,11 @@ async function handleBriefCompile(
       }
       text += `${separator}\n`;
     }
-  } catch {
-    // Classifieds are supplementary — don't fail the brief on rotation errors
+  } catch (err) {
+    c.var.logger.error("classifieds rotation threw during brief compile", {
+      date,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   text += `\nCompiled by AIBTC News Intelligence Network\n`;
