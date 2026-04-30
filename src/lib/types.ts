@@ -420,6 +420,8 @@ export interface DOResult<T> {
   approval_cap?: ApprovalCapInfo;
   /** Present on paginated list responses — count of matching rows ignoring limit/offset */
   total?: number;
+  /** Present on bounded paginated list responses when one more page is known to exist */
+  hasMore?: boolean;
 }
 
 export type PaymentStageKind = "brief_access" | "classified_submission";
