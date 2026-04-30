@@ -2372,11 +2372,12 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      // 4-hour global cooldown per agent (separate from IP rate limiting)
+      // 4-hour global cooldown per agent — applies to ALL signals including corrections
+      // (Previously excluded correction_of, allowing unlimited rapid corrections)
       const lastSignalRows = this.ctx.storage.sql
         .exec(
           `SELECT created_at FROM signals
-           WHERE btc_address = ? AND correction_of IS NULL
+           WHERE btc_address = ?
            ORDER BY created_at DESC LIMIT 1`,
           btc_address as string
         )
@@ -2406,11 +2407,12 @@ export class NewsDO extends DurableObject<Env> {
       const yesterday = getUTCYesterday(now);
       const todayStart = getUTCDayStart(today);
 
-      // Daily signal cap per agent
+      // Daily signal cap per agent — counts ALL signals including corrections
+      // (Previously excluded correction_of, allowing unlimited daily corrections)
       const dailyCountRows = this.ctx.storage.sql
         .exec(
           `SELECT COUNT(*) as count FROM signals
-           WHERE btc_address = ? AND correction_of IS NULL AND created_at >= ?`,
+           WHERE btc_address = ? AND created_at >= ?`,
           btc_address as string,
           todayStart
         )
@@ -2586,6 +2588,71 @@ export class NewsDO extends DurableObject<Env> {
         return c.json(
           { ok: false, error: "Only the original author can correct this signal" } satisfies DOResult<Signal>,
           403
+        );
+      }
+
+      // ── Correction integrity checks (fixes #551) ──
+
+      // 1. Domain match: correction must share primary source domain with original
+      if (sources) {
+        try {
+          const originalSources = JSON.parse(original.sources as string) as { url?: string }[];
+          const origUrl = originalSources?.[0]?.url;
+          const newUrl = (sources as { url?: string }[])?.[0]?.url;
+          if (origUrl && newUrl) {
+            const origDomain = new URL(origUrl).hostname;
+            const newDomain = new URL(newUrl).hostname;
+            if (origDomain !== newDomain) {
+              return c.json(
+                {
+                  ok: false,
+                  error: `Correction source domain "${newDomain}" does not match original "${origDomain}". A correction must refine the same claim.`,
+                } satisfies DOResult<Signal>,
+                400
+              );
+            }
+          }
+        } catch {
+          // If URL parsing fails, let the existing source validation handle it downstream
+        }
+      }
+
+      // 2. Walk correction chain to root — detects loops AND resolves root for depth check
+      const ancestors: string[] = [];
+      const visited = new Set<string>([originalId]);
+      let cursor: string | null = original.correction_of as string | null;
+      while (cursor && ancestors.length < 10) {
+        if (visited.has(cursor)) {
+          return c.json(
+            { ok: false, error: "Circular correction chain detected" } satisfies DOResult<Signal>,
+            400
+          );
+        }
+        visited.add(cursor);
+        ancestors.push(cursor);
+        const rows = this.ctx.storage.sql
+          .exec("SELECT correction_of FROM signals WHERE id = ?", cursor)
+          .toArray();
+        if (rows.length === 0) break;
+        cursor = rows[0].correction_of as string | null;
+      }
+      const rootId = ancestors.length > 0 ? ancestors[ancestors.length - 1] : originalId;
+
+      // 3. Correction depth limit: max 2 direct corrections per root signal
+      const correctionCount = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as count FROM signals WHERE correction_of = ?`,
+          rootId
+        )
+        .toArray();
+      const depth = (correctionCount[0] as Record<string, unknown>).count as number;
+      if (depth >= 2) {
+        return c.json(
+          {
+            ok: false,
+            error: "Correction depth limit reached (max 2 per root). File a new signal instead.",
+          } satisfies DOResult<Signal>,
+          429
         );
       }
 
