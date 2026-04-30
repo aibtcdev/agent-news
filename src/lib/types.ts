@@ -111,6 +111,8 @@ export interface Env {
   MIGRATION_KEY?: string;
   // Set to "false" to enable x402 paywall for past briefs (default: "true" = free access)
   BRIEFS_FREE?: string;
+  // Set to "true" to require x402 payment for signal submission (default: "false" = grace period)
+  SIGNALS_REQUIRE_PAYMENT?: string;
 }
 
 /**

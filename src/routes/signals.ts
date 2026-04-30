@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { SIGNAL_RATE_LIMIT, SIGNAL_READ_RATE_LIMIT, SIGNAL_STATUSES } from "../lib/constants";
+import { SIGNAL_RATE_LIMIT, SIGNAL_READ_RATE_LIMIT, SIGNAL_STATUSES, SIGNAL_PRICE_SATS, CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import {
   validateBtcAddress,
   validateSlug,
@@ -17,9 +17,11 @@ import {
   correctSignal,
   getBeat,
   getActiveBeatSlugs,
+  getConfig,
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
+import { buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 import { toUTCDate, resolveNamesWithTimeout } from "../lib/helpers";
 import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
@@ -276,6 +278,66 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return c.json({ error: authResult.error, code: authResult.code }, 401);
   }
 
+  // Publisher bypass: skip payment if authenticated address is the publisher
+  const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  const isPublisher = publisherConfig?.value === btc_address;
+
+  // Payment gate (when enabled)
+  const requirePayment = c.env.SIGNALS_REQUIRE_PAYMENT === "true";
+
+  if (!isPublisher) {
+    if (requirePayment) {
+      const paymentHeader =
+        c.req.header("X-PAYMENT") ?? c.req.header("payment-signature");
+
+      if (!paymentHeader) {
+        const logger = c.get("logger");
+        logger.debug("402 payment required sent for POST /api/signals", {
+          btc_address,
+        });
+        return buildPaymentRequired({
+          amount: SIGNAL_PRICE_SATS,
+          description: `Signal submission — file a signal for ${SIGNAL_PRICE_SATS} sats sBTC`,
+        });
+      }
+
+      const verification = await verifyPayment(paymentHeader, SIGNAL_PRICE_SATS, c.env);
+      if (!verification.valid) {
+        const logger = c.get("logger");
+        const { body: errorBody, status, headers } = mapVerificationError(verification);
+
+        if (status === 409) {
+          logger.warn("nonce conflict during payment verification for POST /api/signals", {
+            btc_address, errorCode: verification.errorCode,
+          });
+        } else if (status === 503) {
+          logger.error("relay error during payment verification for POST /api/signals", {
+            btc_address,
+          });
+        } else {
+          logger.warn("payment verification failed for POST /api/signals", {
+            btc_address, relayReason: verification.relayReason,
+          });
+        }
+
+        if (status === 402 && verification.retryable !== false) {
+          return buildPaymentRequired({
+            amount: SIGNAL_PRICE_SATS,
+            description: `${errorBody.error} Please pay ${SIGNAL_PRICE_SATS} sats sBTC to file a signal.`,
+            code: errorBody.code,
+          });
+        }
+
+        if (headers) {
+          for (const [key, value] of Object.entries(headers)) {
+            c.header(key, value);
+          }
+        }
+        return c.json(errorBody, status);
+      }
+    }
+  }
+
   // Identity gate: require Genesis level (level >= 2) registration.
   // Fail-closed: if the identity API is unreachable, block with 503 rather than
   // allowing unverified agents through. This prevents bypass via API downtime.
@@ -338,11 +400,19 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     btc_address: btc_address as string,
   });
 
+  // Grace period warning: notify non-publisher agents that payment will be required
+  const disclosureValue = disclosure as string | undefined;
+  const warnings: string[] = [];
+  if (!isPublisher && !requirePayment) {
+    warnings.push(
+      "Signal submission will soon require a 100 sat sBTC x402 payment. " +
+      "Update your tooling to handle HTTP 402 responses on POST /api/signals."
+    );
+  }
+
   // Soft-launch disclosure enforcement: warn when disclosure is absent or empty,
   // including for non-AI signals, to encourage adoption across all correspondents.
   // Do NOT reject the signal — enforcement will be required in a future release.
-  const disclosureValue = disclosure as string | undefined;
-  const warnings: string[] = [];
   if (!disclosureValue || disclosureValue.trim() === "") {
     warnings.push(
       "disclosure is empty — you must declare the model and skill file used to produce this signal. " +

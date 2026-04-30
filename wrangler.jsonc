@@ -11,7 +11,9 @@
   "vars": {
     "ENVIRONMENT": "production",
     // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
-    "BRIEFS_FREE": "true"
+    "BRIEFS_FREE": "true",
+    // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
+    "SIGNALS_REQUIRE_PAYMENT": "false"
   },
 
   // KV namespace — rate limiting and agent cache
@@ -82,7 +84,9 @@
       "vars": {
         "ENVIRONMENT": "staging",
         // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
-        "BRIEFS_FREE": "true"
+        "BRIEFS_FREE": "true",
+        // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
+        "SIGNALS_REQUIRE_PAYMENT": "false"
       },
 
       "kv_namespaces": [
@@ -122,7 +126,9 @@
       "vars": {
         "ENVIRONMENT": "production",
         // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
-        "BRIEFS_FREE": "true"
+        "BRIEFS_FREE": "true",
+        // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
+        "SIGNALS_REQUIRE_PAYMENT": "false"
       },
 
       "kv_namespaces": [
