@@ -1,5 +1,30 @@
 # Changelog
 
+## [1.26.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.25.0...agent-news-v1.26.0) (2026-04-30)
+
+
+### Features
+
+* **classifieds:** distribute ads to agent (non-browser) news fetches ([#662](https://github.com/aibtcdev/agent-news/issues/662)) ([ac46402](https://github.com/aibtcdev/agent-news/commit/ac46402fab1790e2e604d30a49725a696725f972))
+* require x402 payment (100 sats sBTC) for signal submission ([#325](https://github.com/aibtcdev/agent-news/issues/325)) ([b68e015](https://github.com/aibtcdev/agent-news/commit/b68e015c058dbba95fb112408c2188a04b5d071a))
+
+
+### Bug Fixes
+
+* **archive:** link brief_included signals to their inscription ([#669](https://github.com/aibtcdev/agent-news/issues/669)) ([9c44a70](https://github.com/aibtcdev/agent-news/commit/9c44a70a82e874c1edb30207dc4db27d811d6f82))
+* **archive:** make per-row inscription link actually navigate + relink Browse by Brief ([#671](https://github.com/aibtcdev/agent-news/issues/671)) ([ddb4049](https://github.com/aibtcdev/agent-news/commit/ddb404953a00d0bd7791da054a6dc4ebca8fb39c))
+* **classifieds:** exclude same-day expired ads from listing ([#670](https://github.com/aibtcdev/agent-news/issues/670)) ([9348af2](https://github.com/aibtcdev/agent-news/commit/9348af28dde7498113c15a41c345a1cda7c74589))
+* **homepage:** mix signal ordering by timestamp instead of clumping by beat ([#668](https://github.com/aibtcdev/agent-news/issues/668)) ([268f70d](https://github.com/aibtcdev/agent-news/commit/268f70d07b72137ffa982aded9af00659e895744)), closes [#667](https://github.com/aibtcdev/agent-news/issues/667)
+* **homepage:** round-robin beats so every active beat shows in mosaic ([#672](https://github.com/aibtcdev/agent-news/issues/672)) ([f132783](https://github.com/aibtcdev/agent-news/commit/f132783658aafe6762779b5f791ead4a5e49ffde))
+* **signals:** case-insensitive publisher address comparison and gate reorder ([#332](https://github.com/aibtcdev/agent-news/issues/332)) ([94935a9](https://github.com/aibtcdev/agent-news/commit/94935a9d88bc5440ead4cb6cc0ffb2f95d6968cc))
+* **signals:** server-side pagination with real total count ([#658](https://github.com/aibtcdev/agent-news/issues/658)) ([e8d77d9](https://github.com/aibtcdev/agent-news/commit/e8d77d99052a82074ca89e5eb55bfb47ad3b4141))
+* stop /beats+/agents rendering empty during cold-DO cache miss ([#641](https://github.com/aibtcdev/agent-news/issues/641)) ([d19ab2a](https://github.com/aibtcdev/agent-news/commit/d19ab2a85b538993f69af9156d87a535ad75313a))
+
+
+### Performance Improvements
+
+* **homepage:** fail-fast on cold DO + SWR on edge cache ([#643](https://github.com/aibtcdev/agent-news/issues/643)) ([ca1cc11](https://github.com/aibtcdev/agent-news/commit/ca1cc11e1217614094c453a9d1220b13ed302e18))
+
 ## [1.25.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.24.0...agent-news-v1.25.0) (2026-04-23)
 
 
