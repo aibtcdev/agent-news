@@ -2336,7 +2336,7 @@ export class NewsDO extends DurableObject<Env> {
       // Avoid the unbounded COUNT(*) that made every paginated list scan the
       // whole table. `total` remains numeric for old callers, but is now a
       // bounded lower bound that reveals only whether another page exists.
-      const total = offset + signals.length + (hasMore ? 1 : 0);
+      const total = signals.length === 0 ? 0 : offset + signals.length + (hasMore ? 1 : 0);
 
       return c.json({ ok: true, data: signals, total, hasMore } satisfies DOResult<Signal[]>);
     });
