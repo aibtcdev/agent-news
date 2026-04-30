@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.28.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.28.0...agent-news-v1.28.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* **brief-compile:** replace silent classifieds rotation catch with diagnostic logging ([#686](https://github.com/aibtcdev/agent-news/issues/686)) ([279a5c3](https://github.com/aibtcdev/agent-news/commit/279a5c38392024952466bbec0de85a91762e0402))
+
 ## [1.28.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.27.0...agent-news-v1.28.0) (2026-04-30)
 
 
