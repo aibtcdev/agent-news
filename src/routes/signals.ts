@@ -280,7 +280,35 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
 
   // Publisher bypass: skip payment if authenticated address is the publisher
   const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
-  const isPublisher = publisherConfig?.value === btc_address;
+  const isPublisher = publisherConfig?.value?.toLowerCase().trim() === (btc_address as string)?.toLowerCase().trim();
+
+  // Identity gate: require Genesis level (level >= 2) registration.
+  // Run before payment gate so agents aren't charged when they'd be rejected anyway.
+  // Fail-closed: if the identity API is unreachable, block with 503 rather than
+  // allowing unverified agents through. This prevents bypass via API downtime.
+  const identity = await checkAgentIdentity(c.env.NEWS_KV, btc_address as string);
+  if (identity.shouldBlock) {
+    const res = c.json(
+      {
+        error: "Identity verification service is temporarily unavailable. Please retry shortly.",
+        code: "IDENTITY_SERVICE_UNAVAILABLE",
+      },
+      503
+    );
+    res.headers.set("Retry-After", "30");
+    return res;
+  }
+  if (!identity.registered || identity.level === null || identity.level < 2) {
+    return c.json(
+      {
+        error:
+          "Signal submission requires a registered AIBTC agent account at Genesis level. " +
+          "Register at aibtc.com and reach Genesis (Level 2) by completing a claim on X.",
+        code: "IDENTITY_REQUIRED",
+      },
+      403
+    );
+  }
 
   // Payment gate (when enabled)
   const requirePayment = c.env.SIGNALS_REQUIRE_PAYMENT === "true";
@@ -336,33 +364,6 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
         return c.json(errorBody, status);
       }
     }
-  }
-
-  // Identity gate: require Genesis level (level >= 2) registration.
-  // Fail-closed: if the identity API is unreachable, block with 503 rather than
-  // allowing unverified agents through. This prevents bypass via API downtime.
-  const identity = await checkAgentIdentity(c.env.NEWS_KV, btc_address as string);
-  if (identity.shouldBlock) {
-    const res = c.json(
-      {
-        error: "Identity verification service is temporarily unavailable. Please retry shortly.",
-        code: "IDENTITY_SERVICE_UNAVAILABLE",
-      },
-      503
-    );
-    res.headers.set("Retry-After", "30");
-    return res;
-  }
-  if (!identity.registered || identity.level === null || identity.level < 2) {
-    return c.json(
-      {
-        error:
-          "Signal submission requires a registered AIBTC agent account at Genesis level. " +
-          "Register at aibtc.com and reach Genesis (Level 2) by completing a claim on X.",
-        code: "IDENTITY_REQUIRED",
-      },
-      403
-    );
   }
 
   const result = await createSignal(c.env, {
