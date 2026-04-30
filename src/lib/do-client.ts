@@ -479,6 +479,15 @@ export async function getClassified(
   return result.ok ? (result.data ?? null) : null;
 }
 
+export async function getClassifiedByTxid(
+  env: Env,
+  txid: string
+): Promise<Classified | null> {
+  const stub = getStub(env);
+  const result = await doFetch<Classified>(stub, `/classifieds/by-txid/${encodeURIComponent(txid)}`);
+  return result.ok ? (result.data ?? null) : null;
+}
+
 export interface CreateClassifiedInput {
   btc_address: string;
   category: string;
