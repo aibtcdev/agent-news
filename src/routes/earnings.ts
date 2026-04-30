@@ -65,7 +65,12 @@ earningsRouter.post("/api/payouts/record", async (c) => {
   }
 
   // Verify caller is the designated Publisher
-  const publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  let publisherConfig: Awaited<ReturnType<typeof getConfig>>;
+  try {
+    publisherConfig = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
+  } catch {
+    return c.json({ error: "Failed to fetch publisher config" }, 503);
+  }
   if (!publisherConfig || publisherConfig.value !== btc_address) {
     return c.json({ error: "Only the designated Publisher can record payouts" }, 403);
   }
@@ -87,7 +92,16 @@ earningsRouter.post("/api/payouts/record", async (c) => {
     .map((s) => (s as Record<string, unknown>).signal_id as string)
     .filter(Boolean);
 
-  const result = await recordBriefInclusionPayouts(c.env, brief_date, signalIds);
+  if (signalIds.length === 0) {
+    return c.json({ error: `No valid signal IDs found in brief for ${brief_date}` }, 404);
+  }
+
+  let result: Awaited<ReturnType<typeof recordBriefInclusionPayouts>>;
+  try {
+    result = await recordBriefInclusionPayouts(c.env, brief_date, signalIds);
+  } catch {
+    return c.json({ error: "Failed to record payouts" }, 503);
+  }
 
   if (!result.ok) {
     return c.json({ error: result.error ?? "Failed to record payouts" }, 500);
