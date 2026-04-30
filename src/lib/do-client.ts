@@ -183,14 +183,14 @@ export async function listSignals(
 }
 
 /**
- * Same query as `listSignals` but also returns the total count of matching
- * rows (ignoring limit/offset) so the caller can paginate. Used by the
- * public /api/signals route — clients render "Page X of N" off the total.
+ * Same query as `listSignals` but also returns bounded pagination metadata.
+ * `total` is now a lower bound that preserves the legacy numeric field without
+ * forcing NewsDO to run an unbounded COUNT(*) on every list request.
  */
 export async function listSignalsPage(
   env: Env,
   filters: SignalFilters = {}
-): Promise<{ signals: Signal[]; total: number }> {
+): Promise<{ signals: Signal[]; total: number; hasMore: boolean }> {
   const stub = getStub(env);
   const params = new URLSearchParams();
   if (filters.beat) params.set("beat", filters.beat);
@@ -205,7 +205,11 @@ export async function listSignalsPage(
   const result = await doFetch<Signal[]>(stub, `/signals${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list signals");
   if (result.data === undefined) throw new Error("Missing data in response");
-  return { signals: result.data, total: result.total ?? result.data.length };
+  return {
+    signals: result.data,
+    total: result.total ?? result.data.length,
+    hasMore: result.hasMore ?? false,
+  };
 }
 
 /** All data needed for the initial page load, fetched in a single DO call. */

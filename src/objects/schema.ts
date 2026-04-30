@@ -126,9 +126,14 @@ CREATE TABLE IF NOT EXISTS payment_staging (
 );
 
 CREATE INDEX IF NOT EXISTS idx_signal_tags_tag          ON signal_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_signal_tags_tag_signal   ON signal_tags(tag, signal_id);
 CREATE INDEX IF NOT EXISTS idx_signals_beat_slug        ON signals(beat_slug);
+CREATE INDEX IF NOT EXISTS idx_signals_beat_created     ON signals(beat_slug, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
+CREATE INDEX IF NOT EXISTS idx_signals_btc_created      ON signals(btc_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at       ON signals(created_at);
+CREATE INDEX IF NOT EXISTS idx_signals_status_created   ON signals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed_created ON signals(status, reviewed_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_of    ON signals(correction_of);
 CREATE INDEX IF NOT EXISTS idx_earnings_btc_address     ON earnings(btc_address);
 CREATE INDEX IF NOT EXISTS idx_classifieds_btc_address  ON classifieds(btc_address);
@@ -728,6 +733,21 @@ export const MIGRATION_SIGNAL_SCORING_SQL = [
  */
 export const MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL = [
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_classifieds_payment_txid_unique ON classifieds(payment_txid) WHERE payment_txid IS NOT NULL",
+] as const;
+
+/**
+ * MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL — Cloudflare bill-reduction indexes.
+ *
+ * Supports the April 2026 cost fix for /signals, /signals/counts, and /init:
+ * dynamic WHERE clauses, no unbounded list COUNT(*), deferred tag loading, and
+ * per-status count queries that avoid OR/COALESCE full scans.
+ */
+export const MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL = [
+  "CREATE INDEX IF NOT EXISTS idx_signal_tags_tag_signal ON signal_tags(tag, signal_id)",
+  "CREATE INDEX IF NOT EXISTS idx_signals_status_created ON signals(status, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed_created ON signals(status, reviewed_at DESC, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_signals_beat_created ON signals(beat_slug, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_signals_btc_created ON signals(btc_address, created_at DESC)",
 ] as const;
 
 export const MIGRATION_APR7_EARNINGS_SQL = [

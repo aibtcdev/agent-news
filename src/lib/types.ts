@@ -418,8 +418,14 @@ export interface DOResult<T> {
   status?: DOErrorStatus;
   /** Present on approval responses — current daily cap status */
   approval_cap?: ApprovalCapInfo;
-  /** Present on paginated list responses — count of matching rows ignoring limit/offset */
+  /**
+   * Present on paginated list responses. Some hot paths return a bounded
+   * lower-bound count instead of an exact count; check hasMore for next-page
+   * availability before treating this as authoritative.
+   */
   total?: number;
+  /** Present on bounded paginated list responses when one more page is known to exist */
+  hasMore?: boolean;
 }
 
 export type PaymentStageKind = "brief_access" | "classified_submission";

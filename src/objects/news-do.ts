@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
@@ -55,6 +55,187 @@ interface RawSignalRow {
 interface RawCompiledSignalRow extends CompiledSignalRow {
   reviewed_at: string | null;
   position?: number | null;
+}
+
+type SqlParam = string | number | null;
+
+const REVIEWED_SIGNAL_STATUSES = ["approved", "brief_included", "rejected", "replaced"] as const;
+const COUNTED_SIGNAL_STATUSES = ["submitted", ...REVIEWED_SIGNAL_STATUSES] as const;
+
+interface SignalListFilters {
+  beat: string | null;
+  agent: string | null;
+  since: string | null;
+  tag: string | null;
+  status: string | null;
+  dateStart: string | null;
+  dateEnd: string | null;
+}
+
+interface SignalCountFilters {
+  beat: string | null;
+  agent: string | null;
+  since: string | null;
+}
+
+function appendSignalScopeFilters(
+  clauses: string[],
+  params: SqlParam[],
+  filters: Pick<SignalListFilters, "beat" | "agent">,
+  alias = "s"
+) {
+  const prefix = alias ? `${alias}.` : "";
+  if (filters.beat) {
+    clauses.push(`${prefix}beat_slug = ?`);
+    params.push(filters.beat);
+  }
+  if (filters.agent) {
+    clauses.push(`${prefix}btc_address = ?`);
+    params.push(filters.agent);
+  }
+}
+
+function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; params: SqlParam[] } {
+  const clauses: string[] = [];
+  const params: SqlParam[] = [];
+  appendSignalScopeFilters(clauses, params, filters);
+  if (filters.since) {
+    clauses.push("s.created_at > ?");
+    params.push(filters.since);
+  }
+  if (filters.tag) {
+    clauses.push("s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?)");
+    params.push(filters.tag);
+  }
+  if (filters.status) {
+    clauses.push("s.status = ?");
+    params.push(filters.status);
+  }
+  if (filters.dateStart) {
+    clauses.push("s.created_at >= ?");
+    params.push(filters.dateStart);
+  }
+  if (filters.dateEnd) {
+    clauses.push("s.created_at < ?");
+    params.push(filters.dateEnd);
+  }
+  return { whereSql: clauses.length ? clauses.join(" AND ") : "1 = 1", params };
+}
+
+function fetchSignalTags(
+  sql: DurableObjectState["storage"]["sql"],
+  signalIds: string[]
+): Map<string, string[]> {
+  const tagsBySignal = new Map<string, string[]>();
+  if (signalIds.length === 0) return tagsBySignal;
+
+  const placeholders = signalIds.map(() => "?").join(", ");
+  const rows = sql
+    .exec(
+      `SELECT signal_id, tag
+       FROM signal_tags
+       WHERE signal_id IN (${placeholders})
+       ORDER BY signal_id, tag`,
+      ...signalIds
+    )
+    .toArray();
+
+  for (const row of rows) {
+    const r = row as { signal_id: string; tag: string };
+    const tags = tagsBySignal.get(r.signal_id) ?? [];
+    tags.push(r.tag);
+    tagsBySignal.set(r.signal_id, tags);
+  }
+  return tagsBySignal;
+}
+
+function rowsToSignalsWithTags(
+  sql: DurableObjectState["storage"]["sql"],
+  rows: Record<string, unknown>[]
+): Signal[] {
+  const ids = rows.map((row) => row.id as string).filter(Boolean);
+  const tagsBySignal = fetchSignalTags(sql, ids);
+  return rows.map((row) =>
+    rowToSignal({
+      ...row,
+      tags_csv: tagsBySignal.get(row.id as string)?.join(",") ?? null,
+    })
+  );
+}
+
+function querySignalCountRows(
+  sql: DurableObjectState["storage"]["sql"],
+  filters: SignalCountFilters
+): Array<{ status: string; count: number }> {
+  const rows: Array<{ status: string; count: number }> = [];
+  const countWhere = (clauses: string[], params: SqlParam[]) => {
+    const countRows = sql
+      .exec(`SELECT COUNT(*) as count FROM signals s WHERE ${clauses.join(" AND ")}`, ...params)
+      .toArray();
+    return Number((countRows[0] as { count: number } | undefined)?.count) || 0;
+  };
+
+  for (const status of COUNTED_SIGNAL_STATUSES) {
+    const reviewedStatus = (REVIEWED_SIGNAL_STATUSES as readonly string[]).includes(status);
+    const baseClauses = ["s.status = ?"];
+    const baseParams: SqlParam[] = [status];
+    appendSignalScopeFilters(baseClauses, baseParams, filters);
+
+    if (!filters.since) {
+      rows.push({ status, count: countWhere(baseClauses, baseParams) });
+      continue;
+    }
+
+    if (reviewedStatus) {
+      const reviewedClauses = [...baseClauses, "s.reviewed_at >= ?"];
+      const fallbackClauses = [...baseClauses, "s.reviewed_at IS NULL", "s.created_at >= ?"];
+      rows.push({
+        status,
+        count:
+          countWhere(reviewedClauses, [...baseParams, filters.since]) +
+          countWhere(fallbackClauses, [...baseParams, filters.since]),
+      });
+    } else {
+      const createdClauses = [...baseClauses, "s.created_at >= ?"];
+      rows.push({ status, count: countWhere(createdClauses, [...baseParams, filters.since]) });
+    }
+  }
+
+  return rows;
+}
+
+function queryBeatStatusCountRowsSince(
+  sql: DurableObjectState["storage"]["sql"],
+  since: string
+): Array<{ beat_slug: string; status: string; count: number }> {
+  const rows: Array<{ beat_slug: string; status: string; count: number }> = [];
+  const appendGroupedRows = (status: string, whereSql: string, ...params: SqlParam[]) => {
+    const queryRows = sql
+      .exec(
+        `SELECT beat_slug, COUNT(*) as count
+         FROM signals
+         WHERE ${whereSql}
+         GROUP BY beat_slug`,
+        ...params
+      )
+      .toArray();
+    for (const row of queryRows) {
+      const r = row as { beat_slug: string; count: number };
+      rows.push({ beat_slug: r.beat_slug, status, count: Number(r.count) || 0 });
+    }
+  };
+
+  for (const status of COUNTED_SIGNAL_STATUSES) {
+    const reviewedStatus = (REVIEWED_SIGNAL_STATUSES as readonly string[]).includes(status);
+    if (reviewedStatus) {
+      appendGroupedRows(status, "status = ? AND reviewed_at >= ?", status, since);
+      appendGroupedRows(status, "status = ? AND reviewed_at IS NULL AND created_at >= ?", status, since);
+    } else {
+      appendGroupedRows(status, "status = ? AND created_at >= ?", status, since);
+    }
+  }
+
+  return rows;
 }
 
 /**
@@ -523,7 +704,8 @@ export class NewsDO extends DurableObject<Env> {
     // 24 = Signal quality auto-scoring — quality_score INTEGER, score_breakdown TEXT (#343)
     // 25 = Publisher payout reconciliation — Apr 7 amendment + clear 8 RBF payout_txid + Mar 31 over-cap void (#502)
     // 26 = Partial UNIQUE index on classifieds.payment_txid for replay protection across both placement paths
-    const CURRENT_MIGRATION_VERSION = 26;
+    // 27 = Signal hot-path composite indexes for Cloudflare bill reduction
+    const CURRENT_MIGRATION_VERSION = 27;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -904,6 +1086,21 @@ export class NewsDO extends DurableObject<Env> {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes("already exists")) {
               console.error("Classifieds payment_txid unique-index migration failed:", e);
+            }
+          }
+        }
+      }
+
+      // Hot listing/count indexes — supports /signals, /signals/counts, and
+      // /init query rewrites that avoid OR/COALESCE full scans.
+      if (appliedVersion < 27) {
+        for (const stmt of MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error("Signal hot-path index migration failed:", e);
             }
           }
         }
@@ -2106,63 +2303,42 @@ export class NewsDO extends DurableObject<Env> {
         dateEnd = getUTCDayEnd(dateParam);
       }
 
+      const { whereSql, params } = buildSignalListWhere({
+        beat,
+        agent,
+        since: dateParam ? null : since,
+        tag,
+        status,
+        dateStart,
+        dateEnd,
+      });
+      const pageLimit = limit + 1;
+
       const rows = this.ctx.storage.sql
         .exec(
-          `SELECT s.*, b.name as beat_name, GROUP_CONCAT(st.tag) as tags_csv
+          `SELECT s.*, b.name as beat_name, NULL as tags_csv
            FROM signals s
            LEFT JOIN beats b ON s.beat_slug = b.slug
-           LEFT JOIN signal_tags st ON s.id = st.signal_id
-           WHERE (?1 IS NULL OR s.beat_slug = ?1)
-             AND (?2 IS NULL OR s.btc_address = ?2)
-             AND (?3 IS NULL OR s.created_at > ?3)
-             AND (?4 IS NULL OR s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?4))
-             AND (?5 IS NULL OR s.status = ?5)
-             AND (?7 IS NULL OR s.created_at >= ?7)
-             AND (?8 IS NULL OR s.created_at < ?8)
-           GROUP BY s.id
+           WHERE ${whereSql}
            ORDER BY s.created_at DESC
-           LIMIT ?6
-           OFFSET ?9`,
-          beat,
-          agent,
-          dateParam ? null : since,
-          tag,
-          status,
-          limit,
-          dateStart,
-          dateEnd,
+           LIMIT ?
+           OFFSET ?`,
+          ...params,
+          pageLimit,
           offset
         )
-        .toArray();
+        .toArray() as Record<string, unknown>[];
 
-      const signals = rows.map((r) => rowToSignal(r as Record<string, unknown>));
+      const hasMore = rows.length > limit;
+      const pageRows = hasMore ? rows.slice(0, limit) : rows;
+      const signals = rowsToSignalsWithTags(this.ctx.storage.sql, pageRows);
 
-      // Total count of all matching rows (for pagination on the client).
-      // The data query slices to LIMIT/OFFSET so its row count alone can't
-      // tell the UI how many pages exist.
-      const totalRows = this.ctx.storage.sql
-        .exec(
-          `SELECT COUNT(*) as total
-           FROM signals s
-           WHERE (?1 IS NULL OR s.beat_slug = ?1)
-             AND (?2 IS NULL OR s.btc_address = ?2)
-             AND (?3 IS NULL OR s.created_at > ?3)
-             AND (?4 IS NULL OR s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?4))
-             AND (?5 IS NULL OR s.status = ?5)
-             AND (?6 IS NULL OR s.created_at >= ?6)
-             AND (?7 IS NULL OR s.created_at < ?7)`,
-          beat,
-          agent,
-          dateParam ? null : since,
-          tag,
-          status,
-          dateStart,
-          dateEnd
-        )
-        .toArray();
-      const total = (totalRows[0] as { total: number } | undefined)?.total ?? signals.length;
+      // Avoid the unbounded COUNT(*) that made every paginated list scan the
+      // whole table. `total` remains numeric for old callers, but is now a
+      // bounded lower bound that reveals only whether another page exists.
+      const total = signals.length === 0 ? 0 : offset + signals.length + (hasMore ? 1 : 0);
 
-      return c.json({ ok: true, data: signals, total } satisfies DOResult<Signal[]>);
+      return c.json({ ok: true, data: signals, total, hasMore } satisfies DOResult<Signal[]>);
     });
 
     // GET /signals/front-page — curated signals (approved + brief_included)
@@ -2266,40 +2442,7 @@ export class NewsDO extends DurableObject<Env> {
       const sinceRaw = c.req.query("since") ?? null;
       const since = sinceRaw && sinceRaw.trim() !== "" ? sinceRaw : null;
 
-      const rows = this.ctx.storage.sql
-        .exec(
-          `SELECT status, COUNT(*) as count
-           FROM signals
-           WHERE (?1 IS NULL OR beat_slug = ?1)
-             AND (?2 IS NULL OR btc_address = ?2)
-             AND (
-               ?3 IS NULL
-               OR (
-                 status = 'submitted' AND created_at >= ?3
-               )
-               OR (
-                 status IN ('approved', 'brief_included', 'rejected', 'replaced')
-                 AND COALESCE(reviewed_at, created_at) >= ?3
-               )
-               OR (
-                 -- Defensive fall-through for any future status added to
-                 -- SIGNAL_STATUSES. TypeScript's as-const enum forces call
-                 -- sites to update, but the SQL string can silently miss a
-                 -- new value and drop rows from the windowed count. Default
-                 -- to created_at-based bucketing (same as 'submitted') so a
-                 -- new status degrades gracefully instead of disappearing.
-                 -- Per review feedback on #522.
-                 status NOT IN (
-                   'submitted', 'approved', 'brief_included', 'rejected', 'replaced'
-                 ) AND created_at >= ?3
-               )
-             )
-           GROUP BY status`,
-          beat,
-          agent,
-          since
-        )
-        .toArray();
+      const rows = querySignalCountRows(this.ctx.storage.sql, { beat, agent, since });
 
       const counts: Record<string, number> = {
         submitted: 0,
@@ -2311,7 +2454,7 @@ export class NewsDO extends DurableObject<Env> {
       for (const row of rows) {
         const r = row as { status: string; count: number };
         if (r.status in counts) {
-          counts[r.status] = r.count;
+          counts[r.status] += Number(r.count) || 0;
         }
       }
       const total = Object.values(counts).reduce((a, b) => a + b, 0);
@@ -4910,69 +5053,26 @@ export class NewsDO extends DurableObject<Env> {
       // scrolls.
       const signals = queryFrontPageSignals(this.ctx.storage.sql);
 
-      // Homepage beat-rail counts — replaces 3 × /api/signals/counts?beat=X
-      // fan-out + the ticker's /api/signals/counts?since=1h call. Uses the
-      // same windowing rule as /signals/counts (submitted → by created_at,
-      // terminal statuses → by reviewed_at ?? created_at) so numbers match.
-      //
-      // IMPORTANT: the three-branch WHERE clause below is duplicated in
-      // the `signalsCount1h` query that follows AND mirrors the logic in
-      // the /signals/counts handler (~line 2220 in this file). Any change
-      // to status bucketing (e.g. a new SignalStatus value) must update
-      // all three sites together — the fall-through `NOT IN (...)` branch
-      // is a safety net for new statuses but won't catch a semantic
-      // re-grouping (e.g. moving `replaced` from terminal to creation-time
-      // bucketing). A CTE could unify these in a future refactor.
+      // Homepage beat-rail counts — same bucketing as /signals/counts, but
+      // expressed as per-status UNION queries so SQLite can use composite
+      // status/date indexes instead of scanning the full signals table.
       const todayUtcMidnight = `${getUTCDate(new Date(now))}T00:00:00.000Z`;
       const oneHourAgo = new Date(now - 3600 * 1000).toISOString();
 
-      const beatStatsRows = this.ctx.storage.sql
-        .exec(
-          `SELECT beat_slug, status, COUNT(*) as count
-           FROM signals
-           WHERE (
-             (status = 'submitted' AND created_at >= ?1)
-             OR (
-               status IN ('approved', 'brief_included', 'rejected', 'replaced')
-               AND COALESCE(reviewed_at, created_at) >= ?1
-             )
-             OR (
-               status NOT IN ('submitted', 'approved', 'brief_included', 'rejected', 'replaced')
-               AND created_at >= ?1
-             )
-           )
-           GROUP BY beat_slug, status`,
-          todayUtcMidnight
-        )
-        .toArray();
+      const beatStatsRows = queryBeatStatusCountRowsSince(this.ctx.storage.sql, todayUtcMidnight);
 
       const beatStats: Record<string, Record<string, number>> = {};
       for (const row of beatStatsRows) {
         const r = row as { beat_slug: string; status: string; count: number };
         if (!beatStats[r.beat_slug]) beatStats[r.beat_slug] = {};
-        beatStats[r.beat_slug][r.status] = Number(r.count) || 0;
+        beatStats[r.beat_slug][r.status] = (beatStats[r.beat_slug][r.status] ?? 0) + (Number(r.count) || 0);
       }
 
-      const hourlyCountRows = this.ctx.storage.sql
-        .exec(
-          `SELECT COUNT(*) as count
-           FROM signals
-           WHERE (
-             (status = 'submitted' AND created_at >= ?1)
-             OR (
-               status IN ('approved', 'brief_included', 'rejected', 'replaced')
-               AND COALESCE(reviewed_at, created_at) >= ?1
-             )
-             OR (
-               status NOT IN ('submitted', 'approved', 'brief_included', 'rejected', 'replaced')
-               AND created_at >= ?1
-             )
-           )`,
-          oneHourAgo
-        )
-        .toArray();
-      const signalsCount1h =
-        Number((hourlyCountRows[0] as { count: number } | undefined)?.count) || 0;
+      const signalsCount1h = querySignalCountRows(this.ctx.storage.sql, {
+        beat: null,
+        agent: null,
+        since: oneHourAgo,
+      }).reduce((total, row) => total + row.count, 0);
 
       return c.json({
         ok: true,
