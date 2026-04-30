@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.27.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.26.0...agent-news-v1.27.0) (2026-04-30)
+
+
+### Features
+
+* **earnings:** add POST /api/payouts/record idempotent payout endpoint ([#676](https://github.com/aibtcdev/agent-news/issues/676)) ([99e6647](https://github.com/aibtcdev/agent-news/commit/99e664732c8930dc65b5fd1fcb96ff83706297e0))
+
+
+### Bug Fixes
+
+* enforce cooldown and domain match on correction_of submissions ([#552](https://github.com/aibtcdev/agent-news/issues/552)) ([64c8815](https://github.com/aibtcdev/agent-news/commit/64c88151b1a92ffd283e3a240d51b2be241f3678))
+
 ## [1.26.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.25.0...agent-news-v1.26.0) (2026-04-30)
 
 
