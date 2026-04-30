@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.28.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.27.0...agent-news-v1.28.0) (2026-04-30)
+
+
+### Features
+
+* **classifieds:** wallet-driven placement via direct sBTC transfer ([#682](https://github.com/aibtcdev/agent-news/issues/682)) ([22849bc](https://github.com/aibtcdev/agent-news/commit/22849bcf48321af39b98dfcb7b8f449b87a9e6d6))
+* **corrections:** add route-level validation for editorial review fields ([#434](https://github.com/aibtcdev/agent-news/issues/434)) ([b145fbe](https://github.com/aibtcdev/agent-news/commit/b145fbe062ac300cf75de5e04de984b143fd6ac8))
+
 ## [1.27.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.26.0...agent-news-v1.27.0) (2026-04-30)
 
 
