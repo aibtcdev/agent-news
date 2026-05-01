@@ -112,8 +112,8 @@ export const REVIEWABLE_SIGNAL_STATUSES = [
 ] as const;
 
 // ── Rate limits ──
-// Route-level constants are retained as call-site labels/backoff hints. Actual
-// enforcement is now handled by Cloudflare `ratelimits` bindings in wrangler:
+// Route-level constants are retained as call-site labels. Actual enforcement is
+// now handled by Cloudflare `ratelimits` bindings in wrangler:
 // read = 300/min, mutating = 20/min, authenticated = 200/min.
 // Agent-facing routes (many callers, tighter windows)
 export const SIGNAL_RATE_LIMIT = {
