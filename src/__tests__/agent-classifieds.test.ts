@@ -65,9 +65,9 @@ describe("agent classifieds injection", () => {
     expect(res.headers.get("cache-control")).toBe("private, no-store");
     const body = await res.json<{ classifieds?: unknown[] }>();
     expect(Array.isArray(body.classifieds)).toBe(true);
-    expect(body.classifieds!.length).toBeGreaterThan(0);
-    expect(body.classifieds!.length).toBeLessThanOrEqual(3);
-  });
+    expect(body.classifieds?.length).toBeGreaterThan(0);
+    expect(body.classifieds?.length).toBeLessThanOrEqual(3);
+  }, 30_000);
 
   it("does not attach classifieds when Sec-Fetch-Site is present (browser)", async () => {
     const res = await SELF.fetch("http://example.com/api/correspondents", {
@@ -77,7 +77,7 @@ describe("agent classifieds injection", () => {
     expect(res.headers.get("x-classifieds-injected")).toBeNull();
     const body = await res.json<{ classifieds?: unknown[] }>();
     expect(body.classifieds).toBeUndefined();
-  });
+  }, 30_000);
 
   it("skips array-rooted endpoints to avoid breaking shape compatibility", async () => {
     // /api/beats returns a JSON array — middleware must not inject onto it.

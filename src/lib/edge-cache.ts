@@ -49,8 +49,21 @@ import type { AppContext } from "./types";
 
 const CACHED_AT_HEADER = "X-Edge-Cached-At";
 
-function buildCacheKey(c: AppContext): Request {
-  return new Request(new URL(c.req.url).toString(), { method: "GET" });
+export interface EdgeCacheKeyOptions {
+  /**
+   * Optional canonical path for routes whose query string does not change the
+   * response. Use sparingly; most cached routes intentionally key by full URL.
+   */
+  cacheKeyPath?: string;
+}
+
+function buildCacheKey(c: AppContext, options: EdgeCacheKeyOptions = {}): Request {
+  const url = new URL(c.req.url);
+  if (options.cacheKeyPath) {
+    url.pathname = options.cacheKeyPath;
+    url.search = "";
+  }
+  return new Request(url.toString(), { method: "GET" });
 }
 
 /**
@@ -69,9 +82,12 @@ function isTestEnv(c: AppContext): boolean {
  * (with an `X-Edge-Cache: HIT` header attached for observability) or `null`
  * on miss. Safe to call from any GET handler.
  */
-export async function edgeCacheMatch(c: AppContext): Promise<Response | null> {
+export async function edgeCacheMatch(
+  c: AppContext,
+  options: EdgeCacheKeyOptions = {}
+): Promise<Response | null> {
   if (isTestEnv(c)) return null;
-  const cached = await caches.default.match(buildCacheKey(c));
+  const cached = await caches.default.match(buildCacheKey(c, options));
   if (!cached) return null;
   // Clone-via-Response constructor so we can mutate the headers without
   // touching the body stream (which would break subsequent reads).
@@ -93,6 +109,7 @@ export interface SWRMatchOptions {
    * rebuild. Should be well below the outer s-maxage edge TTL.
    */
   freshSeconds: number;
+  cacheKeyPath?: string;
 }
 
 /**
@@ -114,7 +131,7 @@ export async function edgeCacheMatchSWR(
   options: SWRMatchOptions
 ): Promise<SWRHit | null> {
   if (isTestEnv(c)) return null;
-  const cached = await caches.default.match(buildCacheKey(c));
+  const cached = await caches.default.match(buildCacheKey(c, options));
   if (!cached) return null;
   const cachedAt = Number(cached.headers.get(CACHED_AT_HEADER) ?? "0");
   const ageSeconds = cachedAt > 0 ? (Date.now() - cachedAt) / 1000 : Number.POSITIVE_INFINITY;
@@ -136,12 +153,16 @@ export async function edgeCacheMatchSWR(
  * requests. The live response returned to the current caller also carries
  * the stamp (harmless; helps debugging).
  */
-export function edgeCachePut(c: AppContext, response: Response): void {
+export function edgeCachePut(
+  c: AppContext,
+  response: Response,
+  options: EdgeCacheKeyOptions = {}
+): void {
   if (isTestEnv(c)) return;
   response.headers.set(CACHED_AT_HEADER, String(Date.now()));
   const cacheCopy = response.clone();
   response.headers.set("X-Edge-Cache", "MISS");
-  c.executionCtx.waitUntil(caches.default.put(buildCacheKey(c), cacheCopy));
+  c.executionCtx.waitUntil(caches.default.put(buildCacheKey(c, options), cacheCopy));
 }
 
 /**
@@ -162,10 +183,14 @@ export function edgeCachePut(c: AppContext, response: Response): void {
 export function triggerSWRRefresh(
   c: AppContext,
   bucket: string,
-  rebuild: () => Promise<unknown>
+  rebuild: () => Promise<unknown>,
+  options: EdgeCacheKeyOptions = {}
 ): void {
   if (isTestEnv(c)) return;
-  const lockKey = `swr-lock:${bucket}:${new URL(c.req.url).pathname}${new URL(c.req.url).search}`;
+  const requestUrl = new URL(c.req.url);
+  const lockPath = options.cacheKeyPath ?? requestUrl.pathname;
+  const lockSearch = options.cacheKeyPath ? "" : requestUrl.search;
+  const lockKey = `swr-lock:${bucket}:${lockPath}${lockSearch}`;
   c.executionCtx.waitUntil(
     (async () => {
       try {

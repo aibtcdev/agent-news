@@ -7,8 +7,8 @@
  *
  * Cache layout:
  *   - s-maxage=1800 — Cloudflare holds the entry at the edge for 30 minutes.
- *   - freshSeconds=300 — within 5 minutes of writing, served as a plain HIT.
- *   - 300s < age ≤ 1800s — served immediately as a STALE hit, AND a
+ *   - freshSeconds=1500 — within 25 minutes of writing, served as a plain HIT.
+ *   - 1500s < age ≤ 1800s — served immediately as a STALE hit, AND a
  *     background rebuild fires (guarded by a KV lock so concurrent stale
  *     hits don't all hammer the DO). User never waits for the cold boot.
  *   - age > 1800s — CF evicts the entry; next request pays the MISS cost.
@@ -29,7 +29,8 @@ const correspondentsRouter = new Hono<{
   Variables: AppVariables;
 }>();
 
-const FRESH_SECONDS = 300;
+const CACHE_KEY_PATH = "/api/correspondents";
+const FRESH_SECONDS = 1_500;
 
 async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
   const bundle = await getCorrespondentsBundle(c.env);
@@ -104,16 +105,24 @@ async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
       "Cache-Control": "public, max-age=60, s-maxage=1800",
     },
   });
-  edgeCachePut(c, response);
+  edgeCachePut(c, response, { cacheKeyPath: CACHE_KEY_PATH });
   return response;
 }
 
 // GET /api/correspondents — ranked correspondents with signal counts, streaks, and names.
 correspondentsRouter.get("/api/correspondents", async (c) => {
-  const hit = await edgeCacheMatchSWR(c, { freshSeconds: FRESH_SECONDS });
+  const hit = await edgeCacheMatchSWR(c, {
+    cacheKeyPath: CACHE_KEY_PATH,
+    freshSeconds: FRESH_SECONDS,
+  });
   if (hit && !hit.stale) return hit.response;
-  if (hit && hit.stale) {
-    triggerSWRRefresh(c, "correspondents", () => buildCorrespondentsResponse(c));
+  if (hit?.stale) {
+    triggerSWRRefresh(
+      c,
+      "correspondents",
+      () => buildCorrespondentsResponse(c),
+      { cacheKeyPath: CACHE_KEY_PATH }
+    );
     return hit.response;
   }
   return buildCorrespondentsResponse(c);
