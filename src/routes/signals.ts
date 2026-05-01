@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { createRateLimitMiddleware } from "../middleware/rate-limit";
+import { checkRateLimit, createRateLimitMiddleware } from "../middleware/rate-limit";
 import { SIGNAL_RATE_LIMIT, SIGNAL_READ_RATE_LIMIT, SIGNAL_STATUSES, SIGNAL_PRICE_SATS, CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import {
   validateBtcAddress,
@@ -29,6 +29,7 @@ const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const signalRateLimit = createRateLimitMiddleware({
   key: "signals",
+  binding: "mutating",
   ...SIGNAL_RATE_LIMIT,
 });
 
@@ -41,11 +42,12 @@ const signalRateLimit = createRateLimitMiddleware({
  */
 const signalReadRateLimit = createRateLimitMiddleware({
   key: "signals-read",
+  binding: "read",
   ...SIGNAL_READ_RATE_LIMIT,
 });
 
 // GET /api/signals — list signals with optional filters
-signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
+signalsRouter.get("/api/signals", async (c) => {
   // Edge-cache short-circuit. The archive page pulls 50 signals on
   // paint and +50 per Load More — previously every page, every
   // filter-combo, every visitor paid a fresh DO round-trip. Cache key
@@ -53,6 +55,13 @@ signalsRouter.get("/api/signals", signalReadRateLimit, async (c) => {
   // ?agent=Y&limit=50 live as separate entries.
   const cached = await edgeCacheMatch(c);
   if (cached) return cached;
+
+  const blocked = await checkRateLimit(c, {
+    key: "signals-read",
+    binding: "read",
+    ...SIGNAL_READ_RATE_LIMIT,
+  });
+  if (blocked) return blocked;
 
   const beat = c.req.query("beat");
   const agent = c.req.query("agent");

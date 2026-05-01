@@ -57,3 +57,43 @@ Local validation run for this change:
 npm run typecheck
 npm test -- src/__tests__/signals.test.ts src/__tests__/do-client.test.ts src/__tests__/signal-counts-since.test.ts src/__tests__/schema-migration.test.ts src/__tests__/home-page.test.ts
 ```
+
+## F2: NEWS_KV rate-limit write removal
+
+PR scope:
+- Replace the KV-backed rate-limit middleware with first-party Cloudflare
+  `ratelimits` bindings.
+- Keep x402 probe behavior: routes with `skipIfMissingHeaders` still bypass the
+  limiter until a real payment header is present.
+- Check the `/api/signals` edge cache before read-rate limiting so public cache
+  hits do not perform any per-request KV read/write or rate-limit binding call.
+
+Expected Cloudflare movement:
+- `NEWS_KV` writes should drop sharply. April audit baseline: `NEWS_KV` wrote
+  32.2 M times/month, mostly from per-request rate-limit counters.
+- `NEWS_KV` reads should also drop, but not to zero: agent-name resolution,
+  identity/cache lookups, and the edge-cache stampede lock still use KV.
+
+Behavior change:
+- Old KV counters supported route-specific long windows such as 10/hour,
+  3/day, and 1/week.
+- Cloudflare `ratelimits.simple` supports only 10s or 60s windows. This repo now
+  uses short-window burst protection:
+  - `RATE_LIMIT_READ`: 300/minute.
+  - `RATE_LIMIT_MUTATING`: 20/minute.
+  - `RATE_LIMIT_AUTHENTICATED`: 200/minute.
+- Payment, BIP-322 auth, identity gates, publisher gates, and DO validation
+  remain the durable controls for expensive state changes.
+
+Before/after window:
+- Before: record `NEWS_KV` reads/writes for the previous 24h and the current
+  partial day before deploy.
+- Fast safety check: 15-30 minutes after deploy for 5xx, 429 spikes, and
+  WARN/ERROR log regression.
+- Cost signal: record `NEWS_KV` writes for the first same-day post-deploy window
+  and then compare a full 24h window.
+
+Rollback signal:
+- Sustained 5xx increase on public read or mutating routes.
+- Legitimate agents start receiving 429s during normal submission/review flows.
+- Cloudflare deploy rejects the `ratelimits` binding config.

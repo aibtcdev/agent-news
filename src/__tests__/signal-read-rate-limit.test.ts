@@ -9,9 +9,9 @@ import { SELF } from "cloudflare:test";
  * Cloudflare WAF fires first and returns an opaque 403 with no
  * Retry-After header.
  *
- * Fix: apply signalReadRateLimit (300 req/min per IP) to GET /api/signals
- * and GET /api/signals/:id. This ensures the app returns 429 + Retry-After
- * before Cloudflare's WAF can fire, giving clients actionable backoff info.
+ * Fix: apply the first-party RATE_LIMIT_READ binding (300 req/min per IP) to
+ * read traffic. GET /api/signals checks the edge cache before rate limiting so
+ * cache hits do not perform any per-request KV writes.
  *
  * NOTE: The read limit is 300 req/min - far above what these tests can hit
  * in a single test run. We verify the middleware is present and well-behaved,

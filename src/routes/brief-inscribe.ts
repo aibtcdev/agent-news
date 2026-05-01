@@ -11,6 +11,7 @@ const briefInscribeRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>
 
 const inscribeRateLimit = createRateLimitMiddleware({
   key: "brief-inscribe",
+  binding: "authenticated",
   ...BRIEF_INSCRIBE_RATE_LIMIT,
   identityHeader: "X-BTC-Address",
 });

@@ -106,6 +106,11 @@ export interface Env {
   LOGS?: unknown;
   // X402_RELAY is a service binding to x402-sponsor-relay RPC (RelayRPC WorkerEntrypoint)
   X402_RELAY?: unknown;
+  // First-party Cloudflare Rate Limiting bindings. These replace the old
+  // per-request NEWS_KV counters for burst protection.
+  RATE_LIMIT_READ?: RateLimit;
+  RATE_LIMIT_MUTATING?: RateLimit;
+  RATE_LIMIT_AUTHENTICATED?: RateLimit;
   ENVIRONMENT?: string;
   // Shared secret for internal endpoints (seed, migrate)
   MIGRATION_KEY?: string;
