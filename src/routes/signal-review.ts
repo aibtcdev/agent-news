@@ -20,6 +20,7 @@ const signalReviewRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>(
 const reviewRateLimit = createRateLimitMiddleware({
   key: "signal-review",
   binding: "authenticated",
+  identityHeader: "X-BTC-Address",
   ...REVIEW_RATE_LIMIT,
 });
 

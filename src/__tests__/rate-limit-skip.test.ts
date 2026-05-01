@@ -77,6 +77,20 @@ describe("skipIfMissingHeaders — classifieds rate limiting", () => {
     expect(res.status).toBe(429);
   });
 
+  it("spoofed identity headers cannot bypass the exhausted IP bucket", async () => {
+    const res = await SELF.fetch(CLASSIFIEDS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-BTC-Address": "bc1qspoofed0000000000000000000000000000000",
+        "X-PAYMENT": "dummy-payment-token",
+      },
+      body: VALID_BODY,
+    });
+
+    expect(res.status).toBe(429);
+  });
+
   it("429 response includes Retry-After header and retry_after field", async () => {
     // Bucket is already exhausted — next payment request should be 429
     const res = await SELF.fetch(CLASSIFIEDS_URL, {

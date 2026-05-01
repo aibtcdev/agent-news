@@ -10,8 +10,6 @@ const RATE_LIMIT_BINDING_CONFIG = {
 
 interface RateLimitOptions {
   key: string;
-  maxRequests: number;
-  windowSeconds: number;
   binding?: "read" | "mutating" | "authenticated";
   /**
    * Optional header name used to refine the rate-limit bucket for
@@ -49,11 +47,12 @@ interface RateLimitOptions {
  * Reads CF-Connecting-IP or an authenticated identity header and checks a
  * first-party Cloudflare Rate Limiting binding. Returns 429 when limited.
  *
- * Public/anonymous requests are keyed by IP. Authenticated requests should
- * carry `X-BTC-Address` and are keyed by address to avoid shared-IP false
- * positives. The old KV implementation used long-window counters; the
- * Cloudflare binding intentionally enforces short-window burst limits, which
- * removes per-request NEWS_KV writes from the request path.
+ * Every counted request checks an IP bucket first. Routes that explicitly set
+ * `identityHeader` also check a second identity bucket, which gives signed
+ * callers independent quotas without letting spoofable headers bypass the IP
+ * bucket. The old KV implementation used long-window counters; the Cloudflare
+ * binding intentionally enforces short-window burst limits, which removes
+ * per-request NEWS_KV writes from the request path.
  *
  * On rate-limit violations, the BTC address from X-BTC-Address is included in
  * warning logs (along with agent_name from the registry) so operators can
@@ -111,75 +110,103 @@ export async function checkRateLimit(
 ) {
   const binding = opts.binding ?? "mutating";
   const limiter = selectLimiter(c.env, binding);
+  const config = RATE_LIMIT_BINDING_CONFIG[binding];
   if (!limiter) {
     const logger = c.get("logger");
-    logger.warn("rate limit binding missing; request allowed", {
+    logger.error("rate limit binding missing", {
       key: opts.key,
       binding,
     });
+    if (c.env.ENVIRONMENT === "production" || c.env.ENVIRONMENT === "staging") {
+      return c.json(
+        { error: "Rate limit service unavailable", retry_after: config.periodSeconds },
+        503
+      );
+    }
     return null;
   }
 
   const ip = c.req.header("CF-Connecting-IP") ?? "unknown";
-  const identityHeader = opts.identityHeader ?? "X-BTC-Address";
-  const identity = c.req.header(identityHeader)?.trim() || null;
-  const bucket = identity ? `id:${identity}` : `ip:${ip}`;
-  const rlKey = `${opts.key}:${bucket}`;
-  const { success } = await limiter.limit({ key: rlKey });
+  const btcAddress = c.req.header("X-BTC-Address")?.trim() || null;
+  const ipBucket = `${opts.key}:ip:${ip}`;
+  const ipBlocked = await checkBindingBucket(c, limiter, config, opts.key, ipBucket, ip, btcAddress);
+  if (ipBlocked) return ipBlocked;
 
-  if (!success) {
-    const config = RATE_LIMIT_BINDING_CONFIG[binding];
-    const retryAfter = config.periodSeconds;
-    const logger = c.get("logger");
-
-    // Read BTC address for agent identification in logs.
-    // Always check X-BTC-Address header first (present on authenticated routes).
-    // Fall back to the configured identity header when present.
-    // Fire-and-forget: agent name resolution must never delay the 429 response.
-    const btcAddress = c.req.header("X-BTC-Address")?.trim() || identity || null;
-
-    logger.warn("rate limit exceeded", {
-      key: opts.key,
+  const identity = opts.identityHeader
+    ? (c.req.header(opts.identityHeader)?.trim() || null)
+    : null;
+  if (identity) {
+    const identityBucket = `${opts.key}:id:${identity}`;
+    const identityBlocked = await checkBindingBucket(
+      c,
+      limiter,
+      config,
+      opts.key,
+      identityBucket,
       ip,
-      btc_address: btcAddress ?? undefined,
-      auth: btcAddress ? undefined : "missing",
-      bucket: rlKey,
-      max: config.maxRequests,
-      retry_after: retryAfter,
-    });
-
-    // Enrich the log with agent name asynchronously — KV hit is fast (cached edge),
-    // but an external fetch on cache miss could take seconds. Never block the 429.
-    if (btcAddress) {
-      c.executionCtx.waitUntil(
-        resolveAgentName(c.env.NEWS_KV, btcAddress)
-          .then((info) => {
-            if (info.name) {
-              logger.warn("rate limit — agent identified", {
-                key: opts.key,
-                ip,
-                btc_address: btcAddress,
-                agent_name: info.name,
-              });
-            }
-          })
-          .catch(() => {
-            // Ignore resolution errors — name enrichment is best-effort
-          }),
-      );
-    }
-    c.header("Retry-After", String(retryAfter));
-    return c.json(
-      {
-        error: `Rate limited. Try again in ${retryAfter}s`,
-        retry_after: retryAfter,
-        message: `Too many requests. Wait at least ${retryAfter} seconds before retrying. Implement exponential backoff to avoid repeated rate limiting.`,
-      },
-      429
+      btcAddress ?? identity
     );
+    if (identityBlocked) return identityBlocked;
   }
 
   return null;
+}
+
+async function checkBindingBucket(
+  c: Context<{ Bindings: Env; Variables: AppVariables }>,
+  limiter: RateLimit,
+  config: (typeof RATE_LIMIT_BINDING_CONFIG)[keyof typeof RATE_LIMIT_BINDING_CONFIG],
+  key: string,
+  bucket: string,
+  ip: string,
+  btcAddress: string | null
+) {
+  const { success } = await limiter.limit({ key: bucket });
+  if (success) return null;
+
+  const retryAfter = config.periodSeconds;
+  const logger = c.get("logger");
+
+  logger.warn("rate limit exceeded", {
+    key,
+    ip,
+    btc_address: btcAddress ?? undefined,
+    auth: btcAddress ? undefined : "missing",
+    bucket,
+    max: config.maxRequests,
+    retry_after: retryAfter,
+  });
+
+  // Enrich the log with agent name asynchronously — KV hit is fast (cached edge),
+  // but an external fetch on cache miss could take seconds. Never block the 429.
+  if (btcAddress) {
+    c.executionCtx.waitUntil(
+      resolveAgentName(c.env.NEWS_KV, btcAddress)
+        .then((info) => {
+          if (info.name) {
+            logger.warn("rate limit — agent identified", {
+              key,
+              ip,
+              btc_address: btcAddress,
+              agent_name: info.name,
+            });
+          }
+        })
+        .catch(() => {
+          // Ignore resolution errors — name enrichment is best-effort
+        }),
+    );
+  }
+
+  c.header("Retry-After", String(retryAfter));
+  return c.json(
+    {
+      error: `Rate limited. Try again in ${retryAfter}s`,
+      retry_after: retryAfter,
+      message: `Too many requests. Wait at least ${retryAfter} seconds before retrying. Implement exponential backoff to avoid repeated rate limiting.`,
+    },
+    429
+  );
 }
 
 function selectLimiter(

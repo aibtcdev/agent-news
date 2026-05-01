@@ -14,6 +14,7 @@ const briefCompileRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>(
 const compileRateLimit = createRateLimitMiddleware({
   key: "brief-compile",
   binding: "authenticated",
+  identityHeader: "X-BTC-Address",
   ...BRIEF_COMPILE_RATE_LIMIT,
 });
 
