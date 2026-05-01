@@ -61,6 +61,8 @@ type SqlParam = string | number | null;
 
 const REVIEWED_SIGNAL_STATUSES = ["approved", "brief_included", "rejected", "replaced"] as const;
 const COUNTED_SIGNAL_STATUSES = ["submitted", ...REVIEWED_SIGNAL_STATUSES] as const;
+// Keep tag hydration batches below the observed Durable Object SQLite variable cap.
+// A 200-row public page becomes at most four tag queries instead of one rejected IN list.
 const SIGNAL_TAG_HYDRATION_CHUNK_SIZE = 50;
 
 interface SignalListFilters {

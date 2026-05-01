@@ -155,6 +155,8 @@ describe("GET /api/signals — bounded pagination metadata", () => {
     }>();
     expect(body.filtered).toBe(200);
     expect(body.hasMore).toBe(true);
+    expect(body.signals).toHaveLength(200);
+    expect(body.signals.length).toBe(body.filtered);
     expect(body.signals.every((signal) => signal.tags.includes(LARGE_PAGE_TAG))).toBe(true);
   }, 30_000);
 });
