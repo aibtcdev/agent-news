@@ -21,6 +21,15 @@
     { "binding": "NEWS_KV", "id": "3b2ccbdc1fd5426ba72ed323e3407bdc" }
   ],
 
+  // First-party rate limit bindings. Top-level IDs are isolated from the
+  // named production/staging envs so branch preview traffic cannot consume
+  // production counters.
+  "ratelimits": [
+    { "name": "RATE_LIMIT_READ", "namespace_id": "2026050101", "simple": { "limit": 300, "period": 60 } },
+    { "name": "RATE_LIMIT_MUTATING", "namespace_id": "2026050102", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RATE_LIMIT_AUTHENTICATED", "namespace_id": "2026050103", "simple": { "limit": 200, "period": 60 } }
+  ],
+
   // Durable Object binding — primary storage engine (SQLite)
   "durable_objects": {
     "bindings": [
@@ -93,6 +102,12 @@
         { "binding": "NEWS_KV", "id": "341f4de6834c4a908eb52f6cb556bbce" }
       ],
 
+      "ratelimits": [
+        { "name": "RATE_LIMIT_READ", "namespace_id": "2026050111", "simple": { "limit": 300, "period": 60 } },
+        { "name": "RATE_LIMIT_MUTATING", "namespace_id": "2026050112", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RATE_LIMIT_AUTHENTICATED", "namespace_id": "2026050113", "simple": { "limit": 200, "period": 60 } }
+      ],
+
       "durable_objects": {
         "bindings": [
           { "name": "NEWS_DO", "class_name": "NewsDO" }
@@ -133,6 +148,12 @@
 
       "kv_namespaces": [
         { "binding": "NEWS_KV", "id": "3b2ccbdc1fd5426ba72ed323e3407bdc" }
+      ],
+
+      "ratelimits": [
+        { "name": "RATE_LIMIT_READ", "namespace_id": "2026050121", "simple": { "limit": 300, "period": 60 } },
+        { "name": "RATE_LIMIT_MUTATING", "namespace_id": "2026050122", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RATE_LIMIT_AUTHENTICATED", "namespace_id": "2026050123", "simple": { "limit": 200, "period": 60 } }
       ],
 
       "durable_objects": {

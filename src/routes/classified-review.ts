@@ -19,6 +19,7 @@ const classifiedReviewRouter = new Hono<{ Bindings: Env; Variables: AppVariables
 
 const reviewRateLimit = createRateLimitMiddleware({
   key: "classified-review",
+  binding: "authenticated",
   ...REVIEW_RATE_LIMIT,
 });
 
