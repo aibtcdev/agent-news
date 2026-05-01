@@ -750,6 +750,22 @@ export const MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_signals_btc_created ON signals(btc_address, created_at DESC)",
 ] as const;
 
+/**
+ * MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL — reduce DO pressure from
+ * /api/correspondents and /api/init bundle queries.
+ *
+ * The correspondents bundle groups non-correction signals by btc_address,
+ * joins active beat claims by beat/address, and computes leaderboard earnings.
+ * These composite indexes keep those hot scans ordered by the grouping/join
+ * keys instead of walking broad single-column indexes under cache-miss bursts.
+ */
+export const MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL = [
+  "CREATE INDEX IF NOT EXISTS idx_signals_correction_btc_created ON signals(correction_of, btc_address, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_signals_beat_btc_correction_created ON signals(beat_slug, btc_address, correction_of, created_at DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_beat_claims_status_beat_address ON beat_claims(status, beat_slug, btc_address)",
+  "CREATE INDEX IF NOT EXISTS idx_earnings_unpaid_leaderboard ON earnings(voided_at, payout_txid, btc_address)",
+] as const;
+
 export const MIGRATION_APR7_EARNINGS_SQL = [
   // Void earnings for the 14 re-curated signals NOT on-chain
   `UPDATE earnings SET voided_at = datetime('now')
