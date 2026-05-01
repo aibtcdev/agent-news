@@ -61,6 +61,7 @@ type SqlParam = string | number | null;
 
 const REVIEWED_SIGNAL_STATUSES = ["approved", "brief_included", "rejected", "replaced"] as const;
 const COUNTED_SIGNAL_STATUSES = ["submitted", ...REVIEWED_SIGNAL_STATUSES] as const;
+const SIGNAL_TAG_HYDRATION_CHUNK_SIZE = 50;
 
 interface SignalListFilters {
   beat: string | null;
@@ -129,23 +130,27 @@ function fetchSignalTags(
   const tagsBySignal = new Map<string, string[]>();
   if (signalIds.length === 0) return tagsBySignal;
 
-  const placeholders = signalIds.map(() => "?").join(", ");
-  const rows = sql
-    .exec(
-      `SELECT signal_id, tag
-       FROM signal_tags
-       WHERE signal_id IN (${placeholders})
-       ORDER BY signal_id, tag`,
-      ...signalIds
-    )
-    .toArray();
+  for (let i = 0; i < signalIds.length; i += SIGNAL_TAG_HYDRATION_CHUNK_SIZE) {
+    const chunk = signalIds.slice(i, i + SIGNAL_TAG_HYDRATION_CHUNK_SIZE);
+    const placeholders = chunk.map(() => "?").join(", ");
+    const rows = sql
+      .exec(
+        `SELECT signal_id, tag
+         FROM signal_tags
+         WHERE signal_id IN (${placeholders})
+         ORDER BY signal_id, tag`,
+        ...chunk
+      )
+      .toArray();
 
-  for (const row of rows) {
-    const r = row as { signal_id: string; tag: string };
-    const tags = tagsBySignal.get(r.signal_id) ?? [];
-    tags.push(r.tag);
-    tagsBySignal.set(r.signal_id, tags);
+    for (const row of rows) {
+      const r = row as { signal_id: string; tag: string };
+      const tags = tagsBySignal.get(r.signal_id) ?? [];
+      tags.push(r.tag);
+      tagsBySignal.set(r.signal_id, tags);
+    }
   }
+
   return tagsBySignal;
 }
 

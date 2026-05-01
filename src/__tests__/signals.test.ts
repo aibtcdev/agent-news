@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { SELF } from "cloudflare:test";
 
 const PAGING_TAG = "paging-lower-bound-700";
+const LARGE_PAGE_TAG = "large-page-tag-hydration";
 
 async function seed(body: Record<string, unknown>) {
   const res = await SELF.fetch("http://example.com/api/test-seed", {
@@ -118,6 +119,43 @@ describe("GET /api/signals — bounded pagination metadata", () => {
     expect(beyondBody.signals).toHaveLength(0);
     expect(beyondBody.hasMore).toBe(false);
     expect(beyondBody.total).toBe(0);
+  }, 30_000);
+
+  it("hydrates tags for a 200-row page without exceeding DO SQLite variable limits", async () => {
+    const signals = Array.from({ length: 201 }, (_, index) => {
+      const n = String(index + 1).padStart(3, "0");
+      return {
+        id: `large-page-tag-${n}`,
+        beat_slug: "bitcoin-macro",
+        btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+        headline: `Large page tag hydration ${n}`,
+        sources: "[]",
+        created_at: `2026-04-30T13:${String(index % 60).padStart(2, "0")}:00.000Z`,
+        status: "brief_included",
+        reviewed_at: "2026-04-30T14:00:00.000Z",
+      };
+    });
+
+    await seed({
+      signals,
+      signal_tags: signals.map((signal) => ({
+        signal_id: signal.id,
+        tag: LARGE_PAGE_TAG,
+      })),
+    });
+
+    const res = await SELF.fetch(
+      `http://example.com/api/signals?beat=bitcoin-macro&status=brief_included&tag=${LARGE_PAGE_TAG}&limit=500`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{
+      signals: Array<{ tags: string[] }>;
+      filtered: number;
+      hasMore: boolean;
+    }>();
+    expect(body.filtered).toBe(200);
+    expect(body.hasMore).toBe(true);
+    expect(body.signals.every((signal) => signal.tags.includes(LARGE_PAGE_TAG))).toBe(true);
   }, 30_000);
 });
 
