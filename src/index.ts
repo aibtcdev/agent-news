@@ -198,6 +198,30 @@ app.post("/api/internal/seed", async (c) => {
   return c.json(data, res.status as 200 | 400 | 404);
 });
 
+// Production/staging snapshot export for PR preview seeding.
+// Gated on MIGRATION_KEY because it exposes bulk public content in fixture form.
+app.get("/api/internal/export-snapshot", async (c) => {
+  const key = c.req.header("X-Migration-Key");
+  if (!key || key !== c.env.MIGRATION_KEY) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  const params = new URLSearchParams();
+  const limit = c.req.query("limit");
+  const briefs = c.req.query("briefs");
+  if (limit) params.set("limit", limit);
+  if (briefs) params.set("briefs", briefs);
+
+  const id = c.env.NEWS_DO.idFromName("news-singleton");
+  const stub = c.env.NEWS_DO.get(id);
+  const res = await stub.fetch(
+    `https://do/internal/export-snapshot${params.size ? `?${params}` : ""}`,
+    { method: "GET" }
+  );
+  const data = await res.json();
+  return c.json(data, res.status as 200 | 400 | 401 | 404 | 500);
+});
+
 // ---------------------------------------------------------------------------
 // Test-only DO proxy helpers
 // ---------------------------------------------------------------------------

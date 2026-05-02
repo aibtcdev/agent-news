@@ -5301,6 +5301,92 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // -------------------------------------------------------------------------
+    // Internal preview snapshot export — called only through the Worker-level
+    // /api/internal/export-snapshot route, which is MIGRATION_KEY-gated.
+    // Returns the same broad fixture shape accepted by /test-seed, but strips
+    // payment/dispute settlement fields so preview deploys get realistic public
+    // content without carrying live payout or in-flight payment state.
+    // -------------------------------------------------------------------------
+    this.router.get("/internal/export-snapshot", (c) => {
+      const limitParam = Number(c.req.query("limit") ?? 500);
+      const limit = Math.min(Math.max(1, Number.isFinite(limitParam) ? limitParam : 500), 1_000);
+      const briefLimitParam = Number(c.req.query("briefs") ?? 7);
+      const briefLimit = Math.min(Math.max(0, Number.isFinite(briefLimitParam) ? briefLimitParam : 7), 30);
+
+      const signals = this.ctx.storage.sql
+        .exec(
+          `SELECT id, beat_slug, btc_address, headline, body, sources, created_at,
+                  correction_of, status, reviewed_at, publisher_feedback, disclosure
+             FROM signals
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?`,
+          limit
+        )
+        .toArray();
+
+      const signalIds = new Set(signals.map((row) => row.id));
+      const signal_tags = this.ctx.storage.sql
+        .exec("SELECT signal_id, tag FROM signal_tags ORDER BY signal_id, tag")
+        .toArray()
+        .filter((row) => signalIds.has(row.signal_id));
+
+      const brief_signals = this.ctx.storage.sql
+        .exec(
+          `SELECT brief_date, signal_id, btc_address, position, created_at
+             FROM brief_signals
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?`,
+          Math.max(limit, 100)
+        )
+        .toArray()
+        .filter((row) => signalIds.has(row.signal_id));
+
+      const briefs = this.ctx.storage.sql
+        .exec(
+          `SELECT date, text, json_data, compiled_at, NULL AS inscribed_txid, NULL AS inscription_id
+             FROM briefs
+            ORDER BY date DESC
+            LIMIT ?`,
+          briefLimit
+        )
+        .toArray();
+
+      const classifieds = this.ctx.storage.sql
+        .exec(
+          `SELECT id, btc_address, category, headline, body, NULL AS payment_txid,
+                  created_at, expires_at, status
+             FROM classifieds
+            WHERE status = 'approved'
+            ORDER BY datetime(created_at) DESC
+            LIMIT 50`
+        )
+        .toArray();
+
+      const streaks = this.ctx.storage.sql
+        .exec(
+          `SELECT btc_address, current_streak, longest_streak, last_signal_date, total_signals
+             FROM streaks
+            ORDER BY total_signals DESC
+            LIMIT 200`
+        )
+        .toArray();
+
+      return c.json({
+        ok: true,
+        data: {
+          exported_at: new Date().toISOString(),
+          limits: { signals: limit, briefs: briefLimit },
+          signals,
+          signal_tags,
+          brief_signals,
+          briefs,
+          classifieds,
+          streaks,
+        },
+      });
+    });
+
+    // -------------------------------------------------------------------------
     // Test-only seed endpoint — NOT available in production
     // Allows integration tests to insert rows with arbitrary timestamps so that
     // exact scoring math can be verified without fighting rate-limit constraints.
