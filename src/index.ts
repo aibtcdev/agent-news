@@ -35,6 +35,7 @@ import { seoRouter } from "./routes/seo";
 import { homeRouter } from "./routes/home-page";
 import { agentPageRouter } from "./routes/agent-page";
 import { beatPageRouter } from "./routes/beat-page";
+import { worldModelRouter } from "./routes/world-model";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -157,6 +158,9 @@ app.route("/", leaderboardRouter);
 
 // Mount earnings routes
 app.route("/", earningsRouter);
+
+// Mount world model read APIs
+app.route("/", worldModelRouter);
 
 // Mount editor earnings routes (near earnings for logical grouping)
 app.route("/", editorEarningsRouter);
