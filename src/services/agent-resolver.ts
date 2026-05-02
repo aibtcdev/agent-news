@@ -191,11 +191,9 @@ export async function resolveAgentNames(
   const { agents: bulkAgents, complete } = await fetchBulkAgents();
   const uncachedSet = new Set(uncached);
 
-  // Step 4: Populate KV cache only for addresses the caller asked about.
-  // We previously wrote every agent in the bulk page (~1000) on every miss
-  // as a "pre-warm"; that produced the bulk of remaining NEWS_KV writes
-  // (B1, cloudflare-bill-reduction-tracker-2026-05.md) without measurable
-  // hit-rate benefit, so the writes are now scoped to uncachedSet.
+  // The bulk fetch is a latency optimization, not a pre-warm: writing
+  // every fetched agent (up to 1000) on each miss inflated NEWS_KV writes
+  // without measurable hit-rate benefit, so writes are scoped to uncachedSet.
   const kvWrites: Promise<void>[] = [];
 
   for (const [btcAddr, info] of bulkAgents) {
