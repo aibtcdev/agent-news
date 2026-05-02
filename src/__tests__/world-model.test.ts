@@ -51,6 +51,16 @@ describe("GET /api/world-model/beat-health", () => {
           status: "submitted",
           created_at: "2026-05-01T05:00:00Z",
         },
+        {
+          id: "wm-rejected",
+          beat_slug: BEAT_SLUG,
+          btc_address: CONTRIBUTOR,
+          headline: "Rejected quantum signal",
+          sources: "[]",
+          status: "rejected",
+          created_at: "2026-05-01T05:30:00Z",
+          reviewed_at: "2026-05-01T06:00:00Z",
+        },
       ],
     });
 
@@ -64,24 +74,31 @@ describe("GET /api/world-model/beat-health", () => {
         status: string;
         editor: { address: string; assignedAt: string; lastReviewedAt: string | null } | null;
         members: { count: number };
-        signals: { submitted: number; approved: number; total: number };
+        signals: { submitted: number; approved: number; rejected: number; total: number };
         coverageGapIndex: number;
       }>;
-      totals: { beats: number; activeBeats: number; signals: number; submitted: number; approved: number };
+      totals: { beats: number; activeBeats: number; signals: number; submitted: number; approved: number; rejected: number };
     }>();
 
     expect(body.window.since).toBe("2026-05-01T00:00:00Z");
     const quantum = body.beats.find((beat) => beat.slug === BEAT_SLUG);
     expect(quantum).toMatchObject({
       slug: BEAT_SLUG,
-      signals: { submitted: 1, approved: 1, total: 2 },
-      coverageGapIndex: 0.5,
+      signals: { submitted: 1, approved: 1, rejected: 1, total: 3 },
+      coverageGapIndex: 0.3333,
     });
     expect(body.totals.beats).toBeGreaterThanOrEqual(1);
     expect(body.totals.activeBeats).toBeGreaterThanOrEqual(0);
-    expect(body.totals.signals).toBeGreaterThanOrEqual(2);
+    expect(body.totals.signals).toBeGreaterThanOrEqual(3);
     expect(body.totals.submitted).toBeGreaterThanOrEqual(1);
     expect(body.totals.approved).toBeGreaterThanOrEqual(1);
+    expect(body.totals.rejected).toBeGreaterThanOrEqual(1);
     expect(typeof body.generatedAt).toBe("string");
+  });
+
+  it("rejects malformed since query params", async () => {
+    const res = await SELF.fetch("http://example.com/api/world-model/beat-health?since=yesterday");
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ ok: false });
   });
 });

@@ -4,6 +4,13 @@ import { getSignalCounts, listBeats, listSignals } from "../lib/do-client";
 
 const worldModelRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+const DEFAULT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const RECENT_REVIEWED_SIGNALS_LIMIT = 50;
+
+function defaultSince(): string {
+  return new Date(Date.now() - DEFAULT_WINDOW_MS).toISOString();
+}
+
 function latestReviewedAt(signals: Array<{ reviewed_at?: string | null }>): string | null {
   const reviewed = signals
     .map((signal) => signal.reviewed_at)
@@ -22,26 +29,34 @@ function transformBeat(beat: Beat) {
       ? { address: beat.editor.btc_address, assignedAt: beat.editor.registered_at, lastReviewedAt: null as string | null }
       : null,
     members: { count: members.length },
-    signals: { submitted: 0, approved: 0, brief_included: 0, rejected: 0, replaced: 0, total: 0 },
     coverageGapIndex: 0,
   };
 }
 
 // GET /api/world-model/beat-health — DRI-queryable beat health snapshot.
 worldModelRouter.get("/api/world-model/beat-health", async (c) => {
-  const since = c.req.query("since") ?? new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const since = c.req.query("since") ?? defaultSince();
+  if (Number.isNaN(Date.parse(since))) {
+    return c.json({ ok: false, error: "Invalid since query parameter; expected an ISO-compatible date string." }, 400);
+  }
+
   const beats = await listBeats(c.env);
   const rows = await Promise.all(
     beats.map(async (beat) => {
       const row = transformBeat(beat);
-      const [counts, reviewedSignals] = await Promise.all([
+      const [counts, approvedSignals, rejectedSignals] = await Promise.all([
         getSignalCounts(c.env, { beat: beat.slug, since }),
-        listSignals(c.env, { beat: beat.slug, status: "approved", since, limit: 50 }),
+        listSignals(c.env, { beat: beat.slug, status: "approved", since, limit: RECENT_REVIEWED_SIGNALS_LIMIT }),
+        listSignals(c.env, { beat: beat.slug, status: "rejected", since, limit: RECENT_REVIEWED_SIGNALS_LIMIT }),
       ]);
-      row.signals = counts;
-      if (row.editor) row.editor.lastReviewedAt = latestReviewedAt(reviewedSignals);
-      row.coverageGapIndex = counts.total > 0 ? Number((counts.submitted / counts.total).toFixed(4)) : 0;
-      return row;
+      return {
+        ...row,
+        signals: counts,
+        editor: row.editor
+          ? { ...row.editor, lastReviewedAt: latestReviewedAt([...approvedSignals, ...rejectedSignals]) }
+          : null,
+        coverageGapIndex: counts.total > 0 ? Number((counts.submitted / counts.total).toFixed(4)) : 0,
+      };
     })
   );
 
