@@ -102,6 +102,10 @@ async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
       a.address.localeCompare(b.address),
   );
 
+  // Only successful bundle rebuilds reach this point and get written to the
+  // edge cache. If the DO times out or throws, the exception bubbles to the
+  // caller/SWR logger and the previous cached entry remains the only served
+  // copy; timeout/error payloads are never cached for the extended TTL.
   const body = JSON.stringify({ correspondents, total: correspondents.length });
   const response = new Response(body, {
     status: 200,
