@@ -119,7 +119,9 @@ export interface SWRMatchOptions {
  *
  * Matched responses include `X-Edge-Cache-Age` in whole seconds so health
  * probes can distinguish bounded stale serving from a cache entry whose
- * background refreshes have been failing for too long.
+ * background refreshes have been failing for too long. If the original
+ * cached timestamp is missing or unparsable, the header is `-1` so callers
+ * can parse it as a number and treat it as unknown age.
  *
  * Returns:
  *   - null           → cache miss, caller must rebuild.
@@ -145,7 +147,7 @@ export async function edgeCacheMatchSWR(
   response.headers.set("X-Edge-Cache", stale ? "STALE" : "HIT");
   response.headers.set(
     CACHE_AGE_HEADER,
-    Number.isFinite(ageSeconds) ? String(Math.max(0, Math.floor(ageSeconds))) : "unknown"
+    Number.isFinite(ageSeconds) ? String(Math.max(0, Math.floor(ageSeconds))) : "-1"
   );
   return { response, stale, ageSeconds };
 }
