@@ -149,7 +149,8 @@ async function fetchBulkAgents(): Promise<BulkFetchResult> {
  * 1. Check KV cache for all requested addresses
  * 2. If there are cache misses, fetch the bulk agent list (~0.3s for 100 agents)
  *    instead of making N individual calls (~42s each)
- * 3. Populate KV cache for ALL fetched agents (pre-warms future requests)
+ * 3. Populate KV cache only for the originally-requested addresses
+ *    (the bulk fetch is a latency optimization, not a pre-warm)
  * 4. Return a Map<address, AgentInfo> for all requested addresses
  */
 export async function resolveAgentNames(
@@ -190,10 +191,19 @@ export async function resolveAgentNames(
   const { agents: bulkAgents, complete } = await fetchBulkAgents();
   const uncachedSet = new Set(uncached);
 
-  // Step 4: Populate KV cache for ALL fetched agents (pre-warm) and resolve our addresses
+  // Step 4: Populate KV cache only for addresses the caller asked about.
+  // We previously wrote every agent in the bulk page (~1000) on every miss
+  // as a "pre-warm"; that produced the bulk of remaining NEWS_KV writes
+  // (B1, cloudflare-bill-reduction-tracker-2026-05.md) without measurable
+  // hit-rate benefit, so the writes are now scoped to uncachedSet.
   const kvWrites: Promise<void>[] = [];
 
   for (const [btcAddr, info] of bulkAgents) {
+    if (!uncachedSet.has(btcAddr)) continue;
+
+    infoMap.set(btcAddr, info);
+    uncachedSet.delete(btcAddr);
+
     const cacheKey = `${CACHE_KEY_PREFIX}${btcAddr}`;
     const ttl = info.name ? CACHE_TTL_SECONDS : NEGATIVE_CACHE_TTL_SECONDS;
     kvWrites.push(
@@ -201,11 +211,6 @@ export async function resolveAgentNames(
         expirationTtl: ttl,
       }),
     );
-
-    if (uncachedSet.has(btcAddr)) {
-      infoMap.set(btcAddr, info);
-      uncachedSet.delete(btcAddr);
-    }
   }
 
   // Negative-cache addresses as "not found" when the bulk fetch completed fully.
