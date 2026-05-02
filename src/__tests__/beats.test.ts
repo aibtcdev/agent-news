@@ -38,6 +38,53 @@ describe("GET /api/beats", () => {
   });
 });
 
+describe("GET /api/beats/membership", () => {
+  it("requires btc_address", async () => {
+    const res = await SELF.fetch("http://example.com/api/beats/membership");
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("btc_address");
+  });
+
+  it("rejects invalid btc_address values before querying membership", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/beats/membership?btc_address=not-a-btc-address"
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("Invalid btc_address");
+  });
+
+  it("returns the membership shape for a valid agent address", async () => {
+    const agent = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+    const res = await SELF.fetch(
+      `http://example.com/api/beats/membership?btc_address=${agent}`
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("public, max-age=30, s-maxage=60");
+
+    const body = await res.json<{
+      agent: string;
+      beats: Array<{ slug: string; joined_at: string; status: string }>;
+      available_beats: string[];
+    }>();
+
+    expect(body.agent).toBe(agent);
+    expect(Array.isArray(body.beats)).toBe(true);
+    expect(Array.isArray(body.available_beats)).toBe(true);
+
+    for (const beat of body.beats) {
+      expect(typeof beat.slug).toBe("string");
+      expect(typeof beat.joined_at).toBe("string");
+      expect(beat.status).toBe("active");
+    }
+    for (const slug of body.available_beats) {
+      expect(typeof slug).toBe("string");
+    }
+  });
+});
+
 describe("GET /api/beats/:slug — not found", () => {
   it("returns 404 for a nonexistent beat slug", async () => {
     const res = await SELF.fetch(
