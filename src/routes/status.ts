@@ -49,8 +49,10 @@ statusRouter.get("/api/status/:address", async (c) => {
     skills.beat = `${origin}/api/signals?beat=${beatSlug}`;
   }
 
+  const { signals: _rawSignals, ...statusRest } = status;
+
   return c.json({
-    ...status,
+    ...statusRest,
     signals,
     display_name: agentInfo.name,
     skills,

@@ -77,6 +77,12 @@ describe("GET /api/signals", () => {
     const body = await res.json<{
       signals: Array<{ id: string; queue_position: number | null; estimated_review_time: string | null }>;
     }>();
+    const first = body.signals.find((signal) => signal.id === "queue-submitted-001");
+    expect(first).toMatchObject({
+      queue_position: 0,
+      estimated_review_time: "next",
+    });
+
     const second = body.signals.find((signal) => signal.id === "queue-submitted-002");
     expect(second).toMatchObject({
       queue_position: 1,

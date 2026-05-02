@@ -2,14 +2,16 @@ import type { Env, Signal } from "./types";
 import { listSignals } from "./do-client";
 
 const REVIEW_VELOCITY_WINDOW_MS = 24 * 60 * 60 * 1000;
-const REVIEW_LOOKBACK_LIMIT = 200;
+// Queue position is approximate if a beat has more pending signals than this cap.
+// Keep it high enough for competition-week backlogs while avoiding unbounded DO reads.
+const REVIEW_LOOKBACK_LIMIT = 500;
 
 export interface QueueMetadata {
   queue_position: number | null;
   estimated_review_time: string | null;
 }
 
-type QueueSignal = Pick<Signal, "id" | "beat_slug" | "created_at" | "status">;
+type QueueSignal = Pick<Signal, "id" | "beat_slug" | "created_at" | "status" | "correction_of">;
 
 function estimateReviewTime(queuePosition: number, reviewedInWindow: number): string | null {
   if (queuePosition === 0) return "next";
@@ -29,7 +31,9 @@ export async function buildQueueMetadata(
   signals: QueueSignal[]
 ): Promise<Map<string, QueueMetadata>> {
   const metadata = new Map<string, QueueMetadata>();
-  const submittedSignals = signals.filter((signal) => signal.status === "submitted");
+  const submittedSignals = signals.filter(
+    (signal) => signal.status === "submitted" && signal.correction_of === null
+  );
 
   for (const signal of signals) {
     metadata.set(signal.id, { queue_position: null, estimated_review_time: null });
