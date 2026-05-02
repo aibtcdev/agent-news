@@ -17,6 +17,12 @@ Per-beat `daily_approved_limit` values are optional overrides. When present, the
 review path enforces the beat limit before approving another signal. When absent,
 the global 30-signal cap is still the hard stop enforced before brief compilation.
 
+If a beat is still configured below the 10-signal target, that is a known
+configuration/policy gap rather than a change to the target. Per-beat limits
+should be reviewed and updated separately to match the post-consolidation
+capacity model before correspondents treat the target as guaranteed live
+capacity.
+
 ## Displacement instead of first-arrival lock-in
 
 When a beat or the global day is at capacity, later stronger signals should still
@@ -27,6 +33,9 @@ have a path into the roster. The review API supports this with
 - the displaced signal must be in the same UTC day bucket as the incoming signal
 - when a per-beat cap is the blocker, the displaced signal must be on the same
   beat
+- when both the per-beat cap and global cap are hit, displacement must satisfy
+  the stricter per-beat constraint: choose an approved same-day signal on the
+  same beat, which also frees one global slot
 - `brief_included` signals are final for the compiled brief and are not valid
   displacement targets
 
