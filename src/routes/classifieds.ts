@@ -111,11 +111,11 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
       };
     });
 
-    // Per-agent views aren't cached (see below); send a private,no-store
-    // header so downstream caches don't independently snapshot them either.
+    // ?agent views stay uncached; private,no-store prevents downstream
+    // caches from independently snapshotting submitter-specific status.
     c.header(
       "Cache-Control",
-      agent ? "private, no-store" : "public, max-age=60, s-maxage=900"
+      agent ? "private, no-store" : "public, max-age=60, s-maxage=480"
     );
     const response = c.json({ classifieds: withNames, total: withNames.length });
     if (!agent) edgeCachePut(c, response);
