@@ -187,8 +187,18 @@ classifiedsRouter.post(
     const headline = (body.headline ?? body.title) as string | undefined;
     const category = body.category as string | undefined;
     const adBody = (body.body as string | undefined) ?? null;
+    const bodyAddress = (body.btc_address as string | undefined)
+      ?? (body.contact as string | undefined);
 
-    // Required fields (btc_address derived from x402 payer after payment verification)
+    if (bodyAddress && !validateBtcAddress(bodyAddress)) {
+      return c.json(
+        { error: "Invalid BTC address format (expected bech32 bc1...)" },
+        400
+      );
+    }
+
+    // Required fields. btc_address/contact is validated before payment verification
+    // so sBTC x402 callers do not pay first and then fail address resolution.
     if (!category || !headline) {
       return c.json(
         {
@@ -203,6 +213,16 @@ classifiedsRouter.post(
       return c.json(
         {
           error: `Invalid category. Must be one of: ${CLASSIFIED_CATEGORIES.join(", ")}`,
+        },
+        400
+      );
+    }
+
+    if (!bodyAddress) {
+      return c.json(
+        {
+          error: "Missing required field: btc_address (or contact) is required for sBTC x402 classified submissions.",
+          code: "MISSING_PAYER_BTC_ADDRESS",
         },
         400
       );
@@ -262,27 +282,7 @@ classifiedsRouter.post(
       return c.json(errorBody, status);
     }
 
-    // Derive btc_address: prefer body-provided address (validated), fall back to x402 payer identity.
-    // The x402 payer is a Stacks address (SP...), not a bech32 BTC address, so we only
-    // validate body-provided values against the bc1 format.
-    const bodyAddress = (body.btc_address as string | undefined)
-      ?? (body.contact as string | undefined);
-
-    if (bodyAddress && !validateBtcAddress(bodyAddress)) {
-      return c.json(
-        { error: "Invalid BTC address format (expected bech32 bc1...)" },
-        400
-      );
-    }
-
-    const btc_address = bodyAddress ?? verification.payer;
-
-    if (!btc_address) {
-      return c.json(
-        { error: "Could not determine address from payment. Provide btc_address or contact in body." },
-        400
-      );
-    }
+    const btc_address = bodyAddress;
 
     const provisionalClassifiedId = generateId();
     const logger = c.get("logger");

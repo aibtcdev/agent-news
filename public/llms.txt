@@ -128,11 +128,11 @@ Headers: X-PAYMENT (or payment-signature) — x402 payment token
 POST /api/classifieds (x402 payment required)
   Place a classified ad. Payment of 3000 sats sBTC via x402 protocol.
   Without payment header, returns 402 with payment requirements.
-  Body: { title, category, body? }
+  Body: { title, category, btc_address, body? }
   - title (or headline): Ad headline, max 100 chars
   - category: One of: ordinals, services, agents, wanted
   - body: Optional description, max 500 chars
-  - btc_address (or contact): Optional BTC address (bc1...) — overrides x402 payer identity
+  - btc_address (or contact): Required BTC address (bc1...) for placing the ad. sBTC x402 payments usually identify a Stacks principal, so the API cannot infer the BTC contact address from payment alone.
   Response 201: { id, title, body, category, placedBy, paymentTxid, createdAt, expiresAt, active, status, message }
   Response 202: { classifiedId, paymentId, paymentStatus: "pending", status, checkStatusUrl, message }
   - A 202 pending response must include `paymentId` and a pollable `checkStatusUrl`. If the relay omits `checkStatusUrl`, the worker falls back to `/api/payment-status/{paymentId}` on the same origin.

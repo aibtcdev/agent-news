@@ -94,6 +94,7 @@ describe("POST /api/classifieds — field aliasing (pre-payment validation)", ()
   // the body instead of returning 402. Field validation runs before payment
   // verification, so no real relay call is triggered for these tests.
   const DUMMY_PAYMENT = "test-payment-header";
+  const VALID_BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
 
   it("returns 402 when no payment header is present", async () => {
     const res = await SELF.fetch("http://example.com/api/classifieds", {
@@ -146,9 +147,7 @@ describe("POST /api/classifieds — field aliasing (pre-payment validation)", ()
     expect(body.error).toContain("category");
   });
 
-  it("accepts headline field (DB convention) and reaches payment verification", async () => {
-    // With valid category + headline, validation passes and we hit payment verify.
-    // Payment will fail (relay unavailable in test env) but we prove field aliasing works.
+  it("returns 400 before payment verification when btc_address/contact is missing", async () => {
     const res = await SELF.fetch("http://example.com/api/classifieds", {
       method: "POST",
       headers: {
@@ -156,6 +155,23 @@ describe("POST /api/classifieds — field aliasing (pre-payment validation)", ()
         "X-PAYMENT": DUMMY_PAYMENT,
       },
       body: JSON.stringify({ category: "services", headline: "My Ad Headline" }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json<{ code: string; error: string }>();
+    expect(body.code).toBe("MISSING_PAYER_BTC_ADDRESS");
+    expect(body.error).toContain("btc_address");
+  });
+
+  it("accepts headline field (DB convention) and reaches payment verification", async () => {
+    // With valid category + headline + btc_address, validation passes and we hit payment verify.
+    // Payment will fail (relay unavailable in test env) but we prove field aliasing works.
+    const res = await SELF.fetch("http://example.com/api/classifieds", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PAYMENT": DUMMY_PAYMENT,
+      },
+      body: JSON.stringify({ category: "services", headline: "My Ad Headline", btc_address: VALID_BTC_ADDRESS }),
     });
     // Should NOT be 400 (field validation passed) — either 402 or 503 from payment stage
     expect(res.status).not.toBe(400);
@@ -168,7 +184,7 @@ describe("POST /api/classifieds — field aliasing (pre-payment validation)", ()
         "Content-Type": "application/json",
         "X-PAYMENT": DUMMY_PAYMENT,
       },
-      body: JSON.stringify({ category: "services", title: "My Ad Title" }),
+      body: JSON.stringify({ category: "services", title: "My Ad Title", btc_address: VALID_BTC_ADDRESS }),
     });
     // Should NOT be 400 (field aliasing worked) — payment stage returns 402 or 503
     expect(res.status).not.toBe(400);
@@ -186,6 +202,7 @@ describe("POST /api/classifieds — field aliasing (pre-payment validation)", ()
         category: "services",
         headline: "Headline Takes Priority",
         title: "Title is Ignored",
+        btc_address: VALID_BTC_ADDRESS,
       }),
     });
     expect(res.status).not.toBe(400);
