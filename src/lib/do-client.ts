@@ -871,6 +871,41 @@ export async function reviewSignal(
   });
 }
 
+export interface BulkReviewAction {
+  signal_id: string;
+  status: "rejected";
+  feedback: string;
+}
+
+export interface BulkReviewResult {
+  results: Array<{
+    signal_id: string;
+    success: boolean;
+    status?: "rejected";
+    error?: string;
+    noop?: boolean;
+  }>;
+  summary: {
+    total: number;
+    succeeded: number;
+    noop: number;
+    failed: number;
+  };
+}
+
+export async function bulkReviewSignals(
+  env: Env,
+  btcAddress: string,
+  actions: BulkReviewAction[]
+): Promise<DOResult<BulkReviewResult>> {
+  const stub = getStub(env);
+  return doFetch<BulkReviewResult>(stub, "/editor/bulk-review", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ btc_address: btcAddress, actions }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Brief Signals (inclusion tracking)
 // ---------------------------------------------------------------------------

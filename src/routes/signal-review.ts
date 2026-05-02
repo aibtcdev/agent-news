@@ -8,7 +8,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, SignalStatus } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
-import { reviewSignal, listFrontPagePage, listFrontPage } from "../lib/do-client";
+import { bulkReviewSignals, reviewSignal, listFrontPagePage, listFrontPage } from "../lib/do-client";
 import { validateDateFormat } from "../lib/validators";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
@@ -23,6 +23,8 @@ const reviewRateLimit = createRateLimitMiddleware({
   identityHeader: "X-BTC-Address",
   ...REVIEW_RATE_LIMIT,
 });
+
+const MAX_BULK_REVIEW_ACTIONS = 50;
 
 // PATCH /api/signals/:id/review — Publisher reviews a signal (BIP-322 auth required)
 signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) => {
@@ -112,6 +114,55 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     correction_of: s.correction_of,
     approval_cap: result.approval_cap ?? undefined,
   });
+});
+
+// POST /api/editor/bulk-review — v1 bulk reject path for editor close-out sweeps.
+signalReviewRouter.post("/api/editor/bulk-review", reviewRateLimit, async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const { btc_address, actions } = body;
+  if (!btc_address) return c.json({ error: "Missing required field: btc_address" }, 400);
+  if (!validateBtcAddress(btc_address)) return c.json({ error: "Invalid BTC address format" }, 400);
+  if (!Array.isArray(actions)) return c.json({ error: "Missing required field: actions" }, 400);
+  if (actions.length === 0) return c.json({ error: "actions must contain at least one item" }, 400);
+  if (actions.length > MAX_BULK_REVIEW_ACTIONS) {
+    return c.json({ error: "Too many actions", max_actions: MAX_BULK_REVIEW_ACTIONS }, 413);
+  }
+
+  for (const [index, action] of actions.entries()) {
+    if (!action || typeof action !== "object") {
+      return c.json({ error: `actions[${index}] must be an object` }, 400);
+    }
+    const item = action as Record<string, unknown>;
+    if (typeof item.signal_id !== "string" || item.signal_id.length === 0) {
+      return c.json({ error: `actions[${index}].signal_id is required` }, 400);
+    }
+    if (item.status !== "rejected") {
+      return c.json({ error: `actions[${index}].status must be rejected in bulk-review v1` }, 400);
+    }
+    if (typeof item.feedback !== "string" || item.feedback.trim().length === 0) {
+      return c.json({ error: `actions[${index}].feedback is required when rejecting` }, 400);
+    }
+  }
+
+  const authResult = verifyAuth(
+    c.req.raw.headers,
+    btc_address as string,
+    "POST",
+    "/api/editor/bulk-review"
+  );
+  if (!authResult.valid) {
+    return c.json({ error: authResult.error, code: authResult.code }, 401);
+  }
+
+  const result = await bulkReviewSignals(c.env, btc_address as string, actions as Parameters<typeof bulkReviewSignals>[2]);
+  if (!result.ok) return c.json({ error: result.error }, result.status ?? 400);
+  return c.json(result.data);
 });
 
 // GET /api/front-page — curated signals (approved + brief_included only)

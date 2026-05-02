@@ -1715,6 +1715,126 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: signal, approval_cap: approvalCap } as DOResult<Signal>);
     });
 
+    // POST /editor/bulk-review — v1 bulk reject path.
+    // Keeps close-out sweeps inside a single DO request so callers avoid many
+    // parallel review calls against the storage event loop.
+    this.router.post("/editor/bulk-review", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>, 400);
+      }
+
+      const btcAddress = body.btc_address as string | undefined;
+      const actions = body.actions as Array<Record<string, unknown>> | undefined;
+      if (!btcAddress || !Array.isArray(actions)) {
+        return c.json({ ok: false, error: "btc_address and actions are required" } satisfies DOResult<unknown>, 400);
+      }
+
+      const now = new Date().toISOString();
+      const results: Array<{ signal_id: string; success: boolean; status?: "rejected"; error?: string; noop?: boolean }> = [];
+      const validActions: Array<{ id: string; feedback: string; currentStatus: SignalStatus }> = [];
+
+      for (const action of actions) {
+        const id = String(action.signal_id ?? "");
+        const status = action.status;
+        const feedback = typeof action.feedback === "string" ? sanitizeString(action.feedback, 1000) : "";
+
+        if (!id) {
+          results.push({ signal_id: id, success: false, error: "missing_signal_id" });
+          continue;
+        }
+        if (status !== "rejected") {
+          results.push({ signal_id: id, success: false, error: "unsupported_status" });
+          continue;
+        }
+        if (!feedback) {
+          results.push({ signal_id: id, success: false, error: "feedback_required" });
+          continue;
+        }
+
+        const rows = this.ctx.storage.sql
+          .exec("SELECT id, status, beat_slug, btc_address FROM signals WHERE id = ?", id)
+          .toArray();
+        if (rows.length === 0) {
+          results.push({ signal_id: id, success: false, error: "not_found" });
+          continue;
+        }
+
+        const signal = rows[0] as { id: string; status: SignalStatus; beat_slug: string; btc_address: string };
+        if (signal.status === "rejected") {
+          results.push({ signal_id: id, success: false, error: "already_rejected", noop: true });
+          continue;
+        }
+        if (!SIGNAL_VALID_TRANSITIONS[signal.status]?.includes("rejected")) {
+          results.push({ signal_id: id, success: false, error: `invalid_transition:${signal.status}->rejected` });
+          continue;
+        }
+
+        const authCheck = verifyEditorOrPublisher(this.ctx.storage.sql, btcAddress, signal.beat_slug);
+        if (!authCheck.ok) {
+          results.push({ signal_id: id, success: false, error: authCheck.error });
+          continue;
+        }
+        if (authCheck.role === "editor" && btcAddress === signal.btc_address) {
+          results.push({ signal_id: id, success: false, error: "editors_cannot_review_own_signals" });
+          continue;
+        }
+
+        if (signal.status === "brief_included") {
+          const inscriptionRows = this.ctx.storage.sql
+            .exec(
+              `SELECT b.inscription_id
+               FROM brief_signals bs
+               JOIN briefs b ON bs.brief_date = b.date
+               WHERE bs.signal_id = ?
+               LIMIT 1`,
+              id
+            )
+            .toArray();
+          if (inscriptionRows.length > 0 && (inscriptionRows[0] as Record<string, unknown>).inscription_id) {
+            results.push({ signal_id: id, success: false, error: "brief_already_inscribed" });
+            continue;
+          }
+        }
+
+        validActions.push({ id, feedback, currentStatus: signal.status });
+        results.push({ signal_id: id, success: true, status: "rejected" });
+      }
+
+      for (const action of validActions) {
+        this.ctx.storage.sql.exec(
+          `UPDATE signals SET status = 'rejected', publisher_feedback = ?, reviewed_at = ?, updated_at = ?
+           WHERE id = ?`,
+          action.feedback, now, now, action.id
+        );
+        if (action.currentStatus === "brief_included") {
+          this.ctx.storage.sql.exec(
+            "UPDATE brief_signals SET retracted_at = ? WHERE signal_id = ? AND retracted_at IS NULL",
+            now, action.id
+          );
+          this.ctx.storage.sql.exec(
+            "UPDATE earnings SET voided_at = ? WHERE reason = 'brief_inclusion' AND reference_id = ? AND payout_txid IS NULL AND voided_at IS NULL",
+            now, action.id
+          );
+        }
+      }
+
+      const succeeded = results.filter((result) => result.success).length;
+      const noop = results.filter((result) => result.noop).length;
+      return c.json({
+        ok: true,
+        data: {
+          results,
+          summary: {
+            total: results.length,
+            succeeded,
+            noop,
+            failed: results.length - succeeded - noop,
+          },
+        },
+      } satisfies DOResult<unknown>);
+    });
+
     // -------------------------------------------------------------------------
     // Beats CRUD
     // -------------------------------------------------------------------------
