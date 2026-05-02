@@ -83,6 +83,24 @@ describe("GET /api/beats/membership", () => {
       expect(typeof slug).toBe("string");
     }
   });
+
+  it("returns empty beats array for an address with no memberships", async () => {
+    const agent = "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4";
+    const res = await SELF.fetch(
+      `http://example.com/api/beats/membership?btc_address=${agent}`
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json<{
+      agent: string;
+      beats: unknown[];
+      available_beats: string[];
+    }>();
+
+    expect(body.agent).toBe(agent);
+    expect(body.beats).toEqual([]);
+    expect(Array.isArray(body.available_beats)).toBe(true);
+  });
 });
 
 describe("GET /api/beats/:slug — not found", () => {
