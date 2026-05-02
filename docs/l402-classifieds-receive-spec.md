@@ -45,7 +45,7 @@ When no payment header is present, `POST /api/classifieds` should advertise both
     "asset": "sats",
     "invoice": "lnbc...",
     "macaroon": "<base64-macaroon>",
-    "expiresAt": "2026-05-02T18:00:00.000Z"
+    "expiresAt": "<current_time + invoice_ttl_seconds>"
   }
 }
 ```
@@ -77,24 +77,27 @@ The body should remain shared across rails:
 3. If no payment proof is present, return 402 with both x402 and L402 requirements.
 4. If x402 proof is present, use the existing x402 verification and staged-delivery path.
 5. If L402 proof is present, verify the macaroon/preimage against the issued invoice.
-6. On confirmed L402 settlement, create or stage the classified with:
+6. Consume the verified proof atomically: the macaroon/preimage pair is single-use and must be marked spent before or in the same transaction as delivery staging.
+7. On confirmed L402 settlement, stage the classified through the same durable delivery path used by x402 with:
    - `btc_address`: validated body contact address
    - `payment_txid`: Lightning payment hash or invoice identifier
    - `payment_rail`: `l402` (new field if schema allows; otherwise encode in lifecycle metadata first)
-7. Return the same 201/202 delivery shape used by x402 so callers do not need rail-specific handling after payment.
+8. Return the same 201/202 delivery shape used by x402 so callers do not need rail-specific handling after payment.
 
 ## Data model options
 
 Preferred first pass:
 
-- Add `payment_rail TEXT DEFAULT 'x402'` to classifieds or payment staging metadata.
+- Add `payment_rail TEXT NOT NULL DEFAULT 'x402'` to classifieds or payment staging metadata.
+- Use an explicit migration so existing rows are backfilled as `x402`; that default is accurate for historical rows because all pre-L402 classifieds were paid through the x402/sBTC or wallet-driven legacy path.
 - Store the Lightning payment hash in `payment_txid` only if no dedicated `payment_id`/`payment_hash` field exists.
+- Track spent L402 proofs by stable invoice/payment hash (or provider-issued payment id) with a uniqueness constraint so replayed macaroon/preimage pairs cannot create duplicate listings.
 
-If avoiding schema changes for v1, keep the classified row unchanged and record rail details in payment lifecycle logs. This is lower risk but weakens later TAM reporting.
+If avoiding schema changes for v1, keep the classified row unchanged and record rail details in payment lifecycle logs. This is lower risk but weakens later TAM reporting and should not be used for the T+30 rail-split rollup.
 
 ## Open engineering decisions
 
-1. Which L402 provider/verification library should own invoice issuance and macaroon verification?
+1. Which L402 provider/verification library should own invoice issuance and macaroon verification? The likely starting point is the Spark SDK/L402 integration already shipped in `aibtc-mcp-server` v1.49.0 via PR #474.
 2. Should invoice issuance happen inline on the 402 response or through a separate internal service binding?
 3. What is the invoice expiry window? Recommended: 5-10 minutes, shorter than staged classified expiry.
 4. Should L402 settlement use the existing `/api/payment-status/:paymentId` polling surface or a sibling `/api/l402-status/:paymentId` route?
@@ -105,6 +108,8 @@ If avoiding schema changes for v1, keep the classified row unchanged and record 
 - Never create a classified before payment settlement or staged-payment acceptance.
 - Never charge before validating required listing fields.
 - Never treat a Lightning payer identity as a BTC contact address.
+- Each macaroon/preimage proof must be single-use: validate it against the issuer, consume it, and reject duplicate submissions that reuse the same proof.
+- L402 settlement and classified staging must be idempotent. If settlement succeeds but classified creation fails, retry by payment id/hash should finalize the original staged classified rather than charge again.
 - Keep x402 and L402 responses machine-readable so agents can choose either rail without scraping prose.
 - Redact macaroon/preimage material from logs.
 
@@ -120,7 +125,8 @@ If avoiding schema changes for v1, keep the classified row unchanged and record 
 
 - Add invoice issuance + verification service.
 - Accept L402 proof headers.
-- Reuse the existing classified creation/staging path after verification.
+- Persist spent proof/payment identifiers with uniqueness protection.
+- Reuse the existing classified creation/staging path after verification so late delivery retries are idempotent.
 
 ### Phase 3 — reporting
 
