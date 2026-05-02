@@ -48,6 +48,7 @@
 import type { AppContext } from "./types";
 
 const CACHED_AT_HEADER = "X-Edge-Cached-At";
+const CACHE_AGE_HEADER = "X-Edge-Cache-Age";
 
 export interface EdgeCacheKeyOptions {
   /**
@@ -116,6 +117,10 @@ export interface SWRMatchOptions {
  * Match the request against the edge cache, classifying the result as fresh
  * or stale based on a timestamp header we wrote at put-time.
  *
+ * Matched responses include `X-Edge-Cache-Age` in whole seconds so health
+ * probes can distinguish bounded stale serving from a cache entry whose
+ * background refreshes have been failing for too long.
+ *
  * Returns:
  *   - null           → cache miss, caller must rebuild.
  *   - { stale=false }→ fresh hit, serve as-is.
@@ -138,6 +143,10 @@ export async function edgeCacheMatchSWR(
   const stale = ageSeconds >= options.freshSeconds;
   const response = new Response(cached.body, cached);
   response.headers.set("X-Edge-Cache", stale ? "STALE" : "HIT");
+  response.headers.set(
+    CACHE_AGE_HEADER,
+    Number.isFinite(ageSeconds) ? String(Math.max(0, Math.floor(ageSeconds))) : "unknown"
+  );
   return { response, stale, ageSeconds };
 }
 
