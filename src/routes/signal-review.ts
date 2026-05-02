@@ -117,6 +117,9 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
 });
 
 // POST /api/editor/bulk-review — v1 bulk reject path for editor close-out sweeps.
+// The review rate limit intentionally applies per batch, not per action: this
+// endpoint is for privileged close-out sweeps where reducing request fan-out is
+// the product goal. The hard batch cap below bounds the maximum write burst.
 signalReviewRouter.post("/api/editor/bulk-review", reviewRateLimit, async (c) => {
   let body: Record<string, unknown>;
   try {

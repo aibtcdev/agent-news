@@ -1717,7 +1717,10 @@ export class NewsDO extends DurableObject<Env> {
 
     // POST /editor/bulk-review — v1 bulk reject path.
     // Keeps close-out sweeps inside a single DO request so callers avoid many
-    // parallel review calls against the storage event loop.
+    // parallel review calls against the storage event loop. The public Worker
+    // route enforces the 50-action cap before this internal DO endpoint is
+    // called; keeping that bound at the edge preserves one source of truth for
+    // public request validation.
     this.router.post("/editor/bulk-review", async (c) => {
       const body = await parseRequiredJson(c);
       if (!body) {
