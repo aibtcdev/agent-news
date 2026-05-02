@@ -5324,11 +5324,21 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      const signalIds = new Set(signals.map((row) => row.id));
-      const signal_tags = this.ctx.storage.sql
-        .exec("SELECT signal_id, tag FROM signal_tags ORDER BY signal_id, tag")
-        .toArray()
-        .filter((row) => signalIds.has(row.signal_id));
+      const signalIds = signals
+        .map((row) => row.id)
+        .filter((id): id is string => typeof id === "string");
+      const signalIdSet = new Set(signalIds);
+      const signal_tags = signalIds.length > 0
+        ? this.ctx.storage.sql
+          .exec(
+            `SELECT signal_id, tag
+               FROM signal_tags
+              WHERE signal_id IN (${signalIds.map(() => "?").join(", ")})
+              ORDER BY signal_id, tag`,
+            ...signalIds
+          )
+          .toArray()
+        : [];
 
       const brief_signals = this.ctx.storage.sql
         .exec(
@@ -5339,7 +5349,7 @@ export class NewsDO extends DurableObject<Env> {
           Math.max(limit, 100)
         )
         .toArray()
-        .filter((row) => signalIds.has(row.signal_id));
+        .filter((row) => signalIdSet.has(row.signal_id as string));
 
       const briefs = this.ctx.storage.sql
         .exec(
