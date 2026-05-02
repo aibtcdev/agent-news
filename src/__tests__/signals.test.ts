@@ -31,6 +31,59 @@ describe("GET /api/signals", () => {
     expect(typeof body.filtered).toBe("number");
   });
 
+  it("includes queue transparency fields for submitted signals", async () => {
+    const beat = "bitcoin-macro";
+    await seed({
+      signals: [
+        {
+          id: "queue-approved-001",
+          beat_slug: beat,
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Recently reviewed queue signal",
+          sources: "[]",
+          created_at: "2026-05-02T00:00:00.000Z",
+          status: "approved",
+          reviewed_at: "2026-05-02T00:10:00.000Z",
+        },
+        {
+          id: "queue-submitted-001",
+          beat_slug: beat,
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Older submitted queue signal",
+          sources: "[]",
+          created_at: "2026-05-02T00:20:00.000Z",
+          status: "submitted",
+        },
+        {
+          id: "queue-submitted-002",
+          beat_slug: beat,
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Second submitted queue signal",
+          sources: "[]",
+          created_at: "2026-05-02T00:30:00.000Z",
+          status: "submitted",
+        },
+      ],
+      signal_tags: [
+        { signal_id: "queue-submitted-001", tag: "queue-transparency" },
+        { signal_id: "queue-submitted-002", tag: "queue-transparency" },
+      ],
+    });
+
+    const res = await SELF.fetch(
+      `http://example.com/api/signals?beat=${beat}&status=submitted&limit=10&tag=queue-transparency`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{
+      signals: Array<{ id: string; queue_position: number | null; estimated_review_time: string | null }>;
+    }>();
+    const second = body.signals.find((signal) => signal.id === "queue-submitted-002");
+    expect(second).toMatchObject({
+      queue_position: 1,
+      estimated_review_time: "~2 days",
+    });
+  });
+
   it("accepts query parameters without error", async () => {
     const res = await SELF.fetch(
       "http://example.com/api/signals?limit=10&beat=tech"

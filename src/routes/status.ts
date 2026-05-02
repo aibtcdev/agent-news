@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { validateBtcAddress } from "../lib/validators";
 import { getAgentStatus } from "../lib/do-client";
+import { buildQueueMetadata } from "../lib/review-queue";
 import { resolveAgentName } from "../services/agent-resolver";
 
 const statusRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -30,6 +31,12 @@ statusRouter.get("/api/status/:address", async (c) => {
     return c.json({ error: `No status found for address ${address}` }, 404);
   }
 
+  const queueMetadata = await buildQueueMetadata(c.env, status.signals);
+  const signals = status.signals.map((signal) => ({
+    ...signal,
+    ...(queueMetadata.get(signal.id) ?? { queue_position: null, estimated_review_time: null }),
+  }));
+
   // Build skills URLs based on request origin
   const origin = new URL(c.req.url).origin;
   const beatSlug = status.beat?.slug as string | undefined ?? null;
@@ -44,6 +51,7 @@ statusRouter.get("/api/status/:address", async (c) => {
 
   return c.json({
     ...status,
+    signals,
     display_name: agentInfo.name,
     skills,
   });

@@ -24,6 +24,7 @@ import { checkAgentIdentity } from "../services/identity-gate";
 import { buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 import { toUTCDate, resolveNamesWithTimeout } from "../lib/helpers";
 import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
+import { buildQueueMetadata } from "../lib/review-queue";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -116,10 +117,13 @@ signalsRouter.get("/api/signals", async (c) => {
     (p) => c.executionCtx.waitUntil(p)
   );
 
+  const queueMetadata = await buildQueueMetadata(c.env, signals);
+
   // Transform snake_case → camelCase to match frontend expectations
   // beat_name is joined from the beats table in the DO query — no separate listBeats() call needed
   const transformed = signals.map((s) => {
     const info = nameMap.get(s.btc_address);
+    const queue = queueMetadata.get(s.id) ?? { queue_position: null, estimated_review_time: null };
     return {
       id: s.id,
       btcAddress: s.btc_address,
@@ -134,6 +138,8 @@ signalsRouter.get("/api/signals", async (c) => {
       utcDate: toUTCDate(s.created_at),
       correction_of: s.correction_of,
       status: s.status,
+      queue_position: queue.queue_position,
+      estimated_review_time: queue.estimated_review_time,
       publisherFeedback: s.publisher_feedback,
       disclosure: s.disclosure,
       quality_score: s.quality_score ?? null,
@@ -172,6 +178,9 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
     return c.json({ error: `Signal "${id}" not found` }, 404);
   }
 
+  const queueMetadata = await buildQueueMetadata(c.env, [s]);
+  const queue = queueMetadata.get(s.id) ?? { queue_position: null, estimated_review_time: null };
+
   // Resolve agent display name for this signal
   const singleNameMap = await resolveNamesWithTimeout(
     c.env.NEWS_KV,
@@ -194,6 +203,8 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
     timestamp: s.created_at,
     correction_of: s.correction_of,
     status: s.status,
+    queue_position: queue.queue_position,
+    estimated_review_time: queue.estimated_review_time,
     publisherFeedback: s.publisher_feedback,
     reviewedAt: s.reviewed_at,
     disclosure: s.disclosure,
