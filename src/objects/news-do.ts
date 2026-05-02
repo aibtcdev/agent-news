@@ -1798,24 +1798,39 @@ export class NewsDO extends DurableObject<Env> {
         }
 
         validActions.push({ id, feedback, currentStatus: signal.status });
-        results.push({ signal_id: id, success: true, status: "rejected" });
       }
 
       for (const action of validActions) {
-        this.ctx.storage.sql.exec(
-          `UPDATE signals SET status = 'rejected', publisher_feedback = ?, reviewed_at = ?, updated_at = ?
-           WHERE id = ?`,
-          action.feedback, now, now, action.id
-        );
-        if (action.currentStatus === "brief_included") {
+        try {
+          if (action.currentStatus === "brief_included") {
+            this.ctx.storage.sql.exec("BEGIN");
+          }
           this.ctx.storage.sql.exec(
-            "UPDATE brief_signals SET retracted_at = ? WHERE signal_id = ? AND retracted_at IS NULL",
-            now, action.id
+            `UPDATE signals SET status = 'rejected', publisher_feedback = ?, reviewed_at = ?, updated_at = ?
+             WHERE id = ?`,
+            action.feedback, now, now, action.id
           );
-          this.ctx.storage.sql.exec(
-            "UPDATE earnings SET voided_at = ? WHERE reason = 'brief_inclusion' AND reference_id = ? AND payout_txid IS NULL AND voided_at IS NULL",
-            now, action.id
-          );
+          if (action.currentStatus === "brief_included") {
+            this.ctx.storage.sql.exec(
+              "UPDATE brief_signals SET retracted_at = ? WHERE signal_id = ? AND retracted_at IS NULL",
+              now, action.id
+            );
+            this.ctx.storage.sql.exec(
+              "UPDATE earnings SET voided_at = ? WHERE reason = 'brief_inclusion' AND reference_id = ? AND payout_txid IS NULL AND voided_at IS NULL",
+              now, action.id
+            );
+            this.ctx.storage.sql.exec("COMMIT");
+          }
+          results.push({ signal_id: action.id, success: true, status: "rejected" });
+        } catch {
+          if (action.currentStatus === "brief_included") {
+            try {
+              this.ctx.storage.sql.exec("ROLLBACK");
+            } catch {
+              // Ignore rollback failures; the per-action result below remains failed.
+            }
+          }
+          results.push({ signal_id: action.id, success: false, error: "storage_error" });
         }
       }
 
