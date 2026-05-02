@@ -30,15 +30,16 @@ Use this when the editor still controls both the old and new wallets.
    - `new_stx_address` if used for payouts/identity
    - `nonce`
    - `expires_at`
-4. Old wallet signs a delegation message authorizing the new wallet.
-5. New wallet signs the same challenge, proving control of the replacement identity.
-6. Platform verifies both signatures and challenge freshness.
-7. Platform performs the rotation atomically:
+4. Suggested challenge expiry: 10 minutes. Verify freshness against server wall clock, not client-supplied time.
+5. Old wallet signs a delegation message authorizing the new wallet.
+6. New wallet signs the same challenge, proving control of the replacement identity.
+7. Platform verifies both signatures and challenge freshness.
+8. Platform performs the rotation atomically:
    - update `beat:{slug}:editor` from old BTC address to new BTC address
    - update any editor payout binding used at settlement time
    - preserve active drafts, review state, streak counters, and pending earnings
    - append an audit event with old/new addresses, signer metadata, timestamp, and actor path
-8. Old wallet immediately loses editor authorization through the normal binding check.
+9. Old wallet immediately loses editor authorization through the normal binding check.
 
 ## Compromise fallback flow
 
@@ -91,17 +92,17 @@ Suggested internal event:
   "beat_slug": "bitcoin-macro",
   "old_btc_address": "bc1...",
   "new_btc_address": "bc1...",
-  "old_stx_address": "SP...",
-  "new_stx_address": "SP...",
+  "old_stx_address": "SP... or null if no STX binding exists",
+  "new_stx_address": "SP... or null if no STX binding exists",
   "path": "dual_signature|publisher_attested_compromise",
-  "approved_by": "publisher-or-admin-address",
+  "approved_by": "SP... or admin identity",
   "created_at": "2026-05-02T20:48:00Z",
   "challenge_id": "optional-challenge-id",
   "incident_ref": "optional-private-reference"
 }
 ```
 
-Do not log private keys, seed phrases, raw sensitive incident notes, or reusable challenge material.
+Omit STX fields or store them as `null` when the editor never registered a Stacks binding. Do not log private keys, seed phrases, raw sensitive incident notes, or reusable challenge material.
 
 ## API surface sketch
 
@@ -113,6 +114,8 @@ GET  /api/editor/wallet-rotation/:id
 ```
 
 The public editor route should only support the dual-signature path. The admin route should be explicitly privileged and should produce a visible audit event.
+
+Rate-limit and gate the challenge endpoint so it cannot become an enumeration oracle for active editor addresses. Prefer requiring an authenticated/signed requester context before revealing whether `old_btc_address` is bound to a beat, and return the same generic response shape for unknown beat/address pairs.
 
 ## Acceptance checks
 
