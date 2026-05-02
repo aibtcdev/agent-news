@@ -190,13 +190,6 @@ classifiedsRouter.post(
     const bodyAddress = (body.btc_address as string | undefined)
       ?? (body.contact as string | undefined);
 
-    if (bodyAddress && !validateBtcAddress(bodyAddress)) {
-      return c.json(
-        { error: "Invalid BTC address format (expected bech32 bc1...)" },
-        400
-      );
-    }
-
     // Required fields. btc_address/contact is validated before payment verification
     // so sBTC x402 callers do not pay first and then fail address resolution.
     if (!category || !headline) {
@@ -214,6 +207,13 @@ classifiedsRouter.post(
         {
           error: `Invalid category. Must be one of: ${CLASSIFIED_CATEGORIES.join(", ")}`,
         },
+        400
+      );
+    }
+
+    if (bodyAddress && !validateBtcAddress(bodyAddress)) {
+      return c.json(
+        { error: "Invalid BTC address format (expected bech32 bc1...)" },
         400
       );
     }

@@ -133,6 +133,20 @@ describe("POST /api/classifieds — field aliasing (pre-payment validation)", ()
     expect(body.error).toContain("category");
   });
 
+  it("returns required-field errors before btc_address format errors", async () => {
+    const res = await SELF.fetch("http://example.com/api/classifieds", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-PAYMENT": DUMMY_PAYMENT,
+      },
+      body: JSON.stringify({ headline: "My Ad", btc_address: "not-bc1" }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("category");
+  });
+
   it("returns 400 when category is invalid", async () => {
     const res = await SELF.fetch("http://example.com/api/classifieds", {
       method: "POST",
