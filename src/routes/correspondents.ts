@@ -6,12 +6,16 @@
  * on whether the DO is warm, warming, or cold-booting after a quiet window.
  *
  * Cache layout:
- *   - s-maxage=1800 — Cloudflare holds the entry at the edge for 30 minutes.
+ *   - s-maxage=7200 — Cloudflare holds the entry at the edge for 2 hours.
  *   - freshSeconds=1500 — within 25 minutes of writing, served as a plain HIT.
- *   - 1500s < age ≤ 1800s — served immediately as a STALE hit, AND a
+ *   - 1500s < age ≤ 7200s — served immediately as a STALE hit, AND a
  *     background rebuild fires (guarded by a KV lock so concurrent stale
  *     hits don't all hammer the DO). User never waits for the cold boot.
- *   - age > 1800s — CF evicts the entry; next request pays the MISS cost.
+ *   - age > 7200s — CF evicts the entry; next request pays the MISS cost.
+ *
+ * The intentionally long outer TTL is a low-risk mitigation for sustained DO
+ * refresh timeouts: correspondents rankings tolerate slightly stale data better
+ * than hard misses returning 5xx/timeout after the old 30-minute eviction.
  */
 
 import { Hono } from "hono";
@@ -31,6 +35,7 @@ const correspondentsRouter = new Hono<{
 
 const CACHE_KEY_PATH = "/api/correspondents";
 const FRESH_SECONDS = 1_500;
+const EDGE_TTL_SECONDS = 7_200;
 
 async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
   const bundle = await getCorrespondentsBundle(c.env);
@@ -97,12 +102,16 @@ async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
       a.address.localeCompare(b.address),
   );
 
+  // Only successful bundle rebuilds reach this point and get written to the
+  // edge cache. If the DO times out or throws, the exception bubbles to the
+  // caller/SWR logger and the previous cached entry remains the only served
+  // copy; timeout/error payloads are never cached for the extended TTL.
   const body = JSON.stringify({ correspondents, total: correspondents.length });
   const response = new Response(body, {
     status: 200,
     headers: {
       "Content-Type": "application/json; charset=UTF-8",
-      "Cache-Control": "public, max-age=60, s-maxage=1800",
+      "Cache-Control": `public, max-age=60, s-maxage=${EDGE_TTL_SECONDS}`,
     },
   });
   edgeCachePut(c, response, { cacheKeyPath: CACHE_KEY_PATH });
