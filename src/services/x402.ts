@@ -45,6 +45,13 @@ const NONCE_TERMINAL_REASONS = new Set<PaymentTerminalReason>([
   "sender_nonce_duplicate",
 ]);
 
+const noopLogger: Logger = {
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  debug: () => undefined,
+};
+
 const RPC_ERROR_TO_TERMINAL_REASON: Partial<Record<string, PaymentTerminalReason>> = {
   INVALID_TRANSACTION: "invalid_transaction",
   NOT_SPONSORED: "not_sponsored",
@@ -356,7 +363,7 @@ function interpretHttpRelayResult(result: {
   paymentId?: string;
   checkStatusUrl?: string;
   error?: string;
-}): PaymentVerifyResult {
+}, logger: Logger): PaymentVerifyResult {
   if (result.success) {
     return {
       valid: true,
@@ -368,7 +375,11 @@ function interpretHttpRelayResult(result: {
 
   if (result.status === "pending") {
     if (!result.paymentId) {
-      console.error("[x402] relay returned pending without paymentId (http):", JSON.stringify(result));
+      logger.error("relay returned pending without paymentId", {
+        path: "http",
+        status: result.status,
+        hasCheckStatusUrl: Boolean(result.checkStatusUrl),
+      });
       return {
         valid: false,
         relayError: true,
@@ -386,7 +397,11 @@ function interpretHttpRelayResult(result: {
     };
   }
 
-  console.error("[x402] relay payment rejected (http):", JSON.stringify(result));
+  logger.error("relay payment rejected", {
+    path: "http",
+    status: result.status ?? null,
+    error: result.error ?? null,
+  });
   return {
     valid: false,
     relayReason: result.error ?? JSON.stringify(result),
@@ -412,6 +427,7 @@ export async function verifyPayment(
   env?: Env,
   logContext?: { logger?: Logger; route?: string }
 ): Promise<PaymentVerifyResult> {
+  const logger = logContext?.logger ?? noopLogger;
   let paymentPayload: Record<string, unknown>;
   try {
     paymentPayload = JSON.parse(atob(paymentHeader)) as Record<string, unknown>;
@@ -424,7 +440,7 @@ export async function verifyPayment(
   // Placed after payload validation so malformed headers still get a proper
   // 402 (client error) instead of being masked as a 503 (relay error).
   if (shouldFastFail()) {
-    console.warn("[x402] circuit breaker open — fast-failing relay call");
+    logger.warn("relay circuit breaker open", { action: "fast_fail" });
     return { valid: false, relayError: true, relayReason: "Relay circuit breaker open — too many recent failures" };
   }
 
@@ -445,7 +461,7 @@ export async function verifyPayment(
     const txHex = typeof innerPayload?.transaction === "string" ? innerPayload.transaction : undefined;
     if (!txHex) {
       // Malformed payment payload — client error, not a relay error
-      console.error("[x402] RPC path: missing payload.transaction in payment header");
+      logger.error("payment payload missing transaction", { path: "rpc" });
       return { valid: false };
     }
 
@@ -462,17 +478,22 @@ export async function verifyPayment(
     // Step 1: Submit the payment to the relay queue.
     let submitResult: SubmitPaymentResult;
     try {
-      console.log("[x402] using RPC path via X402_RELAY service binding");
+      logger.info("using relay RPC path", { path: "rpc" });
       submitResult = parseSubmitPaymentResult(await env.X402_RELAY.submitPayment(txHex, settle, paymentIdentifier));
     } catch (err) {
       // RPC call failure is a relay error — do not penalise the payer
-      console.error("[x402] RPC submitPayment threw:", err);
+      logger.error("relay RPC submitPayment failed", { path: "rpc", error: String(err) });
       recordRelayFailure();
       return { valid: false, relayError: true };
     }
 
     if (!submitResult.accepted) {
-      console.error("[x402] RPC submitPayment rejected:", submitResult.code, submitResult.error);
+      logger.error("relay RPC submitPayment rejected", {
+        path: "rpc",
+        code: submitResult.code ?? null,
+        error: submitResult.error ?? null,
+        retryable: submitResult.retryable ?? null,
+      });
       return {
         valid: false,
         relayReason: submitResult.error ?? submitResult.code ?? "Payment rejected by relay",
@@ -485,14 +506,14 @@ export async function verifyPayment(
     const paymentId = submitResult.paymentId;
     const checkStatusUrl = submitResult.checkStatusUrl;
     if (!paymentId) {
-      console.error("[x402] RPC submitPayment accepted but did not return a paymentId");
+      logger.error("relay RPC accepted payment without paymentId", { path: "rpc" });
       return {
         valid: false,
         relayError: true,
         relayReason: "Relay accepted payment but did not return a paymentId",
       };
     }
-    console.log("[x402] RPC payment queued:", paymentId, submitResult.status);
+    logger.info("relay RPC payment queued", { path: "rpc", paymentId, status: submitResult.status });
 
     // Step 2: Poll checkPayment() until confirmed, failed, or timeout.
     let lastCheckResult: CheckPaymentResult | undefined;
@@ -506,7 +527,7 @@ export async function verifyPayment(
       try {
         rawCheckResult = await env.X402_RELAY.checkPayment(paymentId);
       } catch (err) {
-        console.error("[x402] RPC checkPayment transport failure:", err);
+        logger.error("relay RPC checkPayment transport failure", { path: "rpc", paymentId, error: String(err) });
         // Treat as transient relay error — payer should not be penalised
         recordRelayFailure();
         return {
@@ -519,7 +540,7 @@ export async function verifyPayment(
       try {
         checkResult = parseCheckPaymentResult(rawCheckResult);
       } catch (err) {
-        console.error("[x402] RPC checkPayment returned invalid payload:", err);
+        logger.error("relay RPC checkPayment returned invalid payload", { path: "rpc", paymentId, error: String(err) });
         recordRelayFailure();
         return {
           valid: false,
@@ -529,7 +550,7 @@ export async function verifyPayment(
       }
 
       lastCheckResult = checkResult;
-      console.log(`[x402] RPC checkPayment attempt ${attempt + 1}:`, checkResult.status);
+      logger.debug("relay RPC checkPayment poll", { path: "rpc", paymentId, attempt: attempt + 1, status: checkResult.status });
 
       if (checkResult.status === "confirmed") {
         recordRelaySuccess();
@@ -566,7 +587,7 @@ export async function verifyPayment(
       // Payment was accepted by relay and is still processing a known pending status.
       // Return valid=true with paymentStatus="pending" so the caller can stage
       // work locally and poll by paymentId until the relay reaches a terminal state.
-      console.warn("[x402] RPC poll exhausted — payment still pending, paymentId:", paymentId);
+      logger.warn("relay RPC poll exhausted with pending status", { path: "rpc", paymentId, status: lastCheckResult.status });
       recordRelaySuccess();
       return {
         valid: true,
@@ -581,7 +602,7 @@ export async function verifyPayment(
       // We never got a successful checkPayment response (all attempts may have
       // been skipped or the loop ran zero times). Treat as pending — the relay
       // accepted the payment via submitPayment so it is likely still processing.
-      console.warn("[x402] RPC poll exhausted — no check response received, paymentId:", paymentId);
+      logger.warn("relay RPC poll exhausted with no check response", { path: "rpc", paymentId });
       recordRelaySuccess();
       return {
         valid: true,
@@ -609,7 +630,7 @@ export async function verifyPayment(
     // Safety net: poll exhausted with an unexpected status we don't recognise.
     // This should not happen in normal operation but guards against future relay
     // status values that this code does not yet handle.
-    console.warn("[x402] RPC poll exhausted with unexpected status:", lastCheckResult.status, "paymentId:", paymentId);
+    logger.warn("relay RPC poll exhausted with unexpected status", { path: "rpc", paymentId, status: lastCheckResult.status });
     return {
       valid: false,
       relayError: true,
@@ -618,7 +639,7 @@ export async function verifyPayment(
   }
 
   // --- HTTP fallback (local dev / binding not configured) ---
-  console.log("[x402] X402_RELAY not bound, falling back to HTTP");
+  logger.warn("relay RPC binding unavailable, falling back to HTTP", { path: "http" });
   if (logContext?.logger && logContext.route) {
     logPaymentEvent(logContext.logger, "warn", "payment.fallback_used", {
       route: logContext.route,
@@ -681,5 +702,5 @@ export async function verifyPayment(
     paymentId: result.paymentId as string | undefined,
     checkStatusUrl: result.checkStatusUrl as string | undefined,
     error: (result.error as string) ?? (result.message as string),
-  });
+  }, logger);
 }
