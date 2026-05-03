@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_EDITOR_COVERED_EARNINGS_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_EDITOR_COVERED_EARNINGS_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
@@ -713,8 +713,9 @@ export class NewsDO extends DurableObject<Env> {
     // 26 = Partial UNIQUE index on classifieds.payment_txid for replay protection across both placement paths
     // 27 = Signal hot-path composite indexes for Cloudflare bill reduction
     // 28 = Correspondents bundle composite indexes for DO timeout reduction
-    // 29 = Editor-covered earnings accounting columns
-    const CURRENT_MIGRATION_VERSION = 29;
+    // 29 = Correspondent stats materialized per-agent aggregates
+    // 30 = Editor-covered earnings accounting columns
+    const CURRENT_MIGRATION_VERSION = 30;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -1130,8 +1131,25 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      // Editor-covered earnings — exclude editor-settled rows from publisher unpaid liability.
+      // Correspondent stats — materialised per-agent aggregates that replace
+      // the GROUP BY scans in /correspondents, /correspondents-bundle, /init,
+      // and the leaderboard's first-signal sub-select.
       if (appliedVersion < 29) {
+        for (let i = 0; i < MIGRATION_CORRESPONDENT_STATS_SQL.length; i++) {
+          const stmt = MIGRATION_CORRESPONDENT_STATS_SQL[i];
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error(`Correspondent stats migration (v29, stmt ${i}) failed:`, e);
+            }
+          }
+        }
+      }
+
+      // Editor-covered earnings — exclude editor-settled rows from publisher unpaid liability.
+      if (appliedVersion < 30) {
         for (const stmt of MIGRATION_EDITOR_COVERED_EARNINGS_SQL) {
           try {
             this.ctx.storage.sql.exec(stmt);
@@ -2157,6 +2175,18 @@ export class NewsDO extends DurableObject<Env> {
       try {
         this.ctx.storage.transactionSync(() => {
           if (signalCount > 0) {
+            // Capture authors before deletion so correspondent_stats can be
+            // recomputed for each affected agent in the same transaction.
+            const affectedRows = this.ctx.storage.sql
+              .exec(
+                "SELECT DISTINCT btc_address FROM signals WHERE beat_slug = ?",
+                slug
+              )
+              .toArray();
+            const affectedAddresses = affectedRows.map(
+              (r) => (r as { btc_address: string }).btc_address
+            );
+
             this.ctx.storage.sql.exec(
               "DELETE FROM signal_tags WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
               slug
@@ -2170,6 +2200,8 @@ export class NewsDO extends DurableObject<Env> {
               slug
             );
             this.ctx.storage.sql.exec("DELETE FROM signals WHERE beat_slug = ?", slug);
+
+            this.recomputeCorrespondentStatsFor(affectedAddresses);
           }
           this.ctx.storage.sql.exec("DELETE FROM beat_claims WHERE beat_slug = ?", slug);
           this.ctx.storage.sql.exec("DELETE FROM beats WHERE slug = ?", slug);
@@ -2699,6 +2731,9 @@ export class NewsDO extends DurableObject<Env> {
         signalScore.total,
         JSON.stringify(signalScore.breakdown)
       );
+
+      // Maintain materialised per-agent aggregate (replaces full-table GROUP BY scans).
+      this.bumpCorrespondentStatsForInsert(btc_address as string, nowIso);
 
       for (const t of signalTags) {
         this.ctx.storage.sql.exec(
@@ -3453,23 +3488,79 @@ export class NewsDO extends DurableObject<Env> {
     // Correspondents — agents grouped from signals
     // -------------------------------------------------------------------------
 
-    // GET /correspondents — agents with signal counts, last active
+    // POST /recon-correspondents — publisher-gated drift check / repair for
+    // correspondent_stats. Compares the materialised aggregate to a fresh
+    // GROUP BY scan and returns per-address mismatches; with `{ repair: true }`
+    // the drifted rows are recomputed in place. Both paths run a full table
+    // scan, so use sparingly — they exist to backstop maintenance bugs.
+    this.router.post("/recon-correspondents", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json(
+          { ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const { btc_address, repair } = body as { btc_address?: unknown; repair?: unknown };
+      if (typeof btc_address !== "string" || !btc_address) {
+        return c.json(
+          { ok: false, error: "Missing or invalid field: btc_address" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      if (repair !== undefined && typeof repair !== "boolean") {
+        return c.json(
+          { ok: false, error: "Field 'repair' must be a boolean if provided" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const shouldRepair = repair === true;
+      const pub = verifyPublisher(this.ctx.storage.sql, btc_address);
+      if (!pub.ok) {
+        return c.json(
+          { ok: false, error: pub.error } satisfies DOResult<unknown>,
+          pub.status
+        );
+      }
+
+      const { expected_rows, actual_rows, drift, driftedAddresses } =
+        this.computeCorrespondentDrift();
+      let repaired = 0;
+      if (shouldRepair && driftedAddresses.size > 0) {
+        this.recomputeCorrespondentStatsFor([...driftedAddresses]);
+        repaired = driftedAddresses.size;
+      }
+
+      return c.json({
+        ok: true,
+        data: {
+          expected_rows,
+          actual_rows,
+          drift_count: drift.length, // field-level mismatches across all addresses
+          affected_addresses: driftedAddresses.size, // unique addresses with at least one mismatch
+          drift,
+          repaired,
+        },
+      });
+    });
+
+    // GET /correspondents — agents with signal counts, last active.
+    // Reads from materialised correspondent_stats (~430 rows) instead of
+    // grouping over the full signals table.
     this.router.get("/correspondents", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
-          `SELECT s.btc_address,
-                  COUNT(s.id) as signal_count,
-                  MAX(s.created_at) as last_signal,
-                  COUNT(DISTINCT date(s.created_at)) as days_active,
+          `SELECT cs.btc_address,
+                  cs.signal_count,
+                  cs.last_signal_at as last_signal,
+                  cs.days_active,
                   st.current_streak,
                   st.longest_streak,
                   st.total_signals,
                   st.last_signal_date
-           FROM signals s
-           LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE s.correction_of IS NULL
-           GROUP BY s.btc_address
-           ORDER BY signal_count DESC`
+           FROM correspondent_stats cs
+           LEFT JOIN streaks st ON cs.btc_address = st.btc_address
+           ORDER BY cs.signal_count DESC`
         )
         .toArray();
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
@@ -4907,19 +4998,17 @@ export class NewsDO extends DurableObject<Env> {
     this.router.get("/correspondents-bundle", (c) => {
       const correspondents = this.ctx.storage.sql
         .exec(
-          `SELECT s.btc_address,
-                  COUNT(s.id) as signal_count,
-                  MAX(s.created_at) as last_signal,
-                  COUNT(DISTINCT date(s.created_at)) as days_active,
+          `SELECT cs.btc_address,
+                  cs.signal_count,
+                  cs.last_signal_at as last_signal,
+                  cs.days_active,
                   st.current_streak,
                   st.longest_streak,
                   st.total_signals,
                   st.last_signal_date
-           FROM signals s
-           LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE s.correction_of IS NULL
-           GROUP BY s.btc_address
-           ORDER BY signal_count DESC`
+           FROM correspondent_stats cs
+           LEFT JOIN streaks st ON cs.btc_address = st.btc_address
+           ORDER BY cs.signal_count DESC`
         )
         .toArray();
 
@@ -5058,22 +5147,20 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray() as unknown as Classified[];
 
-      // Correspondents
+      // Correspondents — materialised aggregate (see /correspondents).
       const correspondentRows = this.ctx.storage.sql
         .exec(
-          `SELECT s.btc_address,
-                  COUNT(s.id) as signal_count,
-                  MAX(s.created_at) as last_signal,
-                  COUNT(DISTINCT date(s.created_at)) as days_active,
+          `SELECT cs.btc_address,
+                  cs.signal_count,
+                  cs.last_signal_at as last_signal,
+                  cs.days_active,
                   st.current_streak,
                   st.longest_streak,
                   st.total_signals,
                   st.last_signal_date
-           FROM signals s
-           LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE s.correction_of IS NULL
-           GROUP BY s.btc_address
-           ORDER BY signal_count DESC`
+           FROM correspondent_stats cs
+           LEFT JOIN streaks st ON cs.btc_address = st.btc_address
+           ORDER BY cs.signal_count DESC`
         )
         .toArray();
 
@@ -5343,6 +5430,7 @@ export class NewsDO extends DurableObject<Env> {
       };
 
       // Seed signals
+      const seededSignalAddresses = new Set<string>();
       if (Array.isArray(body.signals)) {
         for (const row of body.signals as Array<Record<string, unknown>>) {
           try {
@@ -5366,10 +5454,19 @@ export class NewsDO extends DurableObject<Env> {
               (row.disclosure as string) ?? ""
             );
             inserted.signals++;
+            if (typeof row.btc_address === "string") {
+              seededSignalAddresses.add(row.btc_address);
+            }
           } catch {
             // Skip invalid rows silently
           }
         }
+      }
+      // Bulk-seed bypasses the live INSERT helper, so refresh
+      // correspondent_stats for every affected agent before tests assert
+      // the read endpoints.
+      if (seededSignalAddresses.size > 0) {
+        this.recomputeCorrespondentStatsFor([...seededSignalAddresses]);
       }
 
       // Seed signal_tags
@@ -5582,12 +5679,208 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      return c.json({ ok: true, data: { inserted } });
+      // Seed correspondent_stats overrides (test-only — used to corrupt the
+      // materialised aggregate so the recon path can be exercised end-to-end).
+      if (Array.isArray(body.correspondent_stats)) {
+        for (const row of body.correspondent_stats as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT INTO correspondent_stats
+               (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+               VALUES (?, ?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(btc_address) DO UPDATE SET
+                 signal_count = excluded.signal_count,
+                 last_signal_at = excluded.last_signal_at,
+                 first_signal_at = excluded.first_signal_at,
+                 days_active = excluded.days_active,
+                 updated_at = datetime('now')`,
+              row.btc_address as string,
+              (row.signal_count as number) ?? 0,
+              (row.last_signal_at as string | null) ?? null,
+              (row.first_signal_at as string | null) ?? null,
+              (row.days_active as number) ?? 0
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Optional: trigger the recon path inline so tests can assert the
+      // drift-detection / repair surface without needing BIP-322 auth.
+      // Mirrors the response shape of POST /recon-correspondents.
+      let recon: unknown = undefined;
+      if (body.recon && typeof body.recon === "object") {
+        const reconBody = body.recon as { repair?: boolean };
+        const { expected_rows, actual_rows, drift, driftedAddresses } =
+          this.computeCorrespondentDrift();
+        let repaired = 0;
+        if (reconBody.repair === true && driftedAddresses.size > 0) {
+          this.recomputeCorrespondentStatsFor([...driftedAddresses]);
+          repaired = driftedAddresses.size;
+        }
+        recon = {
+          expected_rows,
+          actual_rows,
+          drift_count: drift.length,
+          affected_addresses: driftedAddresses.size,
+          drift,
+          repaired,
+        };
+      }
+
+      return c.json({ ok: true, data: { inserted, ...(recon !== undefined ? { recon } : {}) } });
     });
 
     this.router.all("*", (c) => {
       return c.json({ ok: false, error: "Not found" }, 404);
     });
+  }
+
+  /**
+   * Maintain `correspondent_stats` after inserting a non-correction signal.
+   *
+   * Counters: signal_count++, last/first signal-at min/max bumps. days_active
+   * is recomputed via a per-agent COUNT(DISTINCT date(...)) bounded by the
+   * agent's own signal history (typical ~200–600 rows) — much smaller than
+   * the full-table 27.8K-row scan it replaces. Skipped for corrections;
+   * those rows have correction_of != NULL and are excluded from every
+   * aggregate by definition.
+   */
+  private bumpCorrespondentStatsForInsert(btcAddress: string, createdAt: string): void {
+    this.ctx.storage.sql.exec(
+      `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+       VALUES (?1, 1, ?2, ?2, 1, datetime('now'))
+       ON CONFLICT(btc_address) DO UPDATE SET
+         signal_count = correspondent_stats.signal_count + 1,
+         last_signal_at = MAX(correspondent_stats.last_signal_at, excluded.last_signal_at),
+         first_signal_at = MIN(correspondent_stats.first_signal_at, excluded.first_signal_at),
+         days_active = (
+           SELECT COUNT(DISTINCT date(created_at)) FROM signals
+           WHERE btc_address = ?1 AND correction_of IS NULL
+         ),
+         updated_at = datetime('now')`,
+      btcAddress,
+      createdAt
+    );
+  }
+
+  /**
+   * Compare the materialised `correspondent_stats` table to a fresh
+   * aggregate over `signals`, returning per-field mismatches plus the
+   * unique set of drifted addresses. Shared between the publisher-only
+   * recon endpoint and the test-seed `recon` hook so the two paths
+   * cannot diverge as the table evolves.
+   */
+  private computeCorrespondentDrift(): {
+    expected_rows: number;
+    actual_rows: number;
+    drift: Array<{ btc_address: string; field: string; expected: unknown; actual: unknown }>;
+    driftedAddresses: Set<string>;
+  } {
+    type Row = {
+      btc_address: string;
+      signal_count: number;
+      last_signal_at: string | null;
+      first_signal_at: string | null;
+      days_active: number;
+    };
+    const expected = this.ctx.storage.sql
+      .exec(
+        `SELECT btc_address,
+                COUNT(*) as signal_count,
+                MAX(created_at) as last_signal_at,
+                MIN(created_at) as first_signal_at,
+                COUNT(DISTINCT date(created_at)) as days_active
+           FROM signals
+          WHERE correction_of IS NULL
+          GROUP BY btc_address`
+      )
+      .toArray() as Row[];
+    const actual = this.ctx.storage.sql
+      .exec(
+        "SELECT btc_address, signal_count, last_signal_at, first_signal_at, days_active FROM correspondent_stats"
+      )
+      .toArray() as Row[];
+
+    const actualByAddr = new Map(actual.map((r) => [r.btc_address, r]));
+    const expectedByAddr = new Map(expected.map((r) => [r.btc_address, r]));
+    const drift: Array<{ btc_address: string; field: string; expected: unknown; actual: unknown }> = [];
+
+    for (const exp of expected) {
+      const act = actualByAddr.get(exp.btc_address);
+      if (!act) {
+        drift.push({ btc_address: exp.btc_address, field: "row", expected: "present", actual: "missing" });
+        continue;
+      }
+      if (exp.signal_count !== act.signal_count)
+        drift.push({ btc_address: exp.btc_address, field: "signal_count", expected: exp.signal_count, actual: act.signal_count });
+      if (exp.last_signal_at !== act.last_signal_at)
+        drift.push({ btc_address: exp.btc_address, field: "last_signal_at", expected: exp.last_signal_at, actual: act.last_signal_at });
+      if (exp.first_signal_at !== act.first_signal_at)
+        drift.push({ btc_address: exp.btc_address, field: "first_signal_at", expected: exp.first_signal_at, actual: act.first_signal_at });
+      if (exp.days_active !== act.days_active)
+        drift.push({ btc_address: exp.btc_address, field: "days_active", expected: exp.days_active, actual: act.days_active });
+    }
+    for (const act of actual) {
+      if (!expectedByAddr.has(act.btc_address)) {
+        drift.push({ btc_address: act.btc_address, field: "row", expected: "missing", actual: "present" });
+      }
+    }
+
+    return {
+      expected_rows: expected.length,
+      actual_rows: actual.length,
+      drift,
+      driftedAddresses: new Set(drift.map((d) => d.btc_address)),
+    };
+  }
+
+  /**
+   * Recompute `correspondent_stats` rows for the given addresses. Used by
+   * code paths that bulk-mutate `signals` (currently only beat deletion);
+   * each affected agent's row is rebuilt from its own bounded signal
+   * history, and rows for agents who no longer have any non-correction
+   * signal are removed entirely.
+   */
+  private recomputeCorrespondentStatsFor(btcAddresses: string[]): void {
+    for (const btcAddress of btcAddresses) {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as c,
+                  MAX(created_at) as last_at,
+                  MIN(created_at) as first_at,
+                  COUNT(DISTINCT date(created_at)) as days
+           FROM signals
+           WHERE btc_address = ? AND correction_of IS NULL`,
+          btcAddress
+        )
+        .toArray();
+      const row = rows[0] as Record<string, unknown> | undefined;
+      const count = Number(row?.c ?? 0);
+      if (count === 0) {
+        this.ctx.storage.sql.exec(
+          "DELETE FROM correspondent_stats WHERE btc_address = ?",
+          btcAddress
+        );
+        continue;
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(btc_address) DO UPDATE SET
+           signal_count = excluded.signal_count,
+           last_signal_at = excluded.last_signal_at,
+           first_signal_at = excluded.first_signal_at,
+           days_active = excluded.days_active,
+           updated_at = excluded.updated_at`,
+        btcAddress,
+        count,
+        row?.last_at as string | null,
+        row?.first_at as string | null,
+        Number(row?.days ?? 0)
+      );
+    }
   }
 
   /**
@@ -5713,13 +6006,11 @@ export class NewsDO extends DurableObject<Env> {
            FROM earnings WHERE amount_sats > 0 AND voided_at IS NULL AND payout_txid IS NULL AND editor_covered_at IS NULL
            GROUP BY btc_address
          ) ua ON a.btc_address = ua.btc_address
-         LEFT JOIN (
-           -- Earliest-ever non-correction signal per scout — used as tenure tie-breaker.
-           -- Not windowed: a scout who joined 2 years ago always beats a newcomer with the same score.
-           SELECT btc_address, MIN(created_at) AS first_signal_at
-           FROM signals WHERE correction_of IS NULL
-           GROUP BY btc_address
-         ) fs ON a.btc_address = fs.btc_address
+         -- Earliest-ever non-correction signal per scout — used as tenure tie-breaker.
+         -- Not windowed: a scout who joined 2 years ago always beats a newcomer with the same score.
+         -- Reads from materialised correspondent_stats (~430 rows) instead of
+         -- a full-table MIN/GROUP BY scan.
+         LEFT JOIN correspondent_stats fs ON a.btc_address = fs.btc_address
          -- 4-level deterministic tie-breaking for competition fairness:
          --   1. score DESC          — highest score wins
          --   2. current_streak DESC — longest active streak breaks score ties
