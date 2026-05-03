@@ -1,12 +1,43 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState, Logger, LogsRPC } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
+
+const APP_ID = "agent-news";
+
+const noopLogger: Logger = {
+  info: () => undefined,
+  warn: () => undefined,
+  error: () => undefined,
+  debug: () => undefined,
+};
+
+function isLogsRPC(logs: unknown): logs is LogsRPC {
+  return (
+    typeof logs === "object" &&
+    logs !== null &&
+    typeof (logs as LogsRPC).info === "function" &&
+    typeof (logs as LogsRPC).warn === "function" &&
+    typeof (logs as LogsRPC).error === "function" &&
+    typeof (logs as LogsRPC).debug === "function"
+  );
+}
+
+function createDoLogger(env: Env, ctx: DurableObjectState): Logger {
+  const logs = env.LOGS;
+  if (!isLogsRPC(logs)) return noopLogger;
+  return {
+    info: (message, context) => ctx.waitUntil(logs.info(APP_ID, message, { surface: "news-do", ...(context ?? {}) })),
+    warn: (message, context) => ctx.waitUntil(logs.warn(APP_ID, message, { surface: "news-do", ...(context ?? {}) })),
+    error: (message, context) => ctx.waitUntil(logs.error(APP_ID, message, { surface: "news-do", ...(context ?? {}) })),
+    debug: (message, context) => ctx.waitUntil(logs.debug(APP_ID, message, { surface: "news-do", ...(context ?? {}) })),
+  };
+}
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -505,10 +536,11 @@ const TERMINAL_PAYMENT_STATES = new Set(["confirmed", "failed", "replaced", "not
 async function sweepPaymentStagingRows(
   sql: DurableObjectState["storage"]["sql"],
   checkPayment: CheckPaymentFn,
-  opts: { graceMs?: number; limit?: number } = {}
+  opts: { graceMs?: number; limit?: number; logger?: Logger } = {}
 ): Promise<number> {
   const graceMs = opts.graceMs ?? 30_000;
   const limit = opts.limit ?? 10;
+  const logger = opts.logger ?? noopLogger;
   const cutoff = new Date(Date.now() - graceMs).toISOString();
   const rows = sql
     .exec(
@@ -528,7 +560,10 @@ async function sweepPaymentStagingRows(
     try {
       const result = await checkPayment(paymentId);
       if (typeof result?.status !== "string") {
-        console.warn(`[alarm-sweep] invalid checkPayment response for paymentId=${paymentId}:`, result);
+        logger.warn("alarm sweep received invalid payment status response", {
+          paymentId,
+          resultType: typeof result,
+        });
         continue;
       }
       if (TERMINAL_PAYMENT_STATES.has(result.status)) {
@@ -541,9 +576,11 @@ async function sweepPaymentStagingRows(
         );
         if (reconciled && reconciled.stageStatus !== "staged" && reconciled.stageStatus !== "expired") {
           reconciledCount += 1;
-          console.log(
-            `[alarm-sweep] reconciled paymentId=${paymentId} status=${result.status} stage=${reconciled.stageStatus}`
-          );
+          logger.info("alarm sweep reconciled staged payment", {
+            paymentId,
+            status: result.status,
+            stageStatus: reconciled.stageStatus,
+          });
         }
       } else {
         // Non-terminal — bump updated_at so the row rotates to the back of the
@@ -555,7 +592,10 @@ async function sweepPaymentStagingRows(
         );
       }
     } catch (err) {
-      console.error(`[alarm-sweep] checkPayment failed for paymentId=${paymentId}:`, err);
+      logger.error("alarm sweep payment status check failed", {
+        paymentId,
+        error: String(err),
+      });
     }
   }
   return reconciledCount;
@@ -672,9 +712,11 @@ function verifyEditorOrPublisher(
  */
 export class NewsDO extends DurableObject<Env> {
   private readonly router: Hono;
+  private readonly logger: Logger;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.logger = createDoLogger(env, ctx);
 
     // Initialize SQLite schema (idempotent via IF NOT EXISTS).
     // sql.exec() is synchronous in DO SQLite, so no blockConcurrencyWhile needed.
@@ -5736,6 +5778,7 @@ export class NewsDO extends DurableObject<Env> {
     return sweepPaymentStagingRows(this.ctx.storage.sql, check, {
       graceMs: opts.graceMs,
       limit: opts.limit,
+      logger: this.logger,
     });
   }
 
@@ -5748,7 +5791,7 @@ export class NewsDO extends DurableObject<Env> {
     try {
       await this.sweepStagedPayments();
     } catch (err) {
-      console.error("[alarm] sweepStagedPayments threw:", err);
+      this.logger.error("alarm sweep threw", { error: String(err) });
     }
     await this.ctx.storage.setAlarm(Date.now() + 50_000);
   }
