@@ -260,6 +260,10 @@ export interface Earning {
   readonly created_at: string;
   /** sBTC transaction ID recorded by the Publisher after sending payout */
   readonly payout_txid: string | null;
+  /** Timestamp when a beat editor marked this earning covered from editor allocation */
+  readonly editor_covered_at: string | null;
+  /** Optional editor payout transaction ID for traceability without treating it as publisher payout */
+  readonly editor_payout_txid: string | null;
 }
 
 /**

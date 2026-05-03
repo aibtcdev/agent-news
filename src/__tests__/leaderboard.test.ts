@@ -21,6 +21,17 @@ type LeaderboardEntry = {
   registered: boolean;
 };
 
+async function seed(body: Record<string, unknown>): Promise<void> {
+  const res = await SELF.fetch("http://example.com/api/test-seed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`Seed failed (${res.status}): ${await res.text()}`);
+  }
+}
+
 describe("GET /api/leaderboard", () => {
   it("returns 200 with leaderboard shape", async () => {
     const res = await SELF.fetch("http://example.com/api/leaderboard");
@@ -51,6 +62,65 @@ describe("GET /api/leaderboard", () => {
       expect(typeof entry.breakdown.unpaidSats).toBe("number");
       expect(entry.breakdown.unpaidSats).toBeGreaterThanOrEqual(0);
     });
+  });
+
+  it("excludes editor-covered brief inclusion earnings from unpaidSats without removing score credit", async () => {
+    const address = "bc1qeditorcovered000000000000000000000000000";
+    const signalId = "editor-covered-signal-1";
+    const briefDate = "2026-04-09";
+    const createdAt = "2026-04-09T12:00:00.000Z";
+
+    await seed({
+      signals: [
+        {
+          id: signalId,
+          beat_slug: "quantum",
+          btc_address: address,
+          headline: "Editor-covered earning keeps score credit",
+          created_at: createdAt,
+          status: "brief_included",
+        },
+      ],
+      briefs: [
+        {
+          date: briefDate,
+          text: "Quantum brief",
+          compiled_at: "2026-04-10T00:00:00.000Z",
+          inscription_id: "editorcoveredi0",
+        },
+      ],
+      brief_signals: [
+        {
+          brief_date: briefDate,
+          signal_id: signalId,
+          btc_address: address,
+          created_at: createdAt,
+        },
+      ],
+      earnings: [
+        {
+          id: "editor-covered-earning-1",
+          btc_address: address,
+          amount_sats: 30_000,
+          reason: "brief_inclusion",
+          reference_id: signalId,
+          created_at: createdAt,
+          payout_txid: null,
+          editor_covered_at: "2026-04-09T23:59:59.000Z",
+          editor_payout_txid: "editor-flat-fee-txid",
+        },
+      ],
+    });
+
+    const res = await SELF.fetch("http://example.com/api/leaderboard");
+    expect(res.status).toBe(200);
+    const body = await res.json<{ leaderboard: LeaderboardEntry[]; total: number }>();
+    const entry = body.leaderboard.find((row) => row.address === address);
+
+    expect(entry).toBeDefined();
+    expect(entry?.breakdown.briefInclusions).toBe(1);
+    expect(entry?.breakdown.unpaidSats).toBe(0);
+    expect(entry?.breakdown.totalEarnedSats).toBe(0);
   });
 });
 

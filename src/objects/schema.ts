@@ -67,7 +67,9 @@ CREATE TABLE IF NOT EXISTS earnings (
   reason      TEXT NOT NULL,
   reference_id TEXT,
   created_at  TEXT NOT NULL,
-  payout_txid TEXT
+  payout_txid TEXT,
+  editor_covered_at TEXT,
+  editor_payout_txid TEXT
 );
 
 CREATE TABLE IF NOT EXISTS classifieds (
@@ -764,6 +766,20 @@ export const MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_signals_beat_btc_correction_created ON signals(beat_slug, btc_address, correction_of, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_beat_claims_status_beat_address ON beat_claims(status, beat_slug, btc_address)",
   "CREATE INDEX IF NOT EXISTS idx_earnings_unpaid_leaderboard ON earnings(voided_at, payout_txid, btc_address)",
+] as const;
+
+/**
+ * Editor-covered earnings support.
+ *
+ * Editor-beat brief inclusions can be covered by the editor's flat daily
+ * allocation instead of a direct publisher payout. These columns let unpaid
+ * liability queries exclude those covered rows without reusing voided_at or
+ * payout_txid for a semantically different state.
+ */
+export const MIGRATION_EDITOR_COVERED_EARNINGS_SQL = [
+  "ALTER TABLE earnings ADD COLUMN editor_covered_at TEXT",
+  "ALTER TABLE earnings ADD COLUMN editor_payout_txid TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_earnings_editor_covered ON earnings(editor_covered_at)",
 ] as const;
 
 export const MIGRATION_APR7_EARNINGS_SQL = [
