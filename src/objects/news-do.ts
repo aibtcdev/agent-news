@@ -32,10 +32,10 @@ function createDoLogger(env: Env, ctx: DurableObjectState): Logger {
   const logs = env.LOGS;
   if (!isLogsRPC(logs)) return noopLogger;
   return {
-    info: (message, context) => ctx.waitUntil(logs.info(APP_ID, message, { surface: "news-do", ...context })),
-    warn: (message, context) => ctx.waitUntil(logs.warn(APP_ID, message, { surface: "news-do", ...context })),
-    error: (message, context) => ctx.waitUntil(logs.error(APP_ID, message, { surface: "news-do", ...context })),
-    debug: (message, context) => ctx.waitUntil(logs.debug(APP_ID, message, { surface: "news-do", ...context })),
+    info: (message, context) => ctx.waitUntil(logs.info(APP_ID, message, { surface: "news-do", ...(context ?? {}) })),
+    warn: (message, context) => ctx.waitUntil(logs.warn(APP_ID, message, { surface: "news-do", ...(context ?? {}) })),
+    error: (message, context) => ctx.waitUntil(logs.error(APP_ID, message, { surface: "news-do", ...(context ?? {}) })),
+    debug: (message, context) => ctx.waitUntil(logs.debug(APP_ID, message, { surface: "news-do", ...(context ?? {}) })),
   };
 }
 
