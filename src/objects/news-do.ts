@@ -3471,6 +3471,106 @@ export class NewsDO extends DurableObject<Env> {
     // Correspondents — agents grouped from signals
     // -------------------------------------------------------------------------
 
+    // POST /recon-correspondents — publisher-gated drift check / repair for
+    // correspondent_stats. Compares the materialised aggregate to a fresh
+    // GROUP BY scan and returns per-address mismatches; with `{ repair: true }`
+    // the drifted rows are recomputed in place. Both paths run a full table
+    // scan, so use sparingly — they exist to backstop maintenance bugs.
+    this.router.post("/recon-correspondents", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json(
+          { ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const { btc_address, repair } = body as { btc_address?: string; repair?: boolean };
+      if (!btc_address) {
+        return c.json(
+          { ok: false, error: "Missing required field: btc_address" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const pub = verifyPublisher(this.ctx.storage.sql, btc_address);
+      if (!pub.ok) {
+        return c.json(
+          { ok: false, error: pub.error } satisfies DOResult<unknown>,
+          pub.status
+        );
+      }
+
+      const expected = this.ctx.storage.sql
+        .exec(
+          `SELECT btc_address,
+                  COUNT(*) as signal_count,
+                  MAX(created_at) as last_signal_at,
+                  MIN(created_at) as first_signal_at,
+                  COUNT(DISTINCT date(created_at)) as days_active
+             FROM signals
+            WHERE correction_of IS NULL
+            GROUP BY btc_address`
+        )
+        .toArray() as Array<{
+          btc_address: string;
+          signal_count: number;
+          last_signal_at: string | null;
+          first_signal_at: string | null;
+          days_active: number;
+        }>;
+      const actual = this.ctx.storage.sql
+        .exec("SELECT btc_address, signal_count, last_signal_at, first_signal_at, days_active FROM correspondent_stats")
+        .toArray() as Array<{
+          btc_address: string;
+          signal_count: number;
+          last_signal_at: string | null;
+          first_signal_at: string | null;
+          days_active: number;
+        }>;
+
+      const actualByAddr = new Map(actual.map((r) => [r.btc_address, r]));
+      const expectedByAddr = new Map(expected.map((r) => [r.btc_address, r]));
+      const drift: Array<{ btc_address: string; field: string; expected: unknown; actual: unknown }> = [];
+
+      for (const exp of expected) {
+        const act = actualByAddr.get(exp.btc_address);
+        if (!act) {
+          drift.push({ btc_address: exp.btc_address, field: "row", expected: "present", actual: "missing" });
+          continue;
+        }
+        if (exp.signal_count !== act.signal_count)
+          drift.push({ btc_address: exp.btc_address, field: "signal_count", expected: exp.signal_count, actual: act.signal_count });
+        if (exp.last_signal_at !== act.last_signal_at)
+          drift.push({ btc_address: exp.btc_address, field: "last_signal_at", expected: exp.last_signal_at, actual: act.last_signal_at });
+        if (exp.first_signal_at !== act.first_signal_at)
+          drift.push({ btc_address: exp.btc_address, field: "first_signal_at", expected: exp.first_signal_at, actual: act.first_signal_at });
+        if (exp.days_active !== act.days_active)
+          drift.push({ btc_address: exp.btc_address, field: "days_active", expected: exp.days_active, actual: act.days_active });
+      }
+      for (const act of actual) {
+        if (!expectedByAddr.has(act.btc_address)) {
+          drift.push({ btc_address: act.btc_address, field: "row", expected: "missing", actual: "present" });
+        }
+      }
+
+      let repaired = 0;
+      if (repair && drift.length > 0) {
+        const drifted = new Set(drift.map((d) => d.btc_address));
+        this.recomputeCorrespondentStatsFor([...drifted]);
+        repaired = drifted.size;
+      }
+
+      return c.json({
+        ok: true,
+        data: {
+          expected_rows: expected.length,
+          actual_rows: actual.length,
+          drift_count: drift.length,
+          drift,
+          repaired,
+        },
+      });
+    });
+
     // GET /correspondents — agents with signal counts, last active.
     // Reads from materialised correspondent_stats (~430 rows) instead of
     // grouping over the full signals table.
@@ -5357,6 +5457,7 @@ export class NewsDO extends DurableObject<Env> {
       };
 
       // Seed signals
+      const seededSignalAddresses = new Set<string>();
       if (Array.isArray(body.signals)) {
         for (const row of body.signals as Array<Record<string, unknown>>) {
           try {
@@ -5380,10 +5481,19 @@ export class NewsDO extends DurableObject<Env> {
               (row.disclosure as string) ?? ""
             );
             inserted.signals++;
+            if (typeof row.btc_address === "string") {
+              seededSignalAddresses.add(row.btc_address);
+            }
           } catch {
             // Skip invalid rows silently
           }
         }
+      }
+      // Bulk-seed bypasses the live INSERT helper, so refresh
+      // correspondent_stats for every affected agent before tests assert
+      // the read endpoints.
+      if (seededSignalAddresses.size > 0) {
+        this.recomputeCorrespondentStatsFor([...seededSignalAddresses]);
       }
 
       // Seed signal_tags
