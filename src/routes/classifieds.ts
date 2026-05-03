@@ -27,7 +27,7 @@ import {
 import { logPaymentEvent } from "../lib/payment-logging";
 import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 import { resolveNamesWithTimeout, generateId } from "../lib/helpers";
-import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
+import { edgeCacheMatchSWR, edgeCachePut, triggerSWRRefresh } from "../lib/edge-cache";
 
 /** Transform a Classified row to the camelCase API response shape. */
 export function transformClassified(cl: Classified) {
@@ -90,42 +90,48 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
     ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 1000)
     : undefined;
 
-  const cacheable = !agent;
-  if (cacheable) {
-    const cached = await edgeCacheMatch(c);
-    if (cached) return cached;
+  const buildResponse = async () => {
+    const classifieds = await listClassifieds(c.env, { category, agent, limit });
+    const transformed = classifieds.map(transformClassified);
+
+    // Resolve agent display names
+    const clAddresses = [...new Set(transformed.map((cl) => cl.placedBy).filter(Boolean))];
+    const clNameMap = await resolveNamesWithTimeout(
+      c.env.NEWS_KV,
+      clAddresses,
+      (p) => c.executionCtx.waitUntil(p)
+    );
+    const withNames = transformed.map((cl) => {
+      const info = clNameMap.get(cl.placedBy);
+      const avatarAddr = info?.btcAddress ?? cl.placedBy;
+      return {
+        ...cl,
+        displayName: info?.name ?? null,
+        avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
+      };
+    });
+
+    // ?agent views stay uncached; private,no-store prevents downstream
+    // caches from independently snapshotting submitter-specific status.
+    c.header(
+      "Cache-Control",
+      agent ? "private, no-store" : "public, max-age=60, s-maxage=480"
+    );
+    const response = c.json({ classifieds: withNames, total: withNames.length });
+    if (!agent) edgeCachePut(c, response);
+    return response;
+  };
+
+  if (agent) return buildResponse();
+
+  const matched = await edgeCacheMatchSWR(c, { freshSeconds: 240 });
+  if (matched && !matched.stale) return matched.response;
+  if (matched?.stale) {
+    triggerSWRRefresh(c, "classifieds", buildResponse);
+    return matched.response;
   }
 
-  const classifieds = await listClassifieds(c.env, { category, agent, limit });
-
-  const transformed = classifieds.map(transformClassified);
-
-  // Resolve agent display names
-  const clAddresses = [...new Set(transformed.map((cl) => cl.placedBy).filter(Boolean))];
-  const clNameMap = await resolveNamesWithTimeout(
-    c.env.NEWS_KV,
-    clAddresses,
-    (p) => c.executionCtx.waitUntil(p)
-  );
-  const withNames = transformed.map((cl) => {
-    const info = clNameMap.get(cl.placedBy);
-    const avatarAddr = info?.btcAddress ?? cl.placedBy;
-    return {
-      ...cl,
-      displayName: info?.name ?? null,
-      avatar: `https://bitcoinfaces.xyz/api/get-image?name=${encodeURIComponent(avatarAddr)}`,
-    };
-  });
-
-  // Per-agent views aren't cached (see above); send a private,no-store
-  // header so downstream caches don't independently snapshot them either.
-  c.header(
-    "Cache-Control",
-    cacheable ? "public, max-age=60, s-maxage=300" : "private, no-store"
-  );
-  const response = c.json({ classifieds: withNames, total: withNames.length });
-  if (cacheable) edgeCachePut(c, response);
-  return response;
+  return buildResponse();
 });
 
 // GET /api/classifieds/:id — get a single classified ad
