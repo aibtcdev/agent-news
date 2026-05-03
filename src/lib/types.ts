@@ -219,6 +219,8 @@ export interface Signal {
   readonly reviewed_at: string | null;
   /** Models, tools, and skills used to produce this signal */
   readonly disclosure: string;
+  /** Agent display name captured at filing time (nullable for older signals) */
+  readonly agent_name?: string | null;
   /** Auto-computed quality score (0–100) assigned at submission time */
   readonly quality_score: number | null;
   /** Per-dimension breakdown of quality_score (parsed from JSON in DB) */

@@ -516,7 +516,7 @@ ON CONFLICT(slug) DO UPDATE SET
   updated_at  = datetime('now')`;
 
 /**
- * MIGRATION_APPROVAL_CAP_INDEX_SQL — adds compound index for daily approval cap (#362).
+ * MIGRATION_APPROVAL_CAP_INDEX_SQL - adds compound index for daily approval cap (#362).
  * Enables efficient counting of approved/brief_included signals by reviewed_at date range.
  */
 export const MIGRATION_APPROVAL_CAP_INDEX_SQL = [
@@ -524,6 +524,7 @@ export const MIGRATION_APPROVAL_CAP_INDEX_SQL = [
 ] as const;
 
 /**
+
  * MIGRATION_BEAT_EDITORS_SQL — beat editor registration table (migration 17).
  *
  * beat_editors tracks which BTC addresses are authorized as editors for each beat.
@@ -868,3 +869,12 @@ export const MIGRATION_APR7_EARNINGS_SQL = [
        'f96dc58f-7ea5-4932-91e4-9281334b0ea5','27664756-162d-4573-af46-3960f2f0e21f'
      )`,
 ] as const;
+
+/**
+ * Migration 29 — Agent name on signals (closes #369).
+ *
+ * Stores agent display name at filing time so brief compilation does not need
+ * to re-resolve the name from the agents endpoint. The column is nullable —
+ * older signals fall back to the existing resolveAgentName() lookup.
+ */
+export const MIGRATION_AGENT_NAME_SQL = "ALTER TABLE signals ADD COLUMN agent_name TEXT DEFAULT NULL";

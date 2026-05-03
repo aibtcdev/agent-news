@@ -293,6 +293,7 @@ export interface CreateSignalInput {
   tags: string[];
   signature?: string;
   disclosure?: string;
+  agent_name?: string | null;
 }
 
 export interface CooldownInfo {

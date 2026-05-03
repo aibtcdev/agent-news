@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_AGENT_NAME_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
@@ -48,6 +48,7 @@ interface RawSignalRow {
   publisher_feedback: string | null;
   reviewed_at: string | null;
   disclosure: string;
+  agent_name: string | null;
   quality_score: number | null;
   score_breakdown: string | null; // JSON-encoded SignalScoreBreakdown
 }
@@ -268,6 +269,7 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     publisher_feedback: raw.publisher_feedback ?? null,
     reviewed_at: raw.reviewed_at ?? null,
     disclosure: raw.disclosure ?? "",
+    agent_name: raw.agent_name ?? null,
     quality_score: raw.quality_score ?? null,
     score_breakdown: raw.score_breakdown
       ? (() => { try { return JSON.parse(raw.score_breakdown); } catch { return null; } })()
@@ -713,7 +715,8 @@ export class NewsDO extends DurableObject<Env> {
     // 26 = Partial UNIQUE index on classifieds.payment_txid for replay protection across both placement paths
     // 27 = Signal hot-path composite indexes for Cloudflare bill reduction
     // 28 = Correspondents bundle composite indexes for DO timeout reduction
-    const CURRENT_MIGRATION_VERSION = 28;
+    // 29 = Agent name on signals (store display name at filing time, closes #369)
+    const CURRENT_MIGRATION_VERSION = 29;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -1125,6 +1128,18 @@ export class NewsDO extends DurableObject<Env> {
             if (!msg.includes("already exists")) {
               console.error("Correspondents bundle index migration failed:", e);
             }
+          }
+        }
+      }
+
+      // Agent name on signals — store display name at filing time (closes #369).
+      if (appliedVersion < 29) {
+        try {
+          this.ctx.storage.sql.exec(MIGRATION_AGENT_NAME_SQL);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!msg.includes("duplicate column")) {
+            console.error("Agent name migration failed:", e);
           }
         }
       }
@@ -2522,7 +2537,7 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      const { beat_slug, btc_address, headline, body: signalBody, sources, tags } = body;
+      const { beat_slug, btc_address, headline, body: signalBody, sources, tags, agent_name } = body;
 
       // Validate beat exists and is not retired
       const beatRows = this.ctx.storage.sql
@@ -2669,9 +2684,13 @@ export class NewsDO extends DurableObject<Env> {
       // Insert signal, tags, and streak as individual statements.
       // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
       // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
+      const sanitizedAgentName = typeof agent_name === "string" && agent_name.length > 0
+        ? sanitizeString(agent_name, 120)
+        : null;
+
       this.ctx.storage.sql.exec(
-        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, quality_score, score_breakdown)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?, ?, ?)`,
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, agent_name, quality_score, score_breakdown)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?, ?, ?, ?)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -2681,6 +2700,7 @@ export class NewsDO extends DurableObject<Env> {
         nowIso,
         nowIso,
         disclosure,
+        sanitizedAgentName,
         signalScore.total,
         JSON.stringify(signalScore.breakdown)
       );

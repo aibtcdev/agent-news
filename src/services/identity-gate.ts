@@ -21,6 +21,7 @@ export interface IdentityCheckResult {
   registered: boolean;
   level: number | null;
   levelName: string | null;
+  displayName: string | null;
   apiReachable: boolean;
   // true when the caller should block the request (API unreachable after retries)
   shouldBlock: boolean;
@@ -44,7 +45,7 @@ async function fetchIdentity(btcAddress: string): Promise<Response> {
 
 /**
  * Checks if a BTC address belongs to a Genesis-level (level >= 2) AIBTC agent.
- * Returns { registered, level, levelName, apiReachable, shouldBlock }.
+ * Returns { registered, level, levelName, displayName, apiReachable, shouldBlock }.
  * Caches results for 1h to avoid per-request external calls.
  *
  * Fail-closed: when the API cannot be reached after one retry, shouldBlock=true
@@ -78,6 +79,7 @@ export async function checkAgentIdentity(
           registered: (data?.found as boolean) === true,
           level: (data?.level as number | undefined) ?? null,
           levelName: (data?.levelName as string | undefined) ?? null,
+          displayName: (data?.displayName as string | undefined) ?? (data?.name as string | undefined) ?? null,
           apiReachable: true,
           shouldBlock: false,
         };
@@ -96,6 +98,7 @@ export async function checkAgentIdentity(
           registered: false,
           level: null,
           levelName: null,
+          displayName: null,
           apiReachable: true,
           shouldBlock: false,
         };
@@ -117,6 +120,7 @@ export async function checkAgentIdentity(
     registered: false,
     level: null,
     levelName: null,
+    displayName: null,
     apiReachable: false,
     shouldBlock: true,
   };
