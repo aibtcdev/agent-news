@@ -766,6 +766,48 @@ export const MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_earnings_unpaid_leaderboard ON earnings(voided_at, payout_txid, btc_address)",
 ] as const;
 
+/**
+ * MIGRATION_CORRESPONDENT_STATS_SQL — materialised per-agent aggregates.
+ *
+ * Replaces the ~27.8K-row `GROUP BY btc_address` scans in /correspondents,
+ * /correspondents-bundle, /init's correspondents block, and the leaderboard's
+ * first-signal sub-select with bounded ~430-row reads (one row per agent).
+ *
+ * Maintained on every signal insert via bumpCorrespondentStatsForInsert; on
+ * beat deletion (which bulk-deletes signals) the affected agents are
+ * recomputed in place. Drift is reconciled by POST /api/config/recon-correspondents
+ * (Publisher-only; see scripts/recon-correspondent-stats.ts for the CLI).
+ */
+export const MIGRATION_CORRESPONDENT_STATS_SQL = [
+  `CREATE TABLE IF NOT EXISTS correspondent_stats (
+     btc_address TEXT PRIMARY KEY,
+     signal_count INTEGER NOT NULL DEFAULT 0,
+     last_signal_at TEXT,
+     first_signal_at TEXT,
+     days_active INTEGER NOT NULL DEFAULT 0,
+     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+   )`,
+  "CREATE INDEX IF NOT EXISTS idx_correspondent_stats_signal_count ON correspondent_stats(signal_count DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_correspondent_stats_last_signal ON correspondent_stats(last_signal_at DESC)",
+  // Backfill from existing signals — idempotent via ON CONFLICT.
+  `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+     SELECT btc_address,
+            COUNT(*),
+            MAX(created_at),
+            MIN(created_at),
+            COUNT(DISTINCT date(created_at)),
+            datetime('now')
+       FROM signals
+      WHERE correction_of IS NULL
+      GROUP BY btc_address
+   ON CONFLICT(btc_address) DO UPDATE SET
+     signal_count = excluded.signal_count,
+     last_signal_at = excluded.last_signal_at,
+     first_signal_at = excluded.first_signal_at,
+     days_active = excluded.days_active,
+     updated_at = excluded.updated_at`,
+] as const;
+
 export const MIGRATION_APR7_EARNINGS_SQL = [
   // Void earnings for the 14 re-curated signals NOT on-chain
   `UPDATE earnings SET voided_at = datetime('now')
