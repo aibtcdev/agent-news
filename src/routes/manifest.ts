@@ -42,7 +42,7 @@ manifestRouter.get("/api", (c) => {
       },
       "GET /api/beats": {
         description:
-          "List all registered beats ordered by name, with members and activity status",
+          'List beats ordered by name, with members and computed status. Optional query: `?include=members` and `?status=all|active|inactive|retired` (default: all).',
         returns:
           "Array of beat objects with members: [{ address, claimedAt }]",
       },
@@ -308,12 +308,18 @@ manifestRouter.get("/api", (c) => {
       },
       "POST /api/signals/:id/corrections": {
         description:
-          "File a fact-check correction on a signal (BIP-322 auth required, max 3/day)",
+          "File a fact-check correction or editorial review on a signal (BIP-322 auth required, max 3/day)",
         body: {
           btc_address: "Your BTC address (required)",
-          claim: "The claim being corrected (required)",
-          correction: "The correction text (required)",
-          sources: "Supporting sources (optional)",
+          type: "Entry type: 'correction' (default) or 'editorial_review'",
+          claim: "The claim being corrected (required for type correction)",
+          correction: "The correction text (required for type correction)",
+          sources: "Supporting sources (optional, type correction only)",
+          score: "Quality score 0–100 integer (editorial_review only)",
+          factcheck_passed: "Whether factual claims verified — boolean (editorial_review only)",
+          beat_relevance: "Beat relevance score 0–100 integer (editorial_review only)",
+          recommendation: "Editorial disposition: 'approve', 'reject', or 'needs_revision' (editorial_review only)",
+          feedback: "Free-text reviewer notes for the correspondent (editorial_review only)",
         },
       },
       "GET /api/signals/:id/corrections": {

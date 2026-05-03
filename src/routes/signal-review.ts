@@ -13,11 +13,14 @@ import { validateDateFormat } from "../lib/validators";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 import { REVIEW_RATE_LIMIT, REVIEWABLE_SIGNAL_STATUSES } from "../lib/constants";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const signalReviewRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 const reviewRateLimit = createRateLimitMiddleware({
   key: "signal-review",
+  binding: "authenticated",
+  identityHeader: "X-BTC-Address",
   ...REVIEW_RATE_LIMIT,
 });
 
@@ -114,7 +117,13 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
 // GET /api/front-page — curated signals (approved + brief_included only)
 // Without ?before: returns all approved + brief_included signals (today's feed)
 // With ?before=YYYY-MM-DD: returns one day of signals strictly before that date (infinite scroll)
+// Edge-cached for both modes — paginated mode in particular benefits because
+// the URL is stable per day, so the same page served to every infinite-scroll
+// reader after the first hit is served from edge.
 signalReviewRouter.get("/api/front-page", async (c) => {
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   const before = c.req.query("before") ?? null;
   const limitParam = c.req.query("limit");
   const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200) : 50;
@@ -147,12 +156,14 @@ signalReviewRouter.get("/api/front-page", async (c) => {
     }));
 
     c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-    return c.json({
+    const response = c.json({
       signals: transformed,
       date: result.date,
       hasMore: result.hasMore,
       curated: true,
     });
+    edgeCachePut(c, response);
+    return response;
   }
 
   // Default mode: single DO query for all approved + brief_included signals
@@ -174,11 +185,13 @@ signalReviewRouter.get("/api/front-page", async (c) => {
   }));
 
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json({
+  const response = c.json({
     signals: transformed,
     total: transformed.length,
     curated: true,
   });
+  edgeCachePut(c, response);
+  return response;
 });
 
 export { signalReviewRouter };

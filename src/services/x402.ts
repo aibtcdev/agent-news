@@ -27,6 +27,7 @@ import {
 } from "../lib/constants";
 import type { Env, RelayRPC, SettleOptions, SubmitPaymentResult, CheckPaymentResult, PaymentStatusResponse, Logger } from "../lib/types";
 import { logPaymentEvent } from "../lib/payment-logging";
+import { derivePaymentIdentifier } from "../lib/helpers";
 
 // ── In-memory circuit breaker for relay calls ──
 // Prevents cascading failures when the relay is down by fast-failing after
@@ -54,6 +55,9 @@ const RPC_ERROR_TO_TERMINAL_REASON: Partial<Record<string, PaymentTerminalReason
   TX_BROADCAST_ERROR: "broadcast_failure",
   SETTLEMENT_FAILED: "chain_abort",
   INTERNAL_ERROR: "internal_error",
+  // Idempotency key conflict: same identifier submitted with a different transaction.
+  // Non-retryable client error — the caller must use a new transaction or identifier.
+  PAYMENT_IDENTIFIER_CONFLICT: "unknown_payment_identity",
 };
 
 function shouldFastFail(): boolean {
@@ -451,11 +455,15 @@ export async function verifyPayment(
       minAmount: paymentRequirements.amount,
     };
 
+    // Derive a deterministic idempotency key from the transaction hex.
+    // Same tx resubmitted on retry → same identifier → relay returns cached paymentId.
+    const paymentIdentifier = await derivePaymentIdentifier(txHex);
+
     // Step 1: Submit the payment to the relay queue.
     let submitResult: SubmitPaymentResult;
     try {
       console.log("[x402] using RPC path via X402_RELAY service binding");
-      submitResult = parseSubmitPaymentResult(await env.X402_RELAY.submitPayment(txHex, settle));
+      submitResult = parseSubmitPaymentResult(await env.X402_RELAY.submitPayment(txHex, settle, paymentIdentifier));
     } catch (err) {
       // RPC call failure is a relay error — do not penalise the payer
       console.error("[x402] RPC submitPayment threw:", err);

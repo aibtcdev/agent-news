@@ -11,12 +11,23 @@
   "vars": {
     "ENVIRONMENT": "production",
     // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
-    "BRIEFS_FREE": "true"
+    "BRIEFS_FREE": "true",
+    // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
+    "SIGNALS_REQUIRE_PAYMENT": "false"
   },
 
   // KV namespace — rate limiting and agent cache
   "kv_namespaces": [
     { "binding": "NEWS_KV", "id": "3b2ccbdc1fd5426ba72ed323e3407bdc" }
+  ],
+
+  // First-party rate limit bindings. Top-level IDs are isolated from the
+  // named production/staging envs so branch preview traffic cannot consume
+  // production counters.
+  "ratelimits": [
+    { "name": "RATE_LIMIT_READ", "namespace_id": "2026050101", "simple": { "limit": 300, "period": 60 } },
+    { "name": "RATE_LIMIT_MUTATING", "namespace_id": "2026050102", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RATE_LIMIT_AUTHENTICATED", "namespace_id": "2026050103", "simple": { "limit": 200, "period": 60 } }
   ],
 
   // Durable Object binding — primary storage engine (SQLite)
@@ -41,8 +52,18 @@
   // reducing Worker→DO network round-trip latency instead of running at the user's edge.
   "placement": { "mode": "smart" },
 
-  // Static frontend assets
-  "assets": { "directory": "./public" },
+  // Static frontend assets.
+  //   - binding: `env.ASSETS.fetch()` lets the Worker pull static files
+  //     (used by the homepage SSR handler to transform public/index.html).
+  //   - run_worker_first: ["/"]  → Worker intercepts ONLY the root. All other
+  //     asset paths (sections, CSS, JS) still serve directly from the static
+  //     asset server with zero Worker overhead. The `/` pattern is a literal
+  //     exact match per Cloudflare docs — it does NOT match `/signals/abc`.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/"]
+  },
 
   /**
    * Secrets (set via `wrangler secret put`):
@@ -72,11 +93,19 @@
       "vars": {
         "ENVIRONMENT": "staging",
         // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
-        "BRIEFS_FREE": "true"
+        "BRIEFS_FREE": "true",
+        // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
+        "SIGNALS_REQUIRE_PAYMENT": "false"
       },
 
       "kv_namespaces": [
         { "binding": "NEWS_KV", "id": "341f4de6834c4a908eb52f6cb556bbce" }
+      ],
+
+      "ratelimits": [
+        { "name": "RATE_LIMIT_READ", "namespace_id": "2026050111", "simple": { "limit": 300, "period": 60 } },
+        { "name": "RATE_LIMIT_MUTATING", "namespace_id": "2026050112", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RATE_LIMIT_AUTHENTICATED", "namespace_id": "2026050113", "simple": { "limit": 200, "period": 60 } }
       ],
 
       "durable_objects": {
@@ -96,21 +125,35 @@
       ],
 
       // No custom domain for staging — use workers.dev URL
-      "assets": { "directory": "./public" }
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": ["/"]
+      }
     },
 
     "production": {
       "name": "agent-news",
       "placement": { "mode": "smart" },
+      "workers_dev": true,
+      "preview_urls": true,
 
       "vars": {
         "ENVIRONMENT": "production",
         // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
-        "BRIEFS_FREE": "true"
+        "BRIEFS_FREE": "true",
+        // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
+        "SIGNALS_REQUIRE_PAYMENT": "false"
       },
 
       "kv_namespaces": [
         { "binding": "NEWS_KV", "id": "3b2ccbdc1fd5426ba72ed323e3407bdc" }
+      ],
+
+      "ratelimits": [
+        { "name": "RATE_LIMIT_READ", "namespace_id": "2026050121", "simple": { "limit": 300, "period": 60 } },
+        { "name": "RATE_LIMIT_MUTATING", "namespace_id": "2026050122", "simple": { "limit": 20, "period": 60 } },
+        { "name": "RATE_LIMIT_AUTHENTICATED", "namespace_id": "2026050123", "simple": { "limit": 200, "period": 60 } }
       ],
 
       "durable_objects": {
@@ -129,7 +172,11 @@
       ],
 
       "routes": [{ "pattern": "aibtc.news", "custom_domain": true }],
-      "assets": { "directory": "./public" }
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": ["/"]
+      }
     }
   }
 }

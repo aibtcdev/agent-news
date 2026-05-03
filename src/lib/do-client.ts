@@ -4,34 +4,55 @@ import { CLASSIFIED_BRIEF_SLOTS } from "./constants";
 /** Singleton DO stub ID — single instance manages all news data */
 const DO_ID_NAME = "news-singleton";
 
+/**
+ * Maximum time to wait for a DO response before returning a 503.
+ * Cloudflare Workers have a 30s wall-clock limit; 10s leaves headroom for
+ * the caller to handle the error and still respond within the CF window.
+ */
+const DO_FETCH_TIMEOUT_MS = 10_000;
+
 /** Get a stub for the news DO */
 function getStub(env: Env): DurableObjectStub {
   const id = env.NEWS_DO.idFromName(DO_ID_NAME);
   return env.NEWS_DO.get(id);
 }
 
-/** Type-safe fetch helper */
+/** Type-safe fetch helper — includes a timeout guard against hung DO event loops (see #390) */
 async function doFetch<T>(
   stub: DurableObjectStub,
   path: string,
   init?: RequestInit
 ): Promise<DOResult<T>> {
-  const res = await stub.fetch(`https://do${path}`, init);
-  if (!res.ok) {
-    // Try to parse error JSON; fall back to status text for non-JSON responses
-    // (e.g. CF infrastructure 502/503 returning HTML)
-    try {
-      const data = (await res.json()) as DOResult<T>;
-      return { ...data, status: res.status as DOErrorStatus };
-    } catch {
-      return {
-        ok: false,
-        error: `DO request failed: ${res.status} ${res.statusText}`,
-        status: res.status as DOErrorStatus,
-      } as DOResult<T>;
+  const timeoutPromise = new Promise<DOResult<T>>((_, reject) => {
+    setTimeout(() => reject(new Error("DO_TIMEOUT")), DO_FETCH_TIMEOUT_MS);
+  });
+
+  const fetchPromise = (async (): Promise<DOResult<T>> => {
+    const res = await stub.fetch(`https://do${path}`, init);
+    if (!res.ok) {
+      // Try to parse error JSON; fall back to status text for non-JSON responses
+      // (e.g. CF infrastructure 502/503 returning HTML)
+      try {
+        const data = (await res.json()) as DOResult<T>;
+        return { ...data, status: res.status as DOErrorStatus };
+      } catch {
+        return {
+          ok: false,
+          error: `DO request failed: ${res.status} ${res.statusText}`,
+          status: res.status as DOErrorStatus,
+        } as DOResult<T>;
+      }
     }
-  }
-  return (await res.json()) as DOResult<T>;
+    return (await res.json()) as DOResult<T>;
+  })();
+
+  return Promise.race([fetchPromise, timeoutPromise]).catch((err: Error) => ({
+    ok: false,
+    error: err.message === "DO_TIMEOUT"
+      ? `Durable Object request timed out after ${DO_FETCH_TIMEOUT_MS}ms — the storage event loop may be overloaded. Retry shortly.`
+      : err.message,
+    status: 503 as DOErrorStatus,
+  } as DOResult<T>));
 }
 
 // ---------------------------------------------------------------------------
@@ -157,6 +178,19 @@ export async function listSignals(
   env: Env,
   filters: SignalFilters = {}
 ): Promise<Signal[]> {
+  const { signals } = await listSignalsPage(env, filters);
+  return signals;
+}
+
+/**
+ * Same query as `listSignals` but also returns bounded pagination metadata.
+ * `total` is now a lower bound that preserves the legacy numeric field without
+ * forcing NewsDO to run an unbounded COUNT(*) on every list request.
+ */
+export async function listSignalsPage(
+  env: Env,
+  filters: SignalFilters = {}
+): Promise<{ signals: Signal[]; total: number; hasMore: boolean }> {
   const stub = getStub(env);
   const params = new URLSearchParams();
   if (filters.beat) params.set("beat", filters.beat);
@@ -171,7 +205,11 @@ export async function listSignals(
   const result = await doFetch<Signal[]>(stub, `/signals${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to list signals");
   if (result.data === undefined) throw new Error("Missing data in response");
-  return result.data;
+  return {
+    signals: result.data,
+    total: result.total ?? result.data.length,
+    hasMore: result.hasMore ?? false,
+  };
 }
 
 /** All data needed for the initial page load, fetched in a single DO call. */
@@ -184,6 +222,15 @@ export interface InitBundle {
   correspondents: CorrespondentRow[];
   leaderboard: LeaderboardEntry[];
   signals: Signal[];
+  /**
+   * Per-beat signal counts by status for today (UTC-midnight window),
+   * keyed by beat_slug. Replaces the homepage's N x /api/signals/counts?beat=X
+   * fan-out. Status keys mirror SignalStatus — only statuses with non-zero
+   * counts appear for a given beat.
+   */
+  beatStats: Record<string, Partial<Record<string, number>>>;
+  /** Total signals across all beats in the last 1 hour (ticker display). */
+  signalsCount1h: number;
 }
 
 /** Fetch all initial page load data in a single DO round-trip. */
@@ -437,6 +484,15 @@ export async function getClassified(
   return result.ok ? (result.data ?? null) : null;
 }
 
+export async function getClassifiedByTxid(
+  env: Env,
+  txid: string
+): Promise<Classified | null> {
+  const stub = getStub(env);
+  const result = await doFetch<Classified>(stub, `/classifieds/by-txid/${encodeURIComponent(txid)}`);
+  return result.ok ? (result.data ?? null) : null;
+}
+
 export interface CreateClassifiedInput {
   btc_address: string;
   category: string;
@@ -547,11 +603,18 @@ export async function getClassifiedsRotation(
   const url = maxChars
     ? `/classifieds/rotation?max_chars=${maxChars}`
     : "/classifieds/rotation";
-  const result = await doFetch<{ data: Classified[]; slots: number; filled: number }>(stub, url);
+  // The DO returns { ok, data: Classified[], slots, filled }. doFetch unpacks
+  // the envelope, leaving result.data as the array directly.
+  const result = await doFetch<Classified[]>(stub, url);
   if (!result.ok || !result.data) {
     return { ok: false, data: [], slots: CLASSIFIED_BRIEF_SLOTS, filled: 0 };
   }
-  return { ok: true, ...result.data };
+  return {
+    ok: true,
+    data: result.data,
+    slots: CLASSIFIED_BRIEF_SLOTS,
+    filled: result.data.length,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -834,20 +897,43 @@ export async function getBriefSignals(env: Env, date: string): Promise<unknown[]
 }
 
 // ---------------------------------------------------------------------------
-// Corrections (fact-checker)
+// Corrections (fact-checker) & Editorial Reviews (beat editor)
 // ---------------------------------------------------------------------------
 
+/**
+ * Input for creating a correction or editorial review on a signal.
+ *
+ * When `type` is `"correction"` (default), `claim` and `correction` are required.
+ * When `type` is `"editorial_review"`, the editorial fields are used instead:
+ * - `score`: 0–100 integer quality score
+ * - `factcheck_passed`: whether factual claims verified
+ * - `beat_relevance`: 0–100 integer relevance to the beat
+ * - `recommendation`: editorial disposition — `"approve"`, `"reject"`, or `"needs_revision"`
+ * - `feedback`: free-text reviewer notes for the correspondent
+ *
+ * Editorial reviews require the caller to be an active beat editor for the
+ * signal's beat or the designated Publisher (enforced by the DO).
+ */
 export interface CreateCorrectionInput {
   signal_id: string;
   btc_address: string;
+  /** The factual claim being corrected (required for type "correction") */
   claim?: string;
+  /** The correction text (required for type "correction") */
   correction?: string;
+  /** Supporting source URLs (optional, type "correction" only) */
   sources?: string | null;
+  /** Entry type — "correction" (default) or "editorial_review" */
   type?: "correction" | "editorial_review";
+  /** Quality score 0–100 (editorial_review only) */
   score?: number;
+  /** Whether factual claims in the signal were verified (editorial_review only) */
   factcheck_passed?: boolean;
+  /** Relevance score 0–100 for how well the signal fits the beat (editorial_review only) */
   beat_relevance?: number;
-  recommendation?: string;
+  /** Editorial disposition: "approve", "reject", or "needs_revision" (editorial_review only) */
+  recommendation?: "approve" | "reject" | "needs_revision";
+  /** Free-text reviewer notes for the correspondent (editorial_review only) */
   feedback?: string;
 }
 
@@ -966,6 +1052,38 @@ export async function recordWeeklyPayouts(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ week }),
   });
+}
+
+/** A single weekly-prize earning row, as returned by GET /leaderboard/payouts/:week. */
+export interface WeeklyPayoutRow {
+  id: string;
+  rank: number;
+  btc_address: string;
+  amount_sats: number;
+  reason: string;
+  week: string;
+  created_at: string;
+  payout_txid: string | null;
+  voided_at: string | null;
+}
+
+export interface WeeklyPayoutsByWeek {
+  week: string;
+  payouts: WeeklyPayoutRow[];
+  summary: {
+    total: number;
+    paid: number;
+    unpaid: number;
+  };
+}
+
+/** Public — list weekly prize earnings for a given ISO week. Used by Guild reconciliation tooling. */
+export async function getWeeklyPayouts(
+  env: Env,
+  week: string
+): Promise<DOResult<WeeklyPayoutsByWeek>> {
+  const stub = getStub(env);
+  return doFetch<WeeklyPayoutsByWeek>(stub, `/leaderboard/payouts/${encodeURIComponent(week)}`);
 }
 
 // ---------------------------------------------------------------------------

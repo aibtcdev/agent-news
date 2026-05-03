@@ -6,6 +6,7 @@ import { validateSlug, validateHexColor, validateBtcAddress, sanitizeString } fr
 import { getBeat, createBeat, updateBeat, deleteBeat, getBeatMembership, getConfig, getActiveBeatSlugs, listBeats } from "../lib/do-client";
 import { CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import { verifyAuth } from "../services/auth";
+import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const beatsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -16,9 +17,15 @@ const beatRateLimit = createRateLimitMiddleware({
 
 // GET /api/beats — list all beats
 // Supports ?include=members to expand full members array (default: memberCount only)
+// Edge-cached: ?status=active and ?include=members produce different cache
+// keys via the request URL, so each variant is cached independently.
 beatsRouter.get("/api/beats", async (c) => {
+  const cached = await edgeCacheMatch(c);
+  if (cached) return cached;
+
   const beats = await listBeats(c.env);
   const includeMembers = c.req.query("include") === "members";
+  const statusFilter = c.req.query("status")?.toLowerCase();
 
   // Transform snake_case → camelCase to match frontend expectations
   const transformed = beats.map((b) => {
@@ -42,8 +49,21 @@ beatsRouter.get("/api/beats", async (c) => {
     };
   });
 
+  let filtered = transformed;
+  if (statusFilter && statusFilter !== "all") {
+    if (!["active", "inactive", "retired"].includes(statusFilter)) {
+      return c.json(
+        { error: 'Invalid status filter (expected: "all", "active", "inactive", "retired")' },
+        400
+      );
+    }
+    filtered = transformed.filter((b) => b.status === statusFilter);
+  }
+
   c.header("Cache-Control", "public, max-age=60, s-maxage=300");
-  return c.json(transformed);
+  const response = c.json(filtered);
+  edgeCachePut(c, response);
+  return response;
 });
 
 // GET /api/beats/membership — list beats an agent has joined

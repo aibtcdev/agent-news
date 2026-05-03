@@ -43,6 +43,28 @@ export function generateId(): string {
 }
 
 /**
+ * Derive a deterministic payment identifier for x402 V2 RPC idempotency.
+ *
+ * Produces a stable `pay_<28-hex-char>` string from any combination of
+ * caller-provided inputs. Same inputs across retries → same identifier,
+ * so the relay's 5-minute idempotency window deduplicates legitimate
+ * re-submissions without confusing them with double-spends.
+ *
+ * The output satisfies PaymentIdentifierSchema: [a-zA-Z0-9_-]{16,128}.
+ * `pay_` (4) + 28 hex chars = 32 chars total.
+ *
+ * @param parts - Ordered components that uniquely identify this payment
+ *   (e.g. beatId, senderAddress, nonce or txHex)
+ */
+export async function derivePaymentIdentifier(...parts: string[]): Promise<string> {
+  const input = parts.join("|");
+  const encoded = new TextEncoder().encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
+  const hashHex = [...new Uint8Array(hashBuffer)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `pay_${hashHex.slice(0, 28)}`;
+}
+
+/**
  * Returns the date string for the day after the given YYYY-MM-DD string
  */
 export function getNextDate(date: string): string {

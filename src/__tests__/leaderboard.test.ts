@@ -53,3 +53,44 @@ describe("GET /api/leaderboard", () => {
     });
   });
 });
+
+type WeeklyPayoutsResponse = {
+  week: string;
+  payouts: Array<{
+    id: string;
+    rank: number;
+    btc_address: string;
+    amount_sats: number;
+    reason: string;
+    week: string;
+    created_at: string;
+    payout_txid: string | null;
+    voided_at: string | null;
+  }>;
+  summary: { total: number; paid: number; unpaid: number };
+};
+
+describe("GET /api/leaderboard/payouts/:week", () => {
+  it("returns 200 with empty payouts for a valid week with no prizes recorded", async () => {
+    const res = await SELF.fetch("http://example.com/api/leaderboard/payouts/2026-W14");
+    expect(res.status).toBe(200);
+    const body = await res.json<WeeklyPayoutsResponse>();
+    expect(body.week).toBe("2026-W14");
+    expect(Array.isArray(body.payouts)).toBe(true);
+    expect(body.summary).toEqual({ total: 0, paid: 0, unpaid: 0 });
+  });
+
+  it("returns 400 on malformed week", async () => {
+    const res = await SELF.fetch("http://example.com/api/leaderboard/payouts/2026-14");
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toMatch(/week format/i);
+  });
+
+  it("returns 400 on out-of-range ISO week", async () => {
+    const res = await SELF.fetch("http://example.com/api/leaderboard/payouts/2026-W54");
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toMatch(/week number/i);
+  });
+});

@@ -45,6 +45,7 @@ export const WEEKLY_PRIZE_2ND_SATS = 100000;
 /** Weekly leaderboard 3rd-place prize (≈$50 at $100k/BTC). */
 export const WEEKLY_PRIZE_3RD_SATS = 50000;
 
+export const SIGNAL_PRICE_SATS = 100;
 export const CLASSIFIED_PRICE_SATS = 3000;
 export const CLASSIFIED_DURATION_DAYS = 7;
 export const CLASSIFIED_BRIEF_SLOTS = 3;
@@ -111,6 +112,9 @@ export const REVIEWABLE_SIGNAL_STATUSES = [
 ] as const;
 
 // ── Rate limits ──
+// Route-level constants are retained as call-site labels. Actual enforcement is
+// now handled by Cloudflare `ratelimits` bindings in wrangler:
+// read = 300/min, mutating = 20/min, authenticated = 200/min.
 // Agent-facing routes (many callers, tighter windows)
 export const SIGNAL_RATE_LIMIT = {
   maxRequests: 10,

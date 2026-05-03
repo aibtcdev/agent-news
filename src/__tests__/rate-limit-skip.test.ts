@@ -8,7 +8,7 @@ import { SELF } from "cloudflare:test";
  * so that x402 probes (requests without a payment header) bypass rate limiting,
  * while real payment attempts are counted against the quota.
  *
- * NOTE: All tests share a single KV-backed rate-limit bucket keyed by IP
+ * NOTE: All tests share a single Cloudflare Rate Limiting bucket keyed by IP
  * (CF-Connecting-IP is absent in tests, so the key is "unknown"). Tests are
  * ordered so that cumulative state is accounted for.
  */
@@ -18,7 +18,7 @@ const VALID_BODY = JSON.stringify({ category: "services", headline: "Test Ad" })
 
 describe("skipIfMissingHeaders — classifieds rate limiting", () => {
   it("requests WITHOUT payment headers bypass rate limiting (always get 402)", async () => {
-    // Send more requests than the rate limit (20 req / 10 min) — all should
+    // Send more requests than the mutating burst limit (20 req / min) — all should
     // return 402 because missing-header requests are never counted.
     const results: number[] = [];
     for (let i = 0; i < 25; i++) {
@@ -36,7 +36,7 @@ describe("skipIfMissingHeaders — classifieds rate limiting", () => {
   });
 
   it("requests WITH payment headers ARE rate limited (eventually 429)", async () => {
-    // The classified rate limit is 20 req / 10 min. Exhaust the quota with
+    // The classified rate limit is 20 req / min. Exhaust the quota with
     // X-PAYMENT, then confirm payment-signature also counts against the same bucket.
     const statuses: number[] = [];
     for (let i = 0; i < 22; i++) {
@@ -70,6 +70,20 @@ describe("skipIfMissingHeaders — classifieds rate limiting", () => {
       headers: {
         "Content-Type": "application/json",
         "payment-signature": "dummy-sig-token",
+      },
+      body: VALID_BODY,
+    });
+
+    expect(res.status).toBe(429);
+  });
+
+  it("spoofed identity headers cannot bypass the exhausted IP bucket", async () => {
+    const res = await SELF.fetch(CLASSIFIEDS_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-BTC-Address": "bc1qspoofed0000000000000000000000000000000",
+        "X-PAYMENT": "dummy-payment-token",
       },
       body: VALID_BODY,
     });

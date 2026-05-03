@@ -1,6 +1,18 @@
 import { describe, it, expect } from "vitest";
 import { SELF } from "cloudflare:test";
 
+const PAGING_TAG = "paging-lower-bound-700";
+const LARGE_PAGE_TAG = "large-page-tag-hydration";
+
+async function seed(body: Record<string, unknown>) {
+  const res = await SELF.fetch("http://example.com/api/test-seed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  expect(res.status).toBe(200);
+}
+
 /**
  * Integration tests for /api/signals endpoints.
  * Tests validation layer and error responses (happy-path CRUD requires BIP-322 auth).
@@ -25,6 +37,128 @@ describe("GET /api/signals", () => {
     );
     expect(res.status).toBe(200);
   });
+});
+
+describe("GET /api/signals — bounded pagination metadata", () => {
+  it("returns hasMore and a bounded total without over-reporting empty pages", async () => {
+    await seed({
+      signals: [
+        {
+          id: "paging-700-001",
+          beat_slug: "agent-social",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Paging test first",
+          sources: "[]",
+          created_at: "2026-04-30T12:03:00.000Z",
+          status: "approved",
+          reviewed_at: "2026-04-30T12:04:00.000Z",
+        },
+        {
+          id: "paging-700-002",
+          beat_slug: "agent-social",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Paging test second",
+          sources: "[]",
+          created_at: "2026-04-30T12:02:00.000Z",
+          status: "approved",
+          reviewed_at: "2026-04-30T12:04:00.000Z",
+        },
+        {
+          id: "paging-700-003",
+          beat_slug: "agent-social",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Paging test third",
+          sources: "[]",
+          created_at: "2026-04-30T12:01:00.000Z",
+          status: "approved",
+          reviewed_at: "2026-04-30T12:04:00.000Z",
+        },
+      ],
+      signal_tags: [
+        { signal_id: "paging-700-001", tag: PAGING_TAG },
+        { signal_id: "paging-700-002", tag: PAGING_TAG },
+        { signal_id: "paging-700-003", tag: PAGING_TAG },
+      ],
+    });
+
+    const firstRes = await SELF.fetch(
+      `http://example.com/api/signals?tag=${PAGING_TAG}&limit=2`
+    );
+    expect(firstRes.status).toBe(200);
+    const firstBody = await firstRes.json<{
+      signals: unknown[];
+      total: number;
+      hasMore: boolean;
+    }>();
+    expect(firstBody.signals).toHaveLength(2);
+    expect(firstBody.hasMore).toBe(true);
+    expect(firstBody.total).toBe(3);
+
+    const secondRes = await SELF.fetch(
+      `http://example.com/api/signals?tag=${PAGING_TAG}&limit=2&offset=2`
+    );
+    expect(secondRes.status).toBe(200);
+    const secondBody = await secondRes.json<{
+      signals: unknown[];
+      total: number;
+      hasMore: boolean;
+    }>();
+    expect(secondBody.signals).toHaveLength(1);
+    expect(secondBody.hasMore).toBe(false);
+    expect(secondBody.total).toBe(3);
+
+    const beyondRes = await SELF.fetch(
+      `http://example.com/api/signals?tag=${PAGING_TAG}&limit=2&offset=100`
+    );
+    expect(beyondRes.status).toBe(200);
+    const beyondBody = await beyondRes.json<{
+      signals: unknown[];
+      total: number;
+      hasMore: boolean;
+    }>();
+    expect(beyondBody.signals).toHaveLength(0);
+    expect(beyondBody.hasMore).toBe(false);
+    expect(beyondBody.total).toBe(0);
+  }, 30_000);
+
+  it("hydrates tags for a 200-row page without exceeding DO SQLite variable limits", async () => {
+    const signals = Array.from({ length: 201 }, (_, index) => {
+      const n = String(index + 1).padStart(3, "0");
+      return {
+        id: `large-page-tag-${n}`,
+        beat_slug: "bitcoin-macro",
+        btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+        headline: `Large page tag hydration ${n}`,
+        sources: "[]",
+        created_at: `2026-04-30T13:${String(index % 60).padStart(2, "0")}:00.000Z`,
+        status: "brief_included",
+        reviewed_at: "2026-04-30T14:00:00.000Z",
+      };
+    });
+
+    await seed({
+      signals,
+      signal_tags: signals.map((signal) => ({
+        signal_id: signal.id,
+        tag: LARGE_PAGE_TAG,
+      })),
+    });
+
+    const res = await SELF.fetch(
+      `http://example.com/api/signals?beat=bitcoin-macro&status=brief_included&tag=${LARGE_PAGE_TAG}&limit=500`
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{
+      signals: Array<{ tags: string[] }>;
+      filtered: number;
+      hasMore: boolean;
+    }>();
+    expect(body.filtered).toBe(200);
+    expect(body.hasMore).toBe(true);
+    expect(body.signals).toHaveLength(200);
+    expect(body.signals.length).toBe(body.filtered);
+    expect(body.signals.every((signal) => signal.tags.includes(LARGE_PAGE_TAG))).toBe(true);
+  }, 30_000);
 });
 
 describe("GET /api/signals/:id — not found", () => {

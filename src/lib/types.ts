@@ -71,11 +71,14 @@ export type PaymentTrackedState = TrackedPaymentState;
  * Defined locally since x402-sponsor-relay isn't a published package.
  * Matches the WorkerEntrypoint methods exposed by RelayRPC in x402-sponsor-relay/src/rpc.ts.
  *
- * submitPayment(txHex, settle) — enqueue a sponsored transaction, returns immediately with paymentId.
+ * submitPayment(txHex, settle, paymentIdentifier) — enqueue a sponsored transaction, returns immediately with paymentId.
+ *   paymentIdentifier is an optional caller-controlled idempotency key (pay_<28-hex-chars>).
+ *   Same identifier + same tx hex → relay returns cached paymentId (idempotent retry).
+ *   Same identifier + different tx hex → relay rejects with PAYMENT_IDENTIFIER_CONFLICT.
  * checkPayment(paymentId)      — poll for settlement result.
  */
 export interface RelayRPC {
-  submitPayment(txHex: string, settle?: SettleOptions): Promise<SubmitPaymentResult>;
+  submitPayment(txHex: string, settle?: SettleOptions, paymentIdentifier?: string): Promise<SubmitPaymentResult>;
   checkPayment(paymentId: string): Promise<CheckPaymentResult>;
 }
 
@@ -95,15 +98,26 @@ export interface Logger {
 export interface Env {
   NEWS_KV: KVNamespace;
   NEWS_DO: DurableObjectNamespace;
+  // Static assets fetcher — bound via wrangler `assets.binding = "ASSETS"`.
+  // Used by the homepage SSR handler to fetch public/index.html before
+  // transforming it with HTMLRewriter.
+  ASSETS: Fetcher;
   // LOGS is a service binding to worker-logs RPC, typed loosely to avoid complex Service<> generics
   LOGS?: unknown;
   // X402_RELAY is a service binding to x402-sponsor-relay RPC (RelayRPC WorkerEntrypoint)
   X402_RELAY?: unknown;
+  // First-party Cloudflare Rate Limiting bindings. These replace the old
+  // per-request NEWS_KV counters for burst protection.
+  RATE_LIMIT_READ?: RateLimit;
+  RATE_LIMIT_MUTATING?: RateLimit;
+  RATE_LIMIT_AUTHENTICATED?: RateLimit;
   ENVIRONMENT?: string;
   // Shared secret for internal endpoints (seed, migrate)
   MIGRATION_KEY?: string;
   // Set to "false" to enable x402 paywall for past briefs (default: "true" = free access)
   BRIEFS_FREE?: string;
+  // Set to "true" to require x402 payment for signal submission (default: "false" = grace period)
+  SIGNALS_REQUIRE_PAYMENT?: string;
 }
 
 /**
@@ -207,6 +221,10 @@ export interface Signal {
   readonly disclosure: string;
   /** Agent display name captured at filing time (nullable for older signals) */
   readonly agent_name?: string | null;
+  /** Auto-computed quality score (0–100) assigned at submission time */
+  readonly quality_score: number | null;
+  /** Per-dimension breakdown of quality_score (parsed from JSON in DB) */
+  readonly score_breakdown: Record<string, number> | null;
 }
 
 /**
@@ -308,7 +326,12 @@ export interface BeatEditor {
 }
 
 /**
- * A fact-checker correction filed against a signal
+ * A fact-checker correction or editorial review filed against a signal.
+ *
+ * When `type` is `"editorial_review"`, the editorial fields (`score`,
+ * `factcheck_passed`, `beat_relevance`, `recommendation`) are populated.
+ * Note: the DO stores the type marker in `claim` and reviewer feedback
+ * in `correction`, so those fields are still present in the response.
  */
 export interface Correction {
   readonly id: string;
@@ -321,6 +344,16 @@ export interface Correction {
   readonly reviewed_by: string | null;
   readonly reviewed_at: string | null;
   readonly created_at: string;
+  /** Entry type — "correction" (default) or "editorial_review" */
+  readonly type: "correction" | "editorial_review";
+  /** Quality score 0–100 (editorial_review only) */
+  readonly score: number | null;
+  /** Whether factual claims were verified (editorial_review only, stored as 0/1 in SQLite) */
+  readonly factcheck_passed: 0 | 1 | null;
+  /** Beat relevance score 0–100 (editorial_review only) */
+  readonly beat_relevance: number | null;
+  /** Editorial disposition (editorial_review only) */
+  readonly recommendation: "approve" | "reject" | "needs_revision" | null;
 }
 
 /**
@@ -371,7 +404,7 @@ export interface CompiledBriefData {
  * Generic result type for Durable Object operations
  */
 /** HTTP error status codes returned by DO handlers */
-export type DOErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500;
+export type DOErrorStatus = 400 | 401 | 403 | 404 | 409 | 429 | 500 | 503;
 
 export interface ApprovalCapInfo {
   limit: number;
@@ -392,6 +425,14 @@ export interface DOResult<T> {
   status?: DOErrorStatus;
   /** Present on approval responses — current daily cap status */
   approval_cap?: ApprovalCapInfo;
+  /**
+   * Present on paginated list responses. Some hot paths return a bounded
+   * lower-bound count instead of an exact count; check hasMore for next-page
+   * availability before treating this as authoritative.
+   */
+  total?: number;
+  /** Present on bounded paginated list responses when one more page is known to exist */
+  hasMore?: boolean;
 }
 
 export type PaymentStageKind = "brief_access" | "classified_submission";

@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { mapVerificationError } from "../services/x402";
-import type { PaymentVerifyResult } from "../services/x402";
 
 describe("mapVerificationError", () => {
   // =========================================================================
@@ -150,6 +149,21 @@ describe("mapVerificationError", () => {
 
       expect(result.status).toBe(402);
       expect(result.body.retryable).toBe(false);
+    });
+
+    it("maps PAYMENT_IDENTIFIER_CONFLICT to 402 non-retryable client error", () => {
+      // Same identifier submitted with a different transaction: client must use a new tx.
+      const result = mapVerificationError({
+        valid: false,
+        errorCode: "PAYMENT_IDENTIFIER_CONFLICT",
+        retryable: false,
+      });
+
+      expect(result.status).toBe(402);
+      expect(result.body.code).toBe("PAYMENT_IDENTIFIER_CONFLICT");
+      expect(result.body.retryable).toBe(false);
+      // PAYMENT_IDENTIFIER_CONFLICT is not a nonce conflict — no 409 or Retry-After
+      expect(result.headers).toBeUndefined();
     });
   });
 });

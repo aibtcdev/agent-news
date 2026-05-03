@@ -191,3 +191,55 @@ describe("POST /api/classifieds — field aliasing (pre-payment validation)", ()
     expect(res.status).not.toBe(400);
   });
 });
+
+// ── Regression: GET /api/classifieds must exclude same-day expired rows ──────
+//
+// expires_at is stored as ISO 8601 ('2026-04-29T10:00:00.000Z') but the SQL
+// filter previously compared against datetime('now') ('YYYY-MM-DD HH:MM:SS').
+// With the same date prefix, lex comparison treats 'T' (0x54) as greater than
+// ' ' (0x20), so already-expired rows would slip through and the classifieds
+// page (which client-filters expiry) appeared empty even when home page rows
+// were present. Lock the correct behavior in.
+describe("GET /api/classifieds — same-day expiry filter", () => {
+  it("excludes approved rows whose expires_at has already passed today", async () => {
+    const expiredId = `expired-same-day-${Date.now()}`;
+    const activeId = `active-same-day-${Date.now()}`;
+    const oneSecondAgo = new Date(Date.now() - 1000).toISOString();
+    const oneHourAhead = new Date(Date.now() + 3600 * 1000).toISOString();
+
+    const seedRes = await SELF.fetch("http://example.com/api/test-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        classifieds: [
+          {
+            id: expiredId,
+            btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+            category: "services",
+            headline: "Expired same-day ad",
+            created_at: new Date(Date.now() - 7 * 86400 * 1000).toISOString(),
+            expires_at: oneSecondAgo,
+            status: "approved",
+          },
+          {
+            id: activeId,
+            btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+            category: "services",
+            headline: "Active same-day ad",
+            created_at: new Date().toISOString(),
+            expires_at: oneHourAhead,
+            status: "approved",
+          },
+        ],
+      }),
+    });
+    expect(seedRes.status).toBe(200);
+
+    const res = await SELF.fetch("http://example.com/api/classifieds?limit=200");
+    expect(res.status).toBe(200);
+    const body = await res.json<{ classifieds: Array<{ id: string }> }>();
+    const ids = body.classifieds.map((c) => c.id);
+    expect(ids).toContain(activeId);
+    expect(ids).not.toContain(expiredId);
+  });
+});

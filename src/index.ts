@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { VERSION } from "./version";
 import type { Env, AppVariables, AppContext } from "./lib/types";
-import { loggerMiddleware } from "./middleware";
+import { agentClassifiedsMiddleware, loggerMiddleware } from "./middleware";
 import { beatsRouter } from "./routes/beats";
 import { signalsRouter } from "./routes/signals";
 import { briefRouter } from "./routes/brief";
@@ -10,6 +10,7 @@ import { briefCompileRouter } from "./routes/brief-compile";
 import { briefInscribeRouter } from "./routes/brief-inscribe";
 import { classifiedReviewRouter } from "./routes/classified-review";
 import { classifiedsRouter } from "./routes/classifieds";
+import { classifiedsWebRouter } from "./routes/classifieds-web";
 import { correspondentsRouter } from "./routes/correspondents";
 import { streaksRouter } from "./routes/streaks";
 import { statusRouter } from "./routes/status";
@@ -30,6 +31,10 @@ import { earningsRouter } from "./routes/earnings";
 import { beatEditorsRouter } from "./routes/beat-editors";
 import { editorEarningsRouter } from "./routes/editor-earnings";
 import { initRouter } from "./routes/init";
+import { seoRouter } from "./routes/seo";
+import { homeRouter } from "./routes/home-page";
+import { agentPageRouter } from "./routes/agent-page";
+import { beatPageRouter } from "./routes/beat-page";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -58,6 +63,46 @@ app.use(
 
 // Apply logger middleware globally (creates request-scoped logger + requestId)
 app.use("*", loggerMiddleware);
+
+// Inject classifieds into agent (non-browser) responses on news endpoints.
+// Browsers send Sec-Fetch-Site; tools (curl/MCP/SDKs) don't — that's the
+// discriminator. The middleware no-ops on cache-key collisions and on routes
+// that already speak `classifieds` (e.g. /api/init, /api/classifieds*), so it
+// is safe to apply broadly. UI requests pass through unchanged.
+const AGENT_AD_PATHS = [
+  "/api/front-page",
+  "/api/front-page/*",
+  "/api/signals",
+  "/api/signals/*",
+  // /api/beats is intentionally excluded: the bare path returns a JSON array,
+  // which the middleware skips to preserve shape compatibility. The /:slug
+  // variant returns an object and gets the injection.
+  "/api/beats/*",
+  "/api/correspondents",
+  "/api/briefs/*",
+  "/api/skills",
+  "/api/status/*",
+];
+for (const path of AGENT_AD_PATHS) {
+  app.use(path, agentClassifiedsMiddleware);
+}
+
+// Mount SEO routes (robots.txt + sitemap family) early so they're not shadowed by static assets.
+app.route("/", seoRouter);
+
+// Mount homepage SSR — intercepts GET / (enabled by run_worker_first: ["/"]
+// in wrangler.jsonc). Other asset paths continue serving directly.
+app.route("/", homeRouter);
+
+// Mount agent profile SSR — GET /agents/:addr (path-param). The listing page
+// at /agents/ is a static asset and is not intercepted (no static match for
+// /agents/:addr, so the Worker naturally owns it without run_worker_first).
+app.route("/", agentPageRouter);
+
+// Mount beat page SSR — GET /beats/:slug (path-param). Same model as
+// /agents/:addr: listing page /beats/ stays static; per-beat URLs go through
+// the Worker because no static file matches them.
+app.route("/", beatPageRouter);
 
 // Mount init bundle (single request for initial page load) before other routes
 app.route("/", initRouter);
@@ -96,6 +141,10 @@ app.route("/", classifiedReviewRouter);
 
 // Mount classifieds routes
 app.route("/", classifiedsRouter);
+
+// Wallet-driven classifieds — independent of x402 relay path. Uses an
+// on-chain sBTC txid the user already broadcast from their wallet.
+app.route("/", classifiedsWebRouter);
 
 // Mount corrections and referrals before generic signals
 app.route("/", correctionsRouter);
@@ -219,6 +268,35 @@ app.post("/api/test/payment-stage/:paymentId/reconcile", async (c) => {
   return c.json(await res.json(), res.status as 200 | 400 | 404);
 });
 
+// Test-only — mark a staged row 'expired' so tests can cover the late-settlement path.
+app.post("/api/test/payment-stage/:paymentId/force-expire", async (c) => {
+  if (!isTestEnv(c)) return c.json({ error: "Not found" }, 404);
+  const res = await getDoStub(c).fetch(
+    `https://do/test/payment-staging/${encodeURIComponent(c.req.param("paymentId"))}/force-expire`,
+    { method: "POST" }
+  );
+  return c.json(await res.json(), res.status as 200 | 404);
+});
+
+// Test-only — trigger the staged-payment alarm sweep without waiting 50s.
+// Accepts { results: { [paymentId]: { status, txid?, terminalReason? } } }
+// to stub checkPayment per row. If `results` is omitted, the live X402_RELAY
+// binding is used (useful for end-to-end probes).
+app.post("/api/test/sweep-staged-payments", async (c) => {
+  if (!isTestEnv(c)) return c.json({ error: "Not found" }, 404);
+  const body = (await parseJsonBody(c)) as {
+    graceMs?: number;
+    limit?: number;
+    results?: Record<string, { status: string; txid?: string; terminalReason?: string }>;
+  } | null;
+  const res = await getDoStub(c).fetch("https://do/test/sweep-staged-payments", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  return c.json(await res.json(), res.status as 200 | 400 | 404);
+});
+
 // Health endpoint (available at both /health and /api/health)
 function healthHandler(c: AppContext) {
   return c.json({
@@ -233,21 +311,8 @@ function healthHandler(c: AppContext) {
 app.get("/health", healthHandler);
 app.get("/api/health", healthHandler);
 
-// Root endpoint - service info
-app.get("/", (c) => {
-  return c.json({
-    service: "agent-news",
-    version: VERSION,
-    description: "AI agent news aggregation and briefing service",
-    endpoints: {
-      health: "GET /health - Health check",
-      apiHealth: "GET /api/health - API health check",
-    },
-    related: {
-      github: "https://github.com/aibtcdev/agent-news",
-    },
-  });
-});
+// (The old GET / JSON service-info handler was removed — homepage SSR owns
+// the root path now. Service metadata lives at /api/health.)
 
 // 404 handler
 app.notFound((c) => {

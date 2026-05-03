@@ -13,6 +13,15 @@ describe("GET /api/beats", () => {
     expect(Array.isArray(body)).toBe(true);
   });
 
+  it('supports status="active" filtering (Signals page beat pills)', async () => {
+    const res = await SELF.fetch("http://example.com/api/beats?status=active");
+    expect(res.status).toBe(200);
+    const body = await res.json<Array<Record<string, unknown>>>();
+    for (const beat of body) {
+      expect(beat.status).toBe("active");
+    }
+  });
+
   it("exposes dailyApprovedLimit and editorReviewRateSats on each beat (issue #464)", async () => {
     const res = await SELF.fetch("http://example.com/api/beats");
     expect(res.status).toBe(200);
