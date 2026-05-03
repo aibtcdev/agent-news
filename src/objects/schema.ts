@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS signals (
   correction_of     TEXT,
   status            TEXT NOT NULL DEFAULT 'submitted',
   publisher_feedback TEXT,
+  reviewed_by       TEXT,
   reviewed_at       TEXT,
   disclosure        TEXT NOT NULL DEFAULT '',
   quality_score     INTEGER DEFAULT NULL,
@@ -156,6 +157,7 @@ CREATE INDEX IF NOT EXISTS idx_payment_staging_status   ON payment_staging(stage
 export const MIGRATION_PHASE0_SQL = [
   "ALTER TABLE signals ADD COLUMN status TEXT NOT NULL DEFAULT 'submitted'",
   "ALTER TABLE signals ADD COLUMN publisher_feedback TEXT",
+  "ALTER TABLE signals ADD COLUMN reviewed_by TEXT",
   "ALTER TABLE signals ADD COLUMN reviewed_at TEXT",
   "ALTER TABLE signals ADD COLUMN disclosure TEXT NOT NULL DEFAULT ''",
   "CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status)",

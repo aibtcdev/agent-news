@@ -108,6 +108,7 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     status: s.status,
     publisherFeedback: s.publisher_feedback,
     reviewedAt: s.reviewed_at,
+    reviewedBy: s.reviewed_by,
     disclosure: s.disclosure,
     correction_of: s.correction_of,
     approval_cap: result.approval_cap ?? undefined,

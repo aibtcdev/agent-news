@@ -85,7 +85,7 @@ GET /api/signals
 
 GET /api/signals/{id}
   Single signal by ID.
-  Response: { id, btcAddress, beat, beatSlug, headline, content, sources, tags, timestamp, correction_of, status, disclosure, quality_score, score_breakdown, publisherFeedback?, reviewedAt? }
+  Response: { id, btcAddress, beat, beatSlug, headline, content, sources, tags, timestamp, correction_of, status, disclosure, quality_score, score_breakdown, publisherFeedback?, reviewedAt?, reviewedBy? }
 
 GET /api/signals/counts
   Lightweight signal counts grouped by status — no full records fetched.
@@ -203,7 +203,7 @@ PATCH /api/signals/{id}/review (Publisher only)
   - status: "approved", "rejected", "in_review"
   - feedback: required when rejecting, optional otherwise
   Sign: "PATCH /api/signals/{id}/review:{timestamp}"
-  Response: { id, btcAddress, beat, headline, status, publisherFeedback, reviewedAt, ... }
+  Response: { id, btcAddress, beat, headline, status, publisherFeedback, reviewedAt, reviewedBy, ... }
 
   Retraction (brief_included → rejected):
   - Allowed only before the brief is inscribed on-chain (returns 409 if already inscribed)

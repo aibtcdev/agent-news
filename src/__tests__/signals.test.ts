@@ -3,6 +3,8 @@ import { SELF } from "cloudflare:test";
 
 const PAGING_TAG = "paging-lower-bound-700";
 const LARGE_PAGE_TAG = "large-page-tag-hydration";
+const REVIEWED_BY_TAG = "reviewed-by-metadata";
+const REVIEWER_BTC_ADDRESS = "bc1q2a79dmk06ct6v206sqtp3agw8kg64dz40vhjeg";
 
 async function seed(body: Record<string, unknown>) {
   const res = await SELF.fetch("http://example.com/api/test-seed", {
@@ -158,6 +160,57 @@ describe("GET /api/signals — bounded pagination metadata", () => {
     expect(body.signals).toHaveLength(200);
     expect(body.signals.length).toBe(body.filtered);
     expect(body.signals.every((signal) => signal.tags.includes(LARGE_PAGE_TAG))).toBe(true);
+  }, 30_000);
+});
+
+describe("GET /api/signals — review metadata", () => {
+  it("exposes reviewedBy on reviewed signals and null for submitted signals", async () => {
+    await seed({
+      signals: [
+        {
+          id: "reviewed-by-approved-001",
+          beat_slug: "quantum",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Reviewed signal attribution",
+          sources: "[]",
+          created_at: "2026-04-30T15:01:00.000Z",
+          status: "approved",
+          reviewed_by: REVIEWER_BTC_ADDRESS,
+          reviewed_at: "2026-04-30T16:00:00.000Z",
+        },
+        {
+          id: "reviewed-by-submitted-001",
+          beat_slug: "quantum",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Submitted signal without attribution",
+          sources: "[]",
+          created_at: "2026-04-30T15:02:00.000Z",
+          status: "submitted",
+          reviewed_by: null,
+          reviewed_at: null,
+        },
+      ],
+      signal_tags: [
+        { signal_id: "reviewed-by-approved-001", tag: REVIEWED_BY_TAG },
+        { signal_id: "reviewed-by-submitted-001", tag: REVIEWED_BY_TAG },
+      ],
+    });
+
+    const listRes = await SELF.fetch(
+      `http://example.com/api/signals?tag=${REVIEWED_BY_TAG}&limit=10`
+    );
+    expect(listRes.status).toBe(200);
+    const listBody = await listRes.json<{ signals: Array<{ id: string; reviewedBy: string | null }> }>();
+    const approved = listBody.signals.find((signal) => signal.id === "reviewed-by-approved-001");
+    const submitted = listBody.signals.find((signal) => signal.id === "reviewed-by-submitted-001");
+    expect(approved?.reviewedBy).toBe(REVIEWER_BTC_ADDRESS);
+    expect(submitted?.reviewedBy).toBeNull();
+
+    const singleRes = await SELF.fetch("http://example.com/api/signals/reviewed-by-approved-001");
+    expect(singleRes.status).toBe(200);
+    const singleBody = await singleRes.json<{ reviewedAt: string; reviewedBy: string | null }>();
+    expect(singleBody.reviewedAt).toBe("2026-04-30T16:00:00.000Z");
+    expect(singleBody.reviewedBy).toBe(REVIEWER_BTC_ADDRESS);
   }, 30_000);
 });
 
