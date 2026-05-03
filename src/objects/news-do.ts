@@ -46,6 +46,7 @@ interface RawSignalRow {
   tags_csv: string | null;
   status: SignalStatus;
   publisher_feedback: string | null;
+  reviewed_by: string | null;
   reviewed_at: string | null;
   disclosure: string;
   quality_score: number | null;
@@ -266,6 +267,7 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     correction_of: raw.correction_of,
     status: raw.status ?? "submitted",
     publisher_feedback: raw.publisher_feedback ?? null,
+    reviewed_by: raw.reviewed_by ?? null,
     reviewed_at: raw.reviewed_at ?? null,
     disclosure: raw.disclosure ?? "",
     quality_score: raw.quality_score ?? null,
@@ -1689,10 +1691,11 @@ export class NewsDO extends DurableObject<Env> {
 
       const now = nowDate.toISOString();
       this.ctx.storage.sql.exec(
-        `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
+        `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ?
          WHERE id = ?`,
         newStatus,
         feedback ? sanitizeString(feedback, 1000) : null,
+        btc_address as string,
         now,
         now,
         id
@@ -5421,8 +5424,8 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(
               `INSERT OR IGNORE INTO signals
                (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at,
-                correction_of, status, reviewed_at, publisher_feedback, disclosure)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                correction_of, status, reviewed_at, reviewed_by, publisher_feedback, disclosure)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               row.id as string,
               row.beat_slug as string,
               row.btc_address as string,
@@ -5434,6 +5437,7 @@ export class NewsDO extends DurableObject<Env> {
               (row.correction_of as string | null) ?? null,
               (row.status as string) ?? "submitted",
               (row.reviewed_at as string | null) ?? null,
+              (row.reviewed_by as string | null) ?? null,
               (row.publisher_feedback as string | null) ?? null,
               (row.disclosure as string) ?? ""
             );
