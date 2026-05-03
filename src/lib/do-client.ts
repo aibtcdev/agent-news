@@ -1098,6 +1098,7 @@ export interface LeaderboardEntry {
   approved_corrections_30d: number;
   referral_credits_30d: number;
   score: number;
+  /** Publisher/on-chain paid earnings only; editor-covered rows remain scoring-only until separately surfaced. */
   total_earned_sats: number;
   unpaid_sats: number;
 }
