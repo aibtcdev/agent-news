@@ -100,4 +100,38 @@ configRouter.get("/api/config/parent-inscription", (c) => {
   });
 });
 
+// POST /api/config/recon-correspondents — Publisher-only drift check / repair
+// for the materialised correspondent_stats table. With `repair: true` the
+// drifted rows are recomputed in place. Both paths run a full GROUP BY scan
+// of `signals`, so use sparingly — they exist to backstop maintenance bugs.
+configRouter.post("/api/config/recon-correspondents", async (c) => {
+  let body: Record<string, unknown>;
+  try {
+    body = await c.req.json<Record<string, unknown>>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const { btc_address } = body;
+  if (!btc_address) {
+    return c.json({ error: "Missing required field: btc_address" }, 400);
+  }
+  const auth = verifyAuth(
+    c.req.raw.headers,
+    btc_address as string,
+    "POST",
+    "/api/config/recon-correspondents"
+  );
+  if (!auth.valid) {
+    return c.json({ error: auth.error, code: auth.code }, 401);
+  }
+  const id = c.env.NEWS_DO.idFromName("news-singleton");
+  const stub = c.env.NEWS_DO.get(id);
+  const res = await stub.fetch("https://do/recon-correspondents", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return c.json((await res.json()) as Record<string, unknown>, res.status as 200 | 400 | 403);
+});
+
 export { configRouter };
