@@ -111,13 +111,16 @@ configRouter.post("/api/config/recon-correspondents", async (c) => {
   } catch {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
-  const { btc_address } = body;
-  if (!btc_address) {
-    return c.json({ error: "Missing required field: btc_address" }, 400);
+  const { btc_address, repair } = body;
+  if (!validateBtcAddress(btc_address)) {
+    return c.json({ error: "Missing or invalid field: btc_address" }, 400);
+  }
+  if (repair !== undefined && typeof repair !== "boolean") {
+    return c.json({ error: "Field 'repair' must be a boolean if provided" }, 400);
   }
   const auth = verifyAuth(
     c.req.raw.headers,
-    btc_address as string,
+    btc_address,
     "POST",
     "/api/config/recon-correspondents"
   );
@@ -129,7 +132,7 @@ configRouter.post("/api/config/recon-correspondents", async (c) => {
   const res = await stub.fetch("https://do/recon-correspondents", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify({ btc_address, repair: repair ?? false }),
   });
   return c.json((await res.json()) as Record<string, unknown>, res.status as 200 | 400 | 403);
 });

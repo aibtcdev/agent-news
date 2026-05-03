@@ -220,3 +220,101 @@ describe("correspondent_stats — recon endpoint reports zero drift after seed",
     expect(addr2).toBeUndefined();
   });
 });
+
+describe("correspondent_stats — recon detects and repairs drift", () => {
+  it("reports drift after stats corruption and repairs it on demand", async () => {
+    const addr = "bc1q-recon-drift-001";
+
+    // Seed two same-day signals; the test-seed recompute hook keeps
+    // correspondent_stats consistent so the inline recon must report 0 drift.
+    const seedRes = await SELF.fetch("http://example.com/api/test-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        signals: [
+          {
+            id: "drift-a",
+            beat_slug: "agent-social",
+            btc_address: addr,
+            headline: "first",
+            sources: "[]",
+            created_at: "2026-04-20T08:00:00.000Z",
+            status: "submitted",
+          },
+          {
+            id: "drift-b",
+            beat_slug: "agent-social",
+            btc_address: addr,
+            headline: "second",
+            sources: "[]",
+            created_at: "2026-04-20T14:00:00.000Z",
+            status: "submitted",
+          },
+        ],
+        recon: { repair: false },
+      }),
+    });
+    expect(seedRes.status).toBe(200);
+    const seedBody = await seedRes.json<{
+      data: {
+        recon: {
+          drift_count: number;
+          affected_addresses: number;
+          repaired: number;
+        };
+      };
+    }>();
+    expect(seedBody.data.recon.drift_count).toBe(0);
+    expect(seedBody.data.recon.affected_addresses).toBe(0);
+
+    // Corrupt the materialised row for this agent.
+    await seed({
+      correspondent_stats: [
+        {
+          btc_address: addr,
+          signal_count: 999,
+          last_signal_at: "2099-01-01T00:00:00.000Z",
+          first_signal_at: "2099-01-01T00:00:00.000Z",
+          days_active: 42,
+        },
+      ],
+    });
+
+    // Confirm the materialised read now serves the corrupt values, proving
+    // the read sites really do read from correspondent_stats (not the
+    // signals aggregate).
+    let correspondents = await fetchCorrespondents();
+    expect(correspondents.find((c) => c.address === addr)?.signalCount).toBe(999);
+
+    // Recon in report mode — exactly one affected address; repaired=0.
+    const reportRes = await SELF.fetch("http://example.com/api/test-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recon: { repair: false } }),
+    });
+    const reportBody = await reportRes.json<{
+      data: { recon: { drift_count: number; affected_addresses: number; repaired: number } };
+    }>();
+    expect(reportBody.data.recon.affected_addresses).toBe(1);
+    expect(reportBody.data.recon.drift_count).toBeGreaterThan(0);
+    expect(reportBody.data.recon.repaired).toBe(0);
+
+    // Recon in repair mode — repaired === affected_addresses.
+    const repairRes = await SELF.fetch("http://example.com/api/test-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recon: { repair: true } }),
+    });
+    const repairBody = await repairRes.json<{
+      data: { recon: { affected_addresses: number; repaired: number } };
+    }>();
+    expect(repairBody.data.recon.repaired).toBe(repairBody.data.recon.affected_addresses);
+    expect(repairBody.data.recon.repaired).toBe(1);
+
+    // After repair the read surface matches the truth: 2 same-day signals.
+    correspondents = await fetchCorrespondents();
+    const repaired = correspondents.find((c) => c.address === addr);
+    expect(repaired?.signalCount).toBe(2);
+    expect(repaired?.daysActive).toBe(1);
+  });
+});

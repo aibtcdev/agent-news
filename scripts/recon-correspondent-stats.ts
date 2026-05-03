@@ -9,8 +9,9 @@
  * Required env:
  *   BASE_URL              — e.g. https://aibtc.news (or staging URL)
  *   BTC_ADDRESS           — Publisher BTC address
- *   BTC_SIGNATURE         — BIP-322 signature for "POST /api/config/recon-correspondents" challenge
- *   BTC_TIMESTAMP         — ISO timestamp used in the signed challenge
+ *   BTC_SIGNATURE         — BIP-322 signature for the signed challenge
+ *   BTC_TIMESTAMP         — Unix seconds (NOT ISO); same value baked into the challenge
+ *                           message "POST /api/config/recon-correspondents:{timestamp}"
  *
  * Optional flags:
  *   --repair              — recompute drifted rows in place (default: report only)
@@ -19,7 +20,7 @@
  *   BASE_URL=https://aibtc.news \
  *   BTC_ADDRESS=bc1q... \
  *   BTC_SIGNATURE=... \
- *   BTC_TIMESTAMP=2026-05-03T12:00:00Z \
+ *   BTC_TIMESTAMP=$(date -u +%s) \
  *   npm run recon:correspondents -- --repair
  */
 
@@ -58,6 +59,7 @@ async function main() {
       expected_rows: number;
       actual_rows: number;
       drift_count: number;
+      affected_addresses: number;
       drift: Array<{ btc_address: string; field: string; expected: unknown; actual: unknown }>;
       repaired: number;
     };
@@ -68,11 +70,19 @@ async function main() {
     process.exit(1);
   }
 
-  const { expected_rows, actual_rows, drift_count, drift, repaired } = json.data;
-  console.log(`expected_rows: ${expected_rows}`);
-  console.log(`actual_rows:   ${actual_rows}`);
-  console.log(`drift_count:   ${drift_count}`);
-  console.log(`repaired:      ${repaired}`);
+  const {
+    expected_rows,
+    actual_rows,
+    drift_count,
+    affected_addresses,
+    drift,
+    repaired,
+  } = json.data;
+  console.log(`expected_rows:      ${expected_rows}`);
+  console.log(`actual_rows:        ${actual_rows}`);
+  console.log(`drift_count:        ${drift_count} (field-level)`);
+  console.log(`affected_addresses: ${affected_addresses}`);
+  console.log(`repaired:           ${repaired}`);
 
   if (drift_count > 0) {
     console.log("\nDrift entries:");
@@ -83,7 +93,17 @@ async function main() {
     }
   }
 
-  process.exit(drift_count === 0 ? 0 : REPAIR && repaired === drift_count ? 0 : 3);
+  // Compare repaired (per-address) to affected_addresses (per-address);
+  // drift_count is field-level and counts each mismatched column separately,
+  // so a single address with multiple drifted fields would falsely fail
+  // a `repaired === drift_count` check.
+  process.exit(
+    drift_count === 0
+      ? 0
+      : REPAIR && repaired === affected_addresses
+      ? 0
+      : 3
+  );
 }
 
 main().catch((err) => {

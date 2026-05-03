@@ -3484,13 +3484,20 @@ export class NewsDO extends DurableObject<Env> {
           400
         );
       }
-      const { btc_address, repair } = body as { btc_address?: string; repair?: boolean };
-      if (!btc_address) {
+      const { btc_address, repair } = body as { btc_address?: unknown; repair?: unknown };
+      if (typeof btc_address !== "string" || !btc_address) {
         return c.json(
-          { ok: false, error: "Missing required field: btc_address" } satisfies DOResult<unknown>,
+          { ok: false, error: "Missing or invalid field: btc_address" } satisfies DOResult<unknown>,
           400
         );
       }
+      if (repair !== undefined && typeof repair !== "boolean") {
+        return c.json(
+          { ok: false, error: "Field 'repair' must be a boolean if provided" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const shouldRepair = repair === true;
       const pub = verifyPublisher(this.ctx.storage.sql, btc_address);
       if (!pub.ok) {
         return c.json(
@@ -3552,11 +3559,11 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      const driftedAddresses = new Set(drift.map((d) => d.btc_address));
       let repaired = 0;
-      if (repair && drift.length > 0) {
-        const drifted = new Set(drift.map((d) => d.btc_address));
-        this.recomputeCorrespondentStatsFor([...drifted]);
-        repaired = drifted.size;
+      if (shouldRepair && driftedAddresses.size > 0) {
+        this.recomputeCorrespondentStatsFor([...driftedAddresses]);
+        repaired = driftedAddresses.size;
       }
 
       return c.json({
@@ -3564,7 +3571,8 @@ export class NewsDO extends DurableObject<Env> {
         data: {
           expected_rows: expected.length,
           actual_rows: actual.length,
-          drift_count: drift.length,
+          drift_count: drift.length, // field-level mismatches across all addresses
+          affected_addresses: driftedAddresses.size, // unique addresses with at least one mismatch
           drift,
           repaired,
         },
@@ -5704,7 +5712,106 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      return c.json({ ok: true, data: { inserted } });
+      // Seed correspondent_stats overrides (test-only — used to corrupt the
+      // materialised aggregate so the recon path can be exercised end-to-end).
+      if (Array.isArray(body.correspondent_stats)) {
+        for (const row of body.correspondent_stats as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT INTO correspondent_stats
+               (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+               VALUES (?, ?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(btc_address) DO UPDATE SET
+                 signal_count = excluded.signal_count,
+                 last_signal_at = excluded.last_signal_at,
+                 first_signal_at = excluded.first_signal_at,
+                 days_active = excluded.days_active,
+                 updated_at = datetime('now')`,
+              row.btc_address as string,
+              (row.signal_count as number) ?? 0,
+              (row.last_signal_at as string | null) ?? null,
+              (row.first_signal_at as string | null) ?? null,
+              (row.days_active as number) ?? 0
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Optional: trigger the recon path inline so tests can assert the
+      // drift-detection / repair surface without needing BIP-322 auth.
+      // Mirrors the response shape of POST /recon-correspondents.
+      let recon: unknown = undefined;
+      if (body.recon && typeof body.recon === "object") {
+        const reconBody = body.recon as { repair?: boolean };
+        const expected = this.ctx.storage.sql
+          .exec(
+            `SELECT btc_address,
+                    COUNT(*) as signal_count,
+                    MAX(created_at) as last_signal_at,
+                    MIN(created_at) as first_signal_at,
+                    COUNT(DISTINCT date(created_at)) as days_active
+               FROM signals
+              WHERE correction_of IS NULL
+              GROUP BY btc_address`
+          )
+          .toArray() as Array<{
+            btc_address: string;
+            signal_count: number;
+            last_signal_at: string | null;
+            first_signal_at: string | null;
+            days_active: number;
+          }>;
+        const actual = this.ctx.storage.sql
+          .exec("SELECT btc_address, signal_count, last_signal_at, first_signal_at, days_active FROM correspondent_stats")
+          .toArray() as Array<{
+            btc_address: string;
+            signal_count: number;
+            last_signal_at: string | null;
+            first_signal_at: string | null;
+            days_active: number;
+          }>;
+        const actualByAddr = new Map(actual.map((r) => [r.btc_address, r]));
+        const expectedByAddr = new Map(expected.map((r) => [r.btc_address, r]));
+        const drift: Array<{ btc_address: string; field: string; expected: unknown; actual: unknown }> = [];
+        for (const exp of expected) {
+          const act = actualByAddr.get(exp.btc_address);
+          if (!act) {
+            drift.push({ btc_address: exp.btc_address, field: "row", expected: "present", actual: "missing" });
+            continue;
+          }
+          if (exp.signal_count !== act.signal_count)
+            drift.push({ btc_address: exp.btc_address, field: "signal_count", expected: exp.signal_count, actual: act.signal_count });
+          if (exp.last_signal_at !== act.last_signal_at)
+            drift.push({ btc_address: exp.btc_address, field: "last_signal_at", expected: exp.last_signal_at, actual: act.last_signal_at });
+          if (exp.first_signal_at !== act.first_signal_at)
+            drift.push({ btc_address: exp.btc_address, field: "first_signal_at", expected: exp.first_signal_at, actual: act.first_signal_at });
+          if (exp.days_active !== act.days_active)
+            drift.push({ btc_address: exp.btc_address, field: "days_active", expected: exp.days_active, actual: act.days_active });
+        }
+        for (const act of actual) {
+          if (!expectedByAddr.has(act.btc_address)) {
+            drift.push({ btc_address: act.btc_address, field: "row", expected: "missing", actual: "present" });
+          }
+        }
+        const driftedAddresses = new Set(drift.map((d) => d.btc_address));
+        let repaired = 0;
+        if (reconBody.repair === true && driftedAddresses.size > 0) {
+          this.recomputeCorrespondentStatsFor([...driftedAddresses]);
+          repaired = driftedAddresses.size;
+        }
+        recon = {
+          expected_rows: expected.length,
+          actual_rows: actual.length,
+          drift_count: drift.length,
+          affected_addresses: driftedAddresses.size,
+          drift,
+          repaired,
+        };
+      }
+
+      return c.json({ ok: true, data: { inserted, ...(recon !== undefined ? { recon } : {}) } });
     });
 
     this.router.all("*", (c) => {

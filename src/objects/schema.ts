@@ -775,7 +775,8 @@ export const MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL = [
  *
  * Maintained on every signal insert via bumpCorrespondentStatsForInsert; on
  * beat deletion (which bulk-deletes signals) the affected agents are
- * recomputed in place. Drift is reconciled by /admin/recon-correspondents.
+ * recomputed in place. Drift is reconciled by POST /api/config/recon-correspondents
+ * (Publisher-only; see scripts/recon-correspondent-stats.ts for the CLI).
  */
 export const MIGRATION_CORRESPONDENT_STATS_SQL = [
   `CREATE TABLE IF NOT EXISTS correspondent_stats (
