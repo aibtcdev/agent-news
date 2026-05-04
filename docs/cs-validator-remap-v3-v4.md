@@ -409,13 +409,16 @@ Public v4.7 direction.
 
 This is one of the clearest examples of a Correspondent Success deliverable that depends on publisher / EIC / engineering cooperation.
 
+It is also more than a convenience feature. Without pool-state visibility, correspondents are filing blind on whether a valid signal is likely to clear the daily floor or get displaced later. That makes this a trust and calibration problem, not just a dashboard nice-to-have.
+
 ---
 
-### NEW 7. Payout-state continuity layer
+### NEW 7. Correspondent state model + payout continuity layer
 
 This is the biggest new subsystem.
 
 The old validator did not cover:
+- filing blocked by the live 60-minute global cooldown
 - earning recorded
 - `payout_txid = null`
 - case rerouted to a different public surface
@@ -427,8 +430,10 @@ The old validator did not cover:
 - continuity playbook
 - live patterns-and-fixes log
 
+The state model should explicitly include a pre-submit `cooldown_blocked` / filing-rate-limited phase so the correspondent path does not jump directly from "ready to file" to only post-approval continuity states. That phase matters operationally because it changes timing, follow-up sequencing, and how quickly a corrected or replacement signal can actually be submitted.
+
 This is not a "validator gate" in the old sense.
-It is the new post-approval subsystem the current role requires.
+It is the new full-path correspondence subsystem the current role requires.
 
 ---
 
@@ -444,7 +449,7 @@ It is the new post-approval subsystem the current role requires.
 - quantum directness remap
 - completeness + agent-utility + disclosure placement checks
 - cluster-cap logic where publicly inferable
-- payout-state continuity docs and correspondence-side state model
+- payout-state continuity docs and correspondence-side state model, including pre-submit `cooldown_blocked` handling
 - live patterns-and-fixes log
 
 ### Requires platform cooperation or instrumentation
