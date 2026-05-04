@@ -22,6 +22,7 @@ const initRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 // subsequent visits within the s-maxage window serve from the nearest
 // Cloudflare PoP in <100ms instead of paying the ~3s DO round-trip.
 initRouter.get("/api/init", async (c) => {
+  const logger = c.get("logger");
   const cached = await edgeCacheMatch(c);
   if (cached) return cached;
 
@@ -37,7 +38,10 @@ initRouter.get("/api/init", async (c) => {
       try {
         jsonData = JSON.parse(todaysBrief.json_data) as Record<string, unknown>;
       } catch (err) {
-        console.error("Failed to parse brief json_data in /api/init:", err);
+        logger.warn("failed to parse brief json_data in init bundle", {
+          briefDate: todaysBrief.date,
+          error: String(err),
+        });
       }
     }
     const inscription = todaysBrief.inscription_id

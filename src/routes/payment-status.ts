@@ -44,7 +44,7 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
   try {
     relayResult = await c.env.X402_RELAY.checkPayment(paymentId);
   } catch (err) {
-    console.error("[payment-status] checkPayment transport failure:", err);
+    logger.error("payment relay check failed", { paymentId, error: String(err) });
     return c.json(
       { error: "Failed to reach payment relay — please retry shortly" },
       503
@@ -55,7 +55,7 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
   try {
     body = buildPaymentStatusResponse(relayResult);
   } catch (err) {
-    console.error("[payment-status] invalid checkPayment response:", err);
+    logger.error("payment relay returned invalid status payload", { paymentId, error: String(err) });
     return c.json(
       { error: "Payment relay returned an invalid status payload — please retry shortly" },
       503
@@ -79,7 +79,7 @@ paymentStatusRouter.get("/api/payment-status/:paymentId", async (c) => {
         terminalReason: body.terminalReason,
       });
     } catch (err) {
-      console.error("[payment-status] reconcilePaymentStage transport failure:", err);
+      logger.error("payment stage reconciliation failed", { paymentId, status: body.status, error: String(err) });
       logPaymentEvent(logger, "warn", "payment.reconciliation_pending", {
         route: "/api/payment-status/:paymentId",
         paymentId,

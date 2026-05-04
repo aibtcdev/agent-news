@@ -36,6 +36,7 @@ const skillsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 // GET /api/skills — list skill files with optional ?type and ?slug filters
 skillsRouter.get("/api/skills", async (c) => {
   const base = new URL(c.req.url).origin;
+  const logger = c.get("logger");
   const typeFilter = c.req.query("type");
   const slugFilter = c.req.query("slug");
 
@@ -51,7 +52,7 @@ skillsRouter.get("/api/skills", async (c) => {
       path: `/skills/beats/${b.slug}.md`,
     }));
   } catch (err) {
-    console.error("[skills] failed to load beats from DO, using empty list", err);
+    logger.warn("failed to load beat skills from DO", { error: String(err) });
   }
 
   let results: Skill[] = [...STATIC_SKILLS, ...beatSkills];
