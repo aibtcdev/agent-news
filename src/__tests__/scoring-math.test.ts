@@ -374,8 +374,10 @@ describe("referral_credits: weight x" + SCORING_WEIGHTS.referral_credits, () => 
 
 describe("edge case: same-day multi-signals count as 1 days_active", () => {
   it("three signals on the same date produce days_active=1", async () => {
-    // Use the same date-prefix to ensure same SQLite date() value
-    const sameDate = "2026-03-10";
+    // Anchor to a recent UTC date so the rows stay inside the leaderboard's
+    // 30-day rolling window regardless of when the test runs (the previous
+    // hardcoded "2026-03-10" silently aged out and zeroed signalCount).
+    const sameDate = recentTs(5).slice(0, 10);
     const ts1 = sameDate + "T08:00:00.000Z";
     const ts2 = sameDate + "T12:00:00.000Z";
     const ts3 = sameDate + "T20:00:00.000Z";

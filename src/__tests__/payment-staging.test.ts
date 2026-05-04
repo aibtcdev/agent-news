@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SELF } from "cloudflare:test";
-
-const BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+import {
+  FIXTURE_BTC_ADDRESS as BTC_ADDRESS,
+  reconcileStage,
+  seedPendingSignal,
+  stageSignalSubmission,
+} from "./_payment-fixtures";
 
 describe("payment staging", () => {
   it("keeps staged records provisional when reconciliation sees mempool", async () => {
@@ -169,6 +173,58 @@ describe("payment staging", () => {
     const duplicateBody = await duplicateRes.json<{ data: { payload: { classified_id: string; headline: string } } }>();
     expect(duplicateBody.data.payload.classified_id).toBe("cl-dup-001");
     expect(duplicateBody.data.payload.headline).toBe("Original headline");
+  });
+
+  it("finalizes a staged signal_submission by flipping status from pending_payment to submitted", async () => {
+    const signalId = "sig-stage-finalize-001";
+    await seedPendingSignal(signalId, {
+      headline: "Pending signal awaiting settlement",
+      body: "Will flip on confirm",
+      createdAt: "2026-04-22T10:00:00.000Z",
+    });
+    await stageSignalSubmission("pay_signal_stage_finalize", signalId, {
+      headline: "Pending signal awaiting settlement",
+      body: "Will flip on confirm",
+    });
+
+    // Pre-finalize the row exists with status='pending_payment' but the
+    // public per-id endpoint returns 404 (author-only visibility — see
+    // GET /api/signals/:id route guard).
+    const before = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(before.status).toBe(404);
+
+    await reconcileStage("pay_signal_stage_finalize", "confirmed", { txid: "f".repeat(64) });
+
+    const after = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(after.status).toBe(200);
+    const afterBody = await after.json<{ status: string }>();
+    expect(afterBody.status).toBe("submitted");
+  });
+
+  it("deletes the staged signal row when the signal_submission stage is discarded", async () => {
+    const signalId = "sig-stage-discard-001";
+    await seedPendingSignal(signalId, {
+      headline: "Pending signal that fails to settle",
+      createdAt: "2026-04-22T11:00:00.000Z",
+    });
+    await stageSignalSubmission("pay_signal_stage_discard", signalId, {
+      headline: "Pending signal that fails to settle",
+    });
+
+    const reconcileTrigger = await SELF.fetch(
+      "http://example.com/api/test/payment-stage/pay_signal_stage_discard/reconcile",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "failed", terminalReason: "sender_nonce_stale" }),
+      }
+    );
+    expect(reconcileTrigger.status).toBe(200);
+    const reconcileBody = await reconcileTrigger.json<{ data: { stageStatus: string } }>();
+    expect(reconcileBody.data.stageStatus).toBe("discarded");
+
+    const after = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(after.status).toBe(404);
   });
 
   it("rejects unsupported staged payload kinds", async () => {
