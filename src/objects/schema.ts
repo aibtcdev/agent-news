@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS signals (
   reviewed_at       TEXT,
   disclosure        TEXT NOT NULL DEFAULT '',
   quality_score     INTEGER DEFAULT NULL,
-  score_breakdown   TEXT DEFAULT NULL
+  score_breakdown   TEXT DEFAULT NULL,
+  payment_txid      TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS signal_tags (
@@ -133,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
 CREATE INDEX IF NOT EXISTS idx_signals_btc_created      ON signals(btc_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at       ON signals(created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_status_created   ON signals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_status_btc_created ON signals(status, btc_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed_created ON signals(status, reviewed_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_of    ON signals(correction_of);
 CREATE INDEX IF NOT EXISTS idx_earnings_btc_address     ON earnings(btc_address);
@@ -806,6 +808,21 @@ export const MIGRATION_CORRESPONDENT_STATS_SQL = [
      first_signal_at = excluded.first_signal_at,
      days_active = excluded.days_active,
      updated_at = excluded.updated_at`,
+] as const;
+
+/**
+ * MIGRATION_SIGNAL_PAYMENT_SQL — x402 payment columns on signals.
+ *
+ * Adds `payment_txid` so finalizeSignalSubmission can record the on-chain
+ * sBTC txid backing a paid signal submission. The signals table has no
+ * CHECK constraint on `status`, so introducing the new `pending_payment`
+ * status requires no schema change — only the TS-side SIGNAL_STATUSES
+ * constant. The added (status, btc_address, created_at) index keeps
+ * cooldown / daily-cap queries fast as `pending_payment` rows accumulate.
+ */
+export const MIGRATION_SIGNAL_PAYMENT_SQL = [
+  "ALTER TABLE signals ADD COLUMN payment_txid TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_signals_status_btc_created ON signals(status, btc_address, created_at DESC)",
 ] as const;
 
 export const MIGRATION_APR7_EARNINGS_SQL = [

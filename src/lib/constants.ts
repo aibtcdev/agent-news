@@ -96,7 +96,10 @@ export const BRIEF_PRICE_SATS = 1000;
 export const CORRESPONDENT_SHARE = 0.7;
 
 // ── Signal statuses (editorial pipeline) ──
+// `pending_payment` is intentionally OUT of REVIEWABLE_SIGNAL_STATUSES — staged
+// signals are invisible to the editorial pipeline until x402 payment finalises.
 export const SIGNAL_STATUSES = [
+  "pending_payment",
   "submitted",
   "approved",
   "replaced",

@@ -5,14 +5,22 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
 
-/** Valid editorial transitions for signals: submitted → approved/rejected → brief_included */
+/**
+ * Valid editorial transitions for signals: submitted → approved/rejected → brief_included.
+ *
+ * `pending_payment` → `submitted` is intentionally absent here: the transition
+ * is performed by `finalizeSignalSubmission` outside the editorial state
+ * machine (the pending row is not yet visible to reviewers). No editorial
+ * transitions originate from `pending_payment`.
+ */
 export const SIGNAL_VALID_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
+  pending_payment: [],
   submitted: ["approved", "rejected"],
   approved: ["replaced", "rejected", "brief_included"],
   replaced: ["approved", "rejected"],
@@ -373,6 +381,90 @@ function getPaymentStageRow(
 }
 
 /**
+ * Context object handed to each finalize callback. `sql` is the DO's SQL
+ * storage handle; `paymentId` and `now` are precomputed by the dispatcher
+ * for consistency across writes; `txid` is the on-chain settlement txid
+ * reported by the relay (preferred over any payload-embedded txid).
+ */
+type FinalizeContext = {
+  sql: DurableObjectState["storage"]["sql"];
+  paymentId: string;
+  now: string;
+  txid?: string;
+};
+
+type FinalizeFn = (payload: PaymentStagePayload, ctx: FinalizeContext) => void;
+
+/**
+ * Inserts the classified row that the agent paid for. INSERT OR IGNORE
+ * keeps the call idempotent under poll+sweep reconcile races.
+ */
+function finalizeClassifiedSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
+  const p = payload as Extract<PaymentStagePayload, { kind: "classified_submission" }>;
+  ctx.sql.exec(
+    `INSERT OR IGNORE INTO classifieds
+       (id, btc_address, category, headline, body, payment_txid, status, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
+    p.classified_id,
+    p.btc_address,
+    p.category,
+    p.headline,
+    p.body,
+    ctx.txid ?? p.payment_txid,
+    ctx.now,
+    ctx.now
+  );
+}
+
+/**
+ * Records brief-revenue earnings for the paying address (if any). No-op
+ * when payload.payer is null — payer is only resolved for authenticated
+ * brief unlocks. INSERT OR IGNORE keeps it idempotent.
+ */
+function finalizeBriefAccess(payload: PaymentStagePayload, ctx: FinalizeContext): void {
+  const p = payload as Extract<PaymentStagePayload, { kind: "brief_access" }>;
+  if (!p.payer) return;
+  ctx.sql.exec(
+    `INSERT OR IGNORE INTO earnings
+       (id, btc_address, amount_sats, reason, reference_id, created_at)
+     VALUES (?, ?, ?, 'brief-revenue', ?, ?)`,
+    generateId(),
+    p.payer,
+    p.amount_sats,
+    ctx.paymentId,
+    ctx.now
+  );
+}
+
+/**
+ * Flips an already-staged signals row from `pending_payment` → `submitted`
+ * and stamps `payment_txid`. The signal content was inserted at stage time,
+ * so finalize is a status-only update; the WHERE clause restricts the
+ * update to the matching pending row, making concurrent poll+sweep finalises
+ * a no-op on the second run.
+ */
+function finalizeSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
+  const p = payload as Extract<PaymentStagePayload, { kind: "signal_submission" }>;
+  ctx.sql.exec(
+    `UPDATE signals
+        SET status = 'submitted',
+            payment_txid = COALESCE(?, payment_txid),
+            updated_at = ?
+      WHERE id = ?
+        AND status = 'pending_payment'`,
+    ctx.txid ?? p.payment_txid,
+    ctx.now,
+    p.signal_id
+  );
+}
+
+const FINALIZE_REGISTRY: Record<PaymentStageKind, FinalizeFn> = {
+  brief_access: finalizeBriefAccess,
+  classified_submission: finalizeClassifiedSubmission,
+  signal_submission: finalizeSignalSubmission,
+};
+
+/**
  * Apply a terminal reconciliation decision to a single staged payment row.
  * Shared by the /payment-staging/:paymentId/reconcile route (poll-driven) and
  * the alarm sweep (backend-driven). Returns the row after the write, or null
@@ -397,36 +489,8 @@ function reconcileStageRow(
   const now = new Date().toISOString();
 
   if (status === "confirmed") {
-    if (staged.kind === "classified_submission") {
-      const payload = staged.payload as Extract<PaymentStagePayload, { kind: "classified_submission" }>;
-      sql.exec(
-        `INSERT OR IGNORE INTO classifieds
-           (id, btc_address, category, headline, body, payment_txid, status, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
-        payload.classified_id,
-        payload.btc_address,
-        payload.category,
-        payload.headline,
-        payload.body,
-        txid ?? payload.payment_txid,
-        now,
-        now
-      );
-    } else if (staged.kind === "brief_access") {
-      const payload = staged.payload as Extract<PaymentStagePayload, { kind: "brief_access" }>;
-      if (payload.payer) {
-        sql.exec(
-          `INSERT OR IGNORE INTO earnings
-             (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, ?, 'brief-revenue', ?, ?)`,
-          generateId(),
-          payload.payer,
-          payload.amount_sats,
-          paymentId,
-          now
-        );
-      }
-    }
+    const finalize = FINALIZE_REGISTRY[staged.kind];
+    finalize(staged.payload, { sql, paymentId, now, txid });
 
     sql.exec(
       `UPDATE payment_staging
@@ -713,7 +777,7 @@ export class NewsDO extends DurableObject<Env> {
     // 26 = Partial UNIQUE index on classifieds.payment_txid for replay protection across both placement paths
     // 27 = Signal hot-path composite indexes for Cloudflare bill reduction
     // 28 = Correspondents bundle composite indexes for DO timeout reduction
-    const CURRENT_MIGRATION_VERSION = 29;
+    const CURRENT_MIGRATION_VERSION = 30;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -1146,6 +1210,22 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Signal payment columns — `payment_txid` for finalised x402 signal
+      // submissions plus a (status, btc_address, created_at) index that keeps
+      // cooldown/daily-cap queries fast as `pending_payment` rows accumulate.
+      if (appliedVersion < 30) {
+        for (const stmt of MIGRATION_SIGNAL_PAYMENT_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists") && !msg.includes("duplicate column name")) {
+              console.error("Signal payment migration failed:", e);
+            }
+          }
+        }
+      }
+
       // Record current migration version so future cold starts skip all of the above.
       // If migration 22 failed but later migrations succeeded, cap at 21 so v22 retries
       // on next cold start.
@@ -1344,7 +1424,11 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
       const stageKind = body.payload.kind;
-      if (stageKind !== "brief_access" && stageKind !== "classified_submission") {
+      if (
+        stageKind !== "brief_access" &&
+        stageKind !== "classified_submission" &&
+        stageKind !== "signal_submission"
+      ) {
         return c.json(
           { ok: false, error: `Unsupported payment stage kind: ${stageKind as string}` } satisfies DOResult<PaymentStageMaterialized>,
           400
