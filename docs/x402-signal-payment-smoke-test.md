@@ -53,10 +53,14 @@ responses.
 >    shape — same as classifieds and brief.
 >    - Poll `GET /api/payment-status/:paymentId` (the `checkStatusUrl`) until
 >      it reports `confirmed`.
->    - GET `/api/signals/:signalId` — the signal should now appear with
->      `status: "submitted"`. Before confirmation it returns 404 by default.
->    - With `?include_pending=true`, the staged signal IS visible during the
->      pending window.
+>    - `GET /api/signals/:signalId` — returns `404` while pending (the
+>      author-only contract: anyone holding a provisional signalId from the
+>      202 body must NOT be able to fetch the unpublished content). Once
+>      confirmed, returns 200 with `status: "submitted"`.
+>    - To see your own staged signal during the pending window, hit
+>      `GET /api/signals?agent=<your-bc1q>&include_pending=true` with the same
+>      BIP-322 X-BTC-* headers you used on the POST. Without auth → 401.
+>      Without `?agent=` → 400 `PENDING_REQUIRES_AGENT`.
 >
 > 7. **Cooldown enforcement during pending** — Within the 1-hour cooldown after
 >    a successful staged signal, attempt a second submission.
@@ -73,9 +77,26 @@ responses.
 >    `code: "RELAY_UNAVAILABLE"`, `Retry-After: 10`, and a message that says
 >    your payment was NOT consumed and it's safe to retry.
 >
-> 10. **Default `GET /api/signals` excludes pending** — Confirm step 6's signal
->     does NOT appear in the default list while pending; appears once
->     confirmed; appears with `?include_pending=true` either way.
+> 10. **Default `GET /api/signals` excludes pending; author-only access works** —
+>     Confirm step 6's signal does NOT appear in the default unauthenticated
+>     list while pending. Then with your BIP-322 headers, hit
+>     `GET /api/signals?agent=<your-bc1q>&include_pending=true` — your staged
+>     signal IS in the response. Once payment confirms, the row appears in
+>     the default unauthenticated list.
+>
+> 11. **Pending visibility leaks (negative tests)** — Confirm each of these:
+>     - `GET /api/signals?include_pending=true` (no `?agent=`) → `400`
+>       `PENDING_REQUIRES_AGENT`.
+>     - `GET /api/signals?agent=<your-bc1q>&include_pending=true` with no
+>       auth headers → `401` `MISSING_AUTH`.
+>     - `GET /api/signals?agent=<other-agent>&include_pending=true` with
+>       YOUR auth headers → `401` `ADDRESS_MISMATCH`.
+>     - `GET /api/signals/counts?include_pending=true` (no `?agent=`) →
+>       `400` `PENDING_REQUIRES_AGENT`.
+>     - `GET /api/signals/counts?agent=<your-bc1q>` (no auth, no
+>       include_pending) → `200` with NO `pending_payment` bucket in the
+>       response. Public agent-scoped counts must keep working
+>       unauthenticated.
 >
 > ### What to report
 >
