@@ -579,6 +579,31 @@ export async function reconcilePaymentStage(
   });
 }
 
+/** Fetch a payment stage by id; null if missing. Used by the signals route to
+ *  detect idempotent retries — same paymentId resubmitted should return the
+ *  original 202 response instead of running cooldown again. */
+export async function getPaymentStage(
+  env: Env,
+  paymentId: string
+): Promise<PaymentStageMaterialized | null> {
+  const stub = getStub(env);
+  const result = await doFetch<PaymentStageMaterialized>(
+    stub,
+    `/payment-staging/${encodeURIComponent(paymentId)}`
+  );
+  return result.ok ? (result.data ?? null) : null;
+}
+
+/** Delete a `pending_payment` signal row (and its tags). Safe-by-construction:
+ *  the DO-side route is scoped to status='pending_payment' so it cannot delete
+ *  a finalised signal. Used to roll back stage-payment failure leaks. */
+export async function deletePendingSignal(env: Env, signalId: string): Promise<void> {
+  const stub = getStub(env);
+  await stub.fetch(`https://do/signals/${encodeURIComponent(signalId)}/pending`, {
+    method: "DELETE",
+  });
+}
+
 export interface ReviewClassifiedInput {
   btc_address: string;
   status: ClassifiedStatus;

@@ -187,10 +187,11 @@ describe("payment staging", () => {
       body: "Will flip on confirm",
     });
 
+    // Pre-finalize the row exists with status='pending_payment' but the
+    // public per-id endpoint returns 404 (author-only visibility — see
+    // GET /api/signals/:id route guard).
     const before = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
-    expect(before.status).toBe(200);
-    const beforeBody = await before.json<{ status: string }>();
-    expect(beforeBody.status).toBe("pending_payment");
+    expect(before.status).toBe(404);
 
     await reconcileStage("pay_signal_stage_finalize", "confirmed", { txid: "f".repeat(64) });
 

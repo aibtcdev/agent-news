@@ -21,6 +21,8 @@ import {
   getConfig,
   reconcilePaymentStage,
   stagePayment,
+  getPaymentStage,
+  deletePendingSignal,
 } from "../lib/do-client";
 import type { Context } from "hono";
 import { verifyAuth } from "../services/auth";
@@ -96,6 +98,27 @@ signalsRouter.get("/api/signals", async (c) => {
 
   if (status && !(SIGNAL_STATUSES as readonly string[]).includes(status)) {
     return c.json({ error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}` }, 400);
+  }
+
+  // Pending visibility is author-only. Require an `agent` filter that
+  // matches a BIP-322-signed X-BTC-* header trio so callers can only
+  // enumerate their own staged rows. Without this gate any caller could
+  // dump unpublished submissions for any agent address before settlement.
+  const wantsPending = includePending || status === "pending_payment";
+  if (wantsPending) {
+    if (!agent) {
+      return c.json(
+        {
+          error: "Pending visibility requires ?agent=<bc1q-address> filter",
+          code: "PENDING_REQUIRES_AGENT",
+        },
+        400
+      );
+    }
+    const authResult = verifyAuth(c.req.raw.headers, agent, "GET", "/api/signals");
+    if (!authResult.valid) {
+      return c.json({ error: authResult.error, code: authResult.code }, 401);
+    }
   }
 
   if (since && Number.isNaN(new Date(since).getTime())) {
@@ -193,6 +216,14 @@ signalsRouter.get("/api/signals/:id", signalReadRateLimit, async (c) => {
   }
   const s = await getSignal(c.env, id);
   if (!s) {
+    return c.json({ error: `Signal "${id}" not found` }, 404);
+  }
+  // x402-staged-but-unconfirmed rows are author-only; the public per-id
+  // endpoint hides them entirely so anyone holding a provisional signalId
+  // (returned in the 202 body) cannot fetch the unpublished content. The
+  // author can list their own pending rows via
+  // GET /api/signals?agent=<bc1q>&status=pending_payment with BIP-322 auth.
+  if (s.status === "pending_payment") {
     return c.json({ error: `Signal "${id}" not found` }, 404);
   }
 
@@ -463,6 +494,28 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
       );
     }
 
+    // Idempotent retry: x402 reuses the same paymentId for retries of the
+    // same signed transaction. If a previous attempt already staged this
+    // paymentId for a signal_submission, re-issue the original 202 instead
+    // of running cooldown / daily-cap (which would reject the retry) and
+    // creating a second staged row.
+    const existingStage = await getPaymentStage(c.env, verification.paymentId);
+    if (existingStage && existingStage.payload.kind === "signal_submission") {
+      const checkStatusUrl = verification.checkStatusUrl
+        ?? buildLocalPaymentStatusUrl(new URL(c.req.url).origin, verification.paymentId);
+      return c.json(
+        {
+          signalId: existingStage.payload.signal_id,
+          paymentId: verification.paymentId,
+          paymentStatus: "pending",
+          status: verification.paymentState ?? "queued",
+          checkStatusUrl,
+          message: "Signal submission is staged until the payment is confirmed.",
+        },
+        202
+      );
+    }
+
     // Run cooldown / daily-cap checks via the DO before staging the payment
     // so an over-limit agent never produces an orphan staged payment for a
     // request that would have been rejected anyway.
@@ -495,6 +548,14 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
       },
     });
     if (!stageResult.ok || !stageResult.data) {
+      // Roll back the pending row so a transient stagePayment failure does
+      // not strand the agent's cooldown / daily-cap slot for hours.
+      await deletePendingSignal(c.env, provisionalSignalId);
+      logger.warn("rolled back pending signal after stagePayment failure", {
+        signalId: provisionalSignalId,
+        paymentId: verification.paymentId,
+        stageError: stageResult.error,
+      });
       return c.json({ error: stageResult.error ?? "Failed to stage signal submission" }, stageResult.status ?? 500);
     }
     logPaymentEvent(logger, "info", "payment.delivery_staged", {

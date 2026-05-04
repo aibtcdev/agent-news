@@ -2730,10 +2730,10 @@ export class NewsDO extends DurableObject<Env> {
       const agent = c.req.query("agent") ?? null;
       const sinceRaw = c.req.query("since") ?? null;
       const since = sinceRaw && sinceRaw.trim() !== "" ? sinceRaw : null;
-      // pending_payment is included when an agent scope is set (an author is
-      // looking at their own staged count) or when the caller asks for it.
-      const includePending =
-        c.req.query("include_pending") === "true" || agent !== null;
+      // pending_payment is included only when the caller opts in. The route
+      // layer is responsible for gating include_pending behind BIP-322 auth
+      // matching the agent — see src/routes/signal-counts.ts.
+      const includePending = c.req.query("include_pending") === "true";
 
       const rows = querySignalCountRows(this.ctx.storage.sql, {
         beat,
@@ -2786,6 +2786,23 @@ export class NewsDO extends DurableObject<Env> {
       const signal = rowToSignal(rows[0] as Record<string, unknown>);
 
       return c.json({ ok: true, data: signal } satisfies DOResult<Signal>);
+    });
+
+    // DELETE /signals/:id/pending — orphan cleanup for the route layer when
+    // stagePayment fails after a pending_payment row has been inserted. The
+    // status='pending_payment' guard is the safety net: nothing finalised
+    // can ever be deleted through this path.
+    this.router.delete("/signals/:id/pending", (c) => {
+      const id = c.req.param("id");
+      this.ctx.storage.sql.exec(
+        "DELETE FROM signal_tags WHERE signal_id = ?",
+        id
+      );
+      this.ctx.storage.sql.exec(
+        "DELETE FROM signals WHERE id = ? AND status = 'pending_payment'",
+        id
+      );
+      return c.json({ ok: true, data: { id } });
     });
 
     // POST /signals — atomic insert: signal + tags + streak + earning
