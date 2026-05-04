@@ -293,6 +293,18 @@ export interface CreateSignalInput {
   tags: string[];
   signature?: string;
   disclosure?: string;
+  /**
+   * Caller-provided id when the route is staging a pending_payment row.
+   * The route allocates this id pre-stage so it can return it in the
+   * 202 body alongside paymentId. Omit (or empty) to have the DO mint one.
+   */
+  signal_id?: string;
+  /**
+   * When true, the row lands at status='pending_payment' and the DO defers
+   * streak / correspondent_stats / referral commit effects until the
+   * x402 finalize hook fires (or deletes the row on discard).
+   */
+  pending_payment?: boolean;
 }
 
 export interface CooldownInfo {

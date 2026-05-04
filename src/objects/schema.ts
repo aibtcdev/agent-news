@@ -792,6 +792,9 @@ export const MIGRATION_CORRESPONDENT_STATS_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_correspondent_stats_signal_count ON correspondent_stats(signal_count DESC)",
   "CREATE INDEX IF NOT EXISTS idx_correspondent_stats_last_signal ON correspondent_stats(last_signal_at DESC)",
   // Backfill from existing signals — idempotent via ON CONFLICT.
+  // Excludes pending_payment so x402-staged-but-unconfirmed signals do
+  // not inflate the materialised totals; they're added by the finalize
+  // path when payment confirms.
   `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
      SELECT btc_address,
             COUNT(*),
@@ -801,6 +804,7 @@ export const MIGRATION_CORRESPONDENT_STATS_SQL = [
             datetime('now')
        FROM signals
       WHERE correction_of IS NULL
+        AND status != 'pending_payment'
       GROUP BY btc_address
    ON CONFLICT(btc_address) DO UPDATE SET
      signal_count = excluded.signal_count,

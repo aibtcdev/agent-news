@@ -437,14 +437,142 @@ function finalizeBriefAccess(payload: PaymentStagePayload, ctx: FinalizeContext)
 }
 
 /**
- * Flips an already-staged signals row from `pending_payment` → `submitted`
- * and stamps `payment_txid`. The signal content was inserted at stage time,
- * so finalize is a status-only update; the WHERE clause restricts the
- * update to the matching pending row, making concurrent poll+sweep finalises
- * a no-op on the second run.
+ * Bumps the materialised correspondent_stats row for a paid signal that is
+ * landing on `submitted`. Mirrors the semantics of the legacy class method
+ * (signal_count++, last/first_signal_at min/max, days_active recomputed)
+ * but excludes `pending_payment` rows from the days_active subquery so a
+ * still-staged signal does not inflate the visible total.
+ *
+ * Free function form so the finalize registry can call it; the createSignal
+ * route handler wraps it with `applyCorrespondentStatsBumpForInsert`.
+ */
+function applyCorrespondentStatsBump(
+  sql: DurableObjectState["storage"]["sql"],
+  btcAddress: string,
+  signalCreatedAt: string
+): void {
+  sql.exec(
+    `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+     VALUES (?1, 1, ?2, ?2, 1, datetime('now'))
+     ON CONFLICT(btc_address) DO UPDATE SET
+       signal_count = correspondent_stats.signal_count + 1,
+       last_signal_at = MAX(correspondent_stats.last_signal_at, excluded.last_signal_at),
+       first_signal_at = MIN(correspondent_stats.first_signal_at, excluded.first_signal_at),
+       days_active = (
+         SELECT COUNT(DISTINCT date(created_at)) FROM signals
+         WHERE btc_address = ?1
+           AND correction_of IS NULL
+           AND status != 'pending_payment'
+       ),
+       updated_at = datetime('now')`,
+    btcAddress,
+    signalCreatedAt
+  );
+}
+
+/**
+ * Updates the streaks row for a finalized (non-correction) signal. Computes
+ * day-over-day continuation from the streaks record's previous
+ * `last_signal_date`, anchored to the *signal's* UTC date — not the moment
+ * of finalization — so that an x402 settlement that crosses a UTC midnight
+ * still credits the day the agent actually filed.
+ */
+function applyStreakBumpForSignal(
+  sql: DurableObjectState["storage"]["sql"],
+  btcAddress: string,
+  signalCreatedAt: string
+): { totalSignals: number } {
+  const signalDate = signalCreatedAt.slice(0, 10);
+  const yesterday = getUTCYesterday(new Date(signalCreatedAt));
+
+  const streakRows = sql
+    .exec("SELECT * FROM streaks WHERE btc_address = ?", btcAddress)
+    .toArray();
+
+  let currentStreak = 1;
+  let longestStreak = 1;
+  let totalSignals = 1;
+  const rec = streakRows[0] as unknown as Streak | undefined;
+
+  if (rec) {
+    totalSignals = (rec.total_signals ?? 0) + 1;
+    if (rec.last_signal_date === signalDate) {
+      currentStreak = rec.current_streak ?? 1;
+      longestStreak = rec.longest_streak ?? 1;
+    } else if (rec.last_signal_date === yesterday) {
+      currentStreak = (rec.current_streak ?? 0) + 1;
+      longestStreak = Math.max(currentStreak, rec.longest_streak ?? 0);
+    } else {
+      currentStreak = 1;
+      longestStreak = Math.max(1, rec.longest_streak ?? 0);
+    }
+  }
+
+  sql.exec(
+    `INSERT OR REPLACE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
+       VALUES (?, ?, ?, ?, ?)`,
+    btcAddress,
+    currentStreak,
+    longestStreak,
+    signalDate,
+    totalSignals
+  );
+
+  return { totalSignals };
+}
+
+/**
+ * Credits a pending referral when this is the agent's first finalized
+ * signal. No-op if no pending referral exists or the agent has already
+ * filed before. Idempotent because the WHERE clause filters out already-
+ * credited rows.
+ */
+function applyReferralCreditOnFirstSignal(
+  sql: DurableObjectState["storage"]["sql"],
+  btcAddress: string,
+  signalId: string,
+  nowIso: string,
+  totalSignals: number
+): void {
+  if (totalSignals !== 1) return;
+  const pendingRef = sql
+    .exec(
+      "SELECT id FROM referral_credits WHERE recruit_address = ? AND credited_at IS NULL",
+      btcAddress
+    )
+    .toArray();
+  if (pendingRef.length === 0) return;
+  sql.exec(
+    "UPDATE referral_credits SET credited_at = ?, first_signal_id = ? WHERE recruit_address = ? AND credited_at IS NULL",
+    nowIso,
+    signalId,
+    btcAddress
+  );
+}
+
+/**
+ * Flips an already-staged signals row from `pending_payment` → `submitted`,
+ * stamps `payment_txid`, and runs the streak / correspondent_stats /
+ * referral commit effects that were intentionally deferred at stage time.
+ *
+ * Idempotent: the status-flip UPDATE is bounded by `status='pending_payment'`,
+ * and the commit effects only run when that flip changes the row (verified
+ * by re-reading the row before vs after). Concurrent poll+sweep finalises
+ * settle to a single set of side effects.
  */
 function finalizeSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
   const p = payload as Extract<PaymentStagePayload, { kind: "signal_submission" }>;
+
+  const before = ctx.sql
+    .exec(
+      "SELECT status, created_at, correction_of FROM signals WHERE id = ?",
+      p.signal_id
+    )
+    .toArray();
+  if (before.length === 0) return;
+  const row = before[0] as { status: string; created_at: string; correction_of: string | null };
+  if (row.status !== "pending_payment") return;
+
   ctx.sql.exec(
     `UPDATE signals
         SET status = 'submitted',
@@ -456,6 +584,14 @@ function finalizeSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeCon
     ctx.now,
     p.signal_id
   );
+
+  // Corrections are excluded from streaks / stats / referrals by the same
+  // rules the createSignal path applies (see news-do.ts createSignal flow).
+  if (row.correction_of !== null) return;
+
+  applyCorrespondentStatsBump(ctx.sql, p.btc_address, row.created_at);
+  const { totalSignals } = applyStreakBumpForSignal(ctx.sql, p.btc_address, row.created_at);
+  applyReferralCreditOnFirstSignal(ctx.sql, p.btc_address, p.signal_id, ctx.now, totalSignals);
 }
 
 const FINALIZE_REGISTRY: Record<PaymentStageKind, FinalizeFn> = {
@@ -2742,13 +2878,13 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date();
       const nowIso = now.toISOString();
 
-      // UTC date helpers (used for daily cap and streak)
+      // UTC date helpers (used for daily cap)
       const today = getUTCDate(now);
-      const yesterday = getUTCYesterday(now);
       const todayStart = getUTCDayStart(today);
 
       // Daily signal cap per agent — counts ALL signals including corrections
-      // (Previously excluded correction_of, allowing unlimited daily corrections)
+      // and pending_payment stages (the slot is reserved at stage time so the
+      // cap can't be bypassed by spamming unpaid stages).
       const dailyCountRows = this.ctx.storage.sql
         .exec(
           `SELECT COUNT(*) as count FROM signals
@@ -2779,7 +2915,13 @@ export class NewsDO extends DurableObject<Env> {
         return res;
       }
 
-      const signalId = generateId();
+      // x402 stage path: caller provides a provisional signal_id when staging
+      // a pending_payment row. This lets the route return the id in the 202
+      // response so agents can poll status before payment finalises.
+      const stagedPending = body.pending_payment === true;
+      const providedSignalId = typeof body.signal_id === "string" ? body.signal_id.trim() : "";
+      const signalId = providedSignalId.length > 0 ? providedSignalId : generateId();
+
       const sourcesJson = JSON.stringify(sources ?? []);
       const sanitizedBody = signalBody ? sanitizeString(signalBody, 1000) : null;
       const signalTags = (tags as string[]) ?? [];
@@ -2795,39 +2937,14 @@ export class NewsDO extends DurableObject<Env> {
         disclosure,
       });
 
-      // Streak calculation (UTC)
-      const streakRows = this.ctx.storage.sql
-        .exec("SELECT * FROM streaks WHERE btc_address = ?", btc_address as string)
-        .toArray();
-
-      let currentStreak = 1;
-      let longestStreak = 1;
-      let totalSignals = 1;
-      const currentStreakRecord = streakRows[0] as unknown as Streak | undefined;
-
-      if (currentStreakRecord) {
-        totalSignals = (currentStreakRecord.total_signals ?? 0) + 1;
-        if (currentStreakRecord.last_signal_date === today) {
-          // Already filed today (UTC) — no streak change, but always count the new signal
-          currentStreak = currentStreakRecord.current_streak ?? 1;
-          longestStreak = currentStreakRecord.longest_streak ?? 1;
-        } else if (currentStreakRecord.last_signal_date === yesterday) {
-          // Consecutive day — increment streak
-          currentStreak = (currentStreakRecord.current_streak ?? 0) + 1;
-          longestStreak = Math.max(currentStreak, currentStreakRecord.longest_streak ?? 0);
-        } else {
-          // Gap — reset streak
-          currentStreak = 1;
-          longestStreak = Math.max(1, currentStreakRecord.longest_streak ?? 0);
-        }
-      }
-
-      // Insert signal, tags, and streak as individual statements.
-      // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
-      // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
+      // Insert the signal row. When stagedPending the row lands at
+      // status='pending_payment' and the streak / correspondent_stats /
+      // referral commit effects are deferred until finalizeSignalSubmission
+      // — that keeps the agent's visible totals in sync with finalized
+      // signals only, even if a payment is later discarded.
       this.ctx.storage.sql.exec(
         `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, quality_score, score_breakdown)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -2836,13 +2953,11 @@ export class NewsDO extends DurableObject<Env> {
         sourcesJson,
         nowIso,
         nowIso,
+        stagedPending ? "pending_payment" : "submitted",
         disclosure,
         signalScore.total,
         JSON.stringify(signalScore.breakdown)
       );
-
-      // Maintain materialised per-agent aggregate (replaces full-table GROUP BY scans).
-      this.bumpCorrespondentStatsForInsert(btc_address as string, nowIso);
 
       for (const t of signalTags) {
         this.ctx.storage.sql.exec(
@@ -2852,35 +2967,20 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      this.ctx.storage.sql.exec(
-        `INSERT OR REPLACE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
-           VALUES (?, ?, ?, ?, ?)`,
-        btc_address as string,
-        currentStreak,
-        longestStreak,
-        today,
-        totalSignals
-      );
-
-      // Credit referral on first signal — if a scout registered a referral
-      // for this agent and they haven't been credited yet, credit now.
-      // Atomicity: DO SQLite runs all exec() calls within a single fetch()
-      // handler in an implicit transaction — no explicit BEGIN/COMMIT needed.
-      if (totalSignals === 1) {
-        const pendingRef = this.ctx.storage.sql
-          .exec(
-            "SELECT id FROM referral_credits WHERE recruit_address = ? AND credited_at IS NULL",
-            btc_address as string
-          )
-          .toArray();
-        if (pendingRef.length > 0) {
-          this.ctx.storage.sql.exec(
-            "UPDATE referral_credits SET credited_at = ?, first_signal_id = ? WHERE recruit_address = ? AND credited_at IS NULL",
-            nowIso,
-            signalId,
-            btc_address as string
-          );
-        }
+      if (!stagedPending) {
+        applyCorrespondentStatsBump(this.ctx.storage.sql, btc_address as string, nowIso);
+        const { totalSignals } = applyStreakBumpForSignal(
+          this.ctx.storage.sql,
+          btc_address as string,
+          nowIso
+        );
+        applyReferralCreditOnFirstSignal(
+          this.ctx.storage.sql,
+          btc_address as string,
+          signalId,
+          nowIso,
+          totalSignals
+        );
       }
 
       // Fetch the created signal with tags
@@ -5845,34 +5945,6 @@ export class NewsDO extends DurableObject<Env> {
   }
 
   /**
-   * Maintain `correspondent_stats` after inserting a non-correction signal.
-   *
-   * Counters: signal_count++, last/first signal-at min/max bumps. days_active
-   * is recomputed via a per-agent COUNT(DISTINCT date(...)) bounded by the
-   * agent's own signal history (typical ~200–600 rows) — much smaller than
-   * the full-table 27.8K-row scan it replaces. Skipped for corrections;
-   * those rows have correction_of != NULL and are excluded from every
-   * aggregate by definition.
-   */
-  private bumpCorrespondentStatsForInsert(btcAddress: string, createdAt: string): void {
-    this.ctx.storage.sql.exec(
-      `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
-       VALUES (?1, 1, ?2, ?2, 1, datetime('now'))
-       ON CONFLICT(btc_address) DO UPDATE SET
-         signal_count = correspondent_stats.signal_count + 1,
-         last_signal_at = MAX(correspondent_stats.last_signal_at, excluded.last_signal_at),
-         first_signal_at = MIN(correspondent_stats.first_signal_at, excluded.first_signal_at),
-         days_active = (
-           SELECT COUNT(DISTINCT date(created_at)) FROM signals
-           WHERE btc_address = ?1 AND correction_of IS NULL
-         ),
-         updated_at = datetime('now')`,
-      btcAddress,
-      createdAt
-    );
-  }
-
-  /**
    * Compare the materialised `correspondent_stats` table to a fresh
    * aggregate over `signals`, returning per-field mismatches plus the
    * unique set of drifted addresses. Shared between the publisher-only
@@ -5901,6 +5973,7 @@ export class NewsDO extends DurableObject<Env> {
                 COUNT(DISTINCT date(created_at)) as days_active
            FROM signals
           WHERE correction_of IS NULL
+            AND status != 'pending_payment'
           GROUP BY btc_address`
       )
       .toArray() as Row[];
@@ -5959,7 +6032,9 @@ export class NewsDO extends DurableObject<Env> {
                   MIN(created_at) as first_at,
                   COUNT(DISTINCT date(created_at)) as days
            FROM signals
-           WHERE btc_address = ? AND correction_of IS NULL`,
+           WHERE btc_address = ?
+             AND correction_of IS NULL
+             AND status != 'pending_payment'`,
           btcAddress
         )
         .toArray();
