@@ -433,7 +433,7 @@ export interface DOResult<T> {
   hasMore?: boolean;
 }
 
-export type PaymentStageKind = "brief_access" | "classified_submission";
+export type PaymentStageKind = "brief_access" | "classified_submission" | "signal_submission";
 export type PaymentStageLifecycle = "staged" | "finalized" | "discarded" | "expired";
 
 export interface BriefAccessStagePayload {
@@ -453,7 +453,23 @@ export interface ClassifiedSubmissionStagePayload {
   payment_txid: string | null;
 }
 
-export type PaymentStagePayload = BriefAccessStagePayload | ClassifiedSubmissionStagePayload;
+export interface SignalSubmissionStagePayload {
+  kind: "signal_submission";
+  signal_id: string;
+  btc_address: string;
+  beat_slug: string;
+  headline: string;
+  body: string | null;
+  sources: Source[];
+  tags: string[];
+  disclosure: string | null;
+  payment_txid: string | null;
+}
+
+export type PaymentStagePayload =
+  | BriefAccessStagePayload
+  | ClassifiedSubmissionStagePayload
+  | SignalSubmissionStagePayload;
 
 export interface PaymentStageRecord {
   payment_id: string;

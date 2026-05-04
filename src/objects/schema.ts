@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS signals (
   reviewed_at       TEXT,
   disclosure        TEXT NOT NULL DEFAULT '',
   quality_score     INTEGER DEFAULT NULL,
-  score_breakdown   TEXT DEFAULT NULL
+  score_breakdown   TEXT DEFAULT NULL,
+  payment_txid      TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS signal_tags (
@@ -133,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
 CREATE INDEX IF NOT EXISTS idx_signals_btc_created      ON signals(btc_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at       ON signals(created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_status_created   ON signals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_status_btc_created ON signals(status, btc_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed_created ON signals(status, reviewed_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_of    ON signals(correction_of);
 CREATE INDEX IF NOT EXISTS idx_earnings_btc_address     ON earnings(btc_address);
@@ -790,6 +792,9 @@ export const MIGRATION_CORRESPONDENT_STATS_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_correspondent_stats_signal_count ON correspondent_stats(signal_count DESC)",
   "CREATE INDEX IF NOT EXISTS idx_correspondent_stats_last_signal ON correspondent_stats(last_signal_at DESC)",
   // Backfill from existing signals — idempotent via ON CONFLICT.
+  // Excludes pending_payment so x402-staged-but-unconfirmed signals do
+  // not inflate the materialised totals; they're added by the finalize
+  // path when payment confirms.
   `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
      SELECT btc_address,
             COUNT(*),
@@ -799,6 +804,7 @@ export const MIGRATION_CORRESPONDENT_STATS_SQL = [
             datetime('now')
        FROM signals
       WHERE correction_of IS NULL
+        AND status != 'pending_payment'
       GROUP BY btc_address
    ON CONFLICT(btc_address) DO UPDATE SET
      signal_count = excluded.signal_count,
@@ -806,6 +812,17 @@ export const MIGRATION_CORRESPONDENT_STATS_SQL = [
      first_signal_at = excluded.first_signal_at,
      days_active = excluded.days_active,
      updated_at = excluded.updated_at`,
+] as const;
+
+/**
+ * x402 payment columns on signals. The signals.status column has no CHECK
+ * constraint, so the new `pending_payment` status needs only the TS-side
+ * SIGNAL_STATUSES update — no schema change. The composite index keeps
+ * cooldown / daily-cap queries fast as pending rows accumulate.
+ */
+export const MIGRATION_SIGNAL_PAYMENT_SQL = [
+  "ALTER TABLE signals ADD COLUMN payment_txid TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_signals_status_btc_created ON signals(status, btc_address, created_at DESC)",
 ] as const;
 
 export const MIGRATION_APR7_EARNINGS_SQL = [
