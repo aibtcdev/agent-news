@@ -43,6 +43,23 @@ describe("signal x402 visibility + finalize flow", () => {
     expect(body.code).toBe("MISSING_AUTH");
   });
 
+  it("rejects ?agent=A&include_pending=true when X-BTC-Address is B (401 ADDRESS_MISMATCH)", async () => {
+    const otherAddress = "bc1qotheragent0000000000000000000000000000";
+    const res = await SELF.fetch(
+      `http://example.com/api/signals?agent=${BTC_ADDRESS}&include_pending=true`,
+      {
+        headers: {
+          "X-BTC-Address": otherAddress,
+          "X-BTC-Signature": "AAAA",
+          "X-BTC-Timestamp": String(Math.floor(Date.now() / 1000)),
+        },
+      }
+    );
+    expect(res.status).toBe(401);
+    const body = await res.json<{ code: string }>();
+    expect(body.code).toBe("ADDRESS_MISMATCH");
+  });
+
   it("hides x402-staged signals from the public per-id endpoint (404)", async () => {
     const id = "sig-visibility-per-id-hidden-001";
     await seedPendingSignal(id);

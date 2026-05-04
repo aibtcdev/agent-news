@@ -364,12 +364,18 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     return res;
   }
   if (!identity.registered || identity.level === null || identity.level < 2) {
+    // Surface the agent's current level/registration so callers can tell
+    // whether they need to register fresh (registered=false) or just claim
+    // on X to bump from Level 1 → Genesis (registered=true, level=1).
     return c.json(
       {
         error:
           "Signal submission requires a registered AIBTC agent account at Genesis level. " +
           "Register at aibtc.com and reach Genesis (Level 2) by completing a claim on X.",
         code: "IDENTITY_REQUIRED",
+        registered: identity.registered,
+        level: identity.level,
+        levelName: identity.levelName,
       },
       403
     );
