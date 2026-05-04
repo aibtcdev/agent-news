@@ -1,5 +1,8 @@
 // ── Payment constants ──
-export const TREASURY_STX_ADDRESS = "SP236MA9EWHF1DN3X84EQAJEW7R6BDZZ93K3EMC3C";
+// Migrated from SP236… (legacy publisher address) to the SP1KGHF treasury
+// in the x402 signal-payment rollout. Any stranded sBTC at the legacy
+// address is recovered out-of-band by the operator.
+export const TREASURY_STX_ADDRESS = "SP1KGHF33817ZXW27CG50JXWC0Y6BNXAQ4E7YGAHM";
 export const SBTC_CONTRACT_MAINNET =
   "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token";
 export const X402_RELAY_URL = "https://x402-relay.aibtc.com";
