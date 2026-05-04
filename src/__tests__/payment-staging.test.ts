@@ -171,6 +171,131 @@ describe("payment staging", () => {
     expect(duplicateBody.data.payload.headline).toBe("Original headline");
   });
 
+  it("finalizes a staged signal_submission by flipping status from pending_payment to submitted", async () => {
+    const signalId = "sig-stage-finalize-001";
+    const seed = await SELF.fetch("http://example.com/api/test-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        signals: [
+          {
+            id: signalId,
+            beat_slug: "agent-economy",
+            btc_address: BTC_ADDRESS,
+            headline: "Pending signal awaiting settlement",
+            body: "Will flip on confirm",
+            sources: JSON.stringify([{ url: "https://example.com", title: "Example" }]),
+            created_at: "2026-04-22T10:00:00.000Z",
+            status: "pending_payment",
+          },
+        ],
+      }),
+    });
+    expect(seed.status).toBe(200);
+
+    const stageRes = await SELF.fetch("http://example.com/api/test/payment-stage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paymentId: "pay_signal_stage_finalize",
+        payload: {
+          kind: "signal_submission",
+          signal_id: signalId,
+          btc_address: BTC_ADDRESS,
+          beat_slug: "agent-economy",
+          headline: "Pending signal awaiting settlement",
+          body: "Will flip on confirm",
+          sources: [{ url: "https://example.com", title: "Example" }],
+          tags: [],
+          disclosure: null,
+          payment_txid: null,
+        },
+      }),
+    });
+    expect(stageRes.status).toBe(201);
+
+    const before = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(before.status).toBe(200);
+    const beforeBody = await before.json<{ status: string }>();
+    expect(beforeBody.status).toBe("pending_payment");
+
+    const reconcile = await SELF.fetch(
+      "http://example.com/api/test/payment-stage/pay_signal_stage_finalize/reconcile",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "confirmed", txid: "f".repeat(64) }),
+      }
+    );
+    expect(reconcile.status).toBe(200);
+    const reconcileBody = await reconcile.json<{ data: { stageStatus: string } }>();
+    expect(reconcileBody.data.stageStatus).toBe("finalized");
+
+    const after = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(after.status).toBe(200);
+    const afterBody = await after.json<{ status: string }>();
+    expect(afterBody.status).toBe("submitted");
+  });
+
+  it("deletes the staged signal row when the signal_submission stage is discarded", async () => {
+    const signalId = "sig-stage-discard-001";
+    const seed = await SELF.fetch("http://example.com/api/test-seed", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        signals: [
+          {
+            id: signalId,
+            beat_slug: "agent-economy",
+            btc_address: BTC_ADDRESS,
+            headline: "Pending signal that fails to settle",
+            body: null,
+            sources: JSON.stringify([{ url: "https://example.com", title: "Example" }]),
+            created_at: "2026-04-22T11:00:00.000Z",
+            status: "pending_payment",
+          },
+        ],
+      }),
+    });
+    expect(seed.status).toBe(200);
+
+    const stageRes = await SELF.fetch("http://example.com/api/test/payment-stage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paymentId: "pay_signal_stage_discard",
+        payload: {
+          kind: "signal_submission",
+          signal_id: signalId,
+          btc_address: BTC_ADDRESS,
+          beat_slug: "agent-economy",
+          headline: "Pending signal that fails to settle",
+          body: null,
+          sources: [{ url: "https://example.com", title: "Example" }],
+          tags: [],
+          disclosure: null,
+          payment_txid: null,
+        },
+      }),
+    });
+    expect(stageRes.status).toBe(201);
+
+    const reconcile = await SELF.fetch(
+      "http://example.com/api/test/payment-stage/pay_signal_stage_discard/reconcile",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "failed", terminalReason: "sender_nonce_stale" }),
+      }
+    );
+    expect(reconcile.status).toBe(200);
+    const reconcileBody = await reconcile.json<{ data: { stageStatus: string } }>();
+    expect(reconcileBody.data.stageStatus).toBe("discarded");
+
+    const after = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(after.status).toBe(404);
+  });
+
   it("rejects unsupported staged payload kinds", async () => {
     const res = await SELF.fetch("http://example.com/api/test/payment-stage", {
       method: "POST",

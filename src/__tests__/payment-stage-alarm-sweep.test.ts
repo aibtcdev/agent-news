@@ -3,6 +3,51 @@ import { SELF } from "cloudflare:test";
 
 const BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
 
+async function seedPendingSignal(signalId: string): Promise<void> {
+  const res = await SELF.fetch("http://example.com/api/test-seed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      signals: [
+        {
+          id: signalId,
+          beat_slug: "agent-economy",
+          btc_address: BTC_ADDRESS,
+          headline: "Sweep test pending signal",
+          body: null,
+          sources: JSON.stringify([{ url: "https://example.com", title: "Example" }]),
+          created_at: "2026-04-22T12:00:00.000Z",
+          status: "pending_payment",
+        },
+      ],
+    }),
+  });
+  expect(res.status).toBe(200);
+}
+
+async function stageSignal(paymentId: string, signalId: string): Promise<void> {
+  const res = await SELF.fetch("http://example.com/api/test/payment-stage", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      paymentId,
+      payload: {
+        kind: "signal_submission",
+        signal_id: signalId,
+        btc_address: BTC_ADDRESS,
+        beat_slug: "agent-economy",
+        headline: "Sweep test pending signal",
+        body: null,
+        sources: [{ url: "https://example.com", title: "Example" }],
+        tags: [],
+        disclosure: null,
+        payment_txid: null,
+      },
+    }),
+  });
+  expect(res.status).toBe(201);
+}
+
 async function stageClassified(paymentId: string, classifiedId: string) {
   const res = await SELF.fetch("http://example.com/api/test/payment-stage", {
     method: "POST",
@@ -162,6 +207,42 @@ describe("payment staging alarm sweep (#572)", () => {
       0
     );
     expect(reconciledNow).toBe(1);
+  });
+
+  it("flips a swept signal_submission stage from pending_payment to submitted", async () => {
+    const paymentId = "pay_sweep_signal_confirmed";
+    const signalId = "sig-sweep-signal-confirmed";
+    await seedPendingSignal(signalId);
+    await stageSignal(paymentId, signalId);
+
+    const reconciled = await runSweep({
+      [paymentId]: { status: "confirmed", txid: "e".repeat(64) },
+    });
+    expect(reconciled).toBe(1);
+
+    const stageRes = await SELF.fetch(`http://example.com/api/test/payment-stage/${paymentId}`);
+    const stageBody = await stageRes.json<{ data: { stageStatus: string } }>();
+    expect(stageBody.data.stageStatus).toBe("finalized");
+
+    const signalRes = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(signalRes.status).toBe(200);
+    const signalBody = await signalRes.json<{ status: string }>();
+    expect(signalBody.status).toBe("submitted");
+  });
+
+  it("deletes the staged signal row when a signal_submission stage is swept to failed", async () => {
+    const paymentId = "pay_sweep_signal_failed";
+    const signalId = "sig-sweep-signal-failed";
+    await seedPendingSignal(signalId);
+    await stageSignal(paymentId, signalId);
+
+    const reconciled = await runSweep({
+      [paymentId]: { status: "failed", terminalReason: "sender_nonce_stale" },
+    });
+    expect(reconciled).toBe(1);
+
+    const signalRes = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(signalRes.status).toBe(404);
   });
 
   it("no-ops when X402_RELAY has no checkPayment and no stub is provided", async () => {
