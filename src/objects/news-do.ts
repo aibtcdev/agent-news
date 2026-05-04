@@ -81,12 +81,22 @@ interface SignalListFilters {
   status: string | null;
   dateStart: string | null;
   dateEnd: string | null;
+  /**
+   * When false (default), `pending_payment` rows are excluded — staged-but-
+   * unconfirmed signals stay invisible to the public listings, leaderboard,
+   * and counts. Authors viewing their own staged rows pass true (or set
+   * status='pending_payment' explicitly) to see them.
+   */
+  includePending: boolean;
 }
 
 interface SignalCountFilters {
   beat: string | null;
   agent: string | null;
   since: string | null;
+  /** See SignalListFilters.includePending. When true the count response
+   *  carries a separate pending_payment bucket. */
+  includePending: boolean;
 }
 
 function appendSignalScopeFilters(
@@ -121,6 +131,11 @@ function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; p
   if (filters.status) {
     clauses.push("s.status = ?");
     params.push(filters.status);
+  } else if (!filters.includePending) {
+    // Default listings hide x402-staged-but-unconfirmed rows. An explicit
+    // status filter (including status=pending_payment) bypasses this; a
+    // caller passing includePending=true bypasses it too.
+    clauses.push("s.status != 'pending_payment'");
   }
   if (filters.dateStart) {
     clauses.push("s.created_at >= ?");
@@ -190,7 +205,11 @@ function querySignalCountRows(
     return Number((countRows[0] as { count: number } | undefined)?.count) || 0;
   };
 
-  for (const status of COUNTED_SIGNAL_STATUSES) {
+  const statuses: readonly string[] = filters.includePending
+    ? [...COUNTED_SIGNAL_STATUSES, "pending_payment"]
+    : COUNTED_SIGNAL_STATUSES;
+
+  for (const status of statuses) {
     const reviewedStatus = (REVIEWED_SIGNAL_STATUSES as readonly string[]).includes(status);
     const baseClauses = ["s.status = ?"];
     const baseParams: SqlParam[] = [status];
@@ -2601,6 +2620,7 @@ export class NewsDO extends DurableObject<Env> {
       const since = c.req.query("since") ?? null;
       const tag = c.req.query("tag") ?? null;
       const status = c.req.query("status") ?? null;
+      const includePending = c.req.query("include_pending") === "true";
       const dateParam = c.req.query("date") ?? null;
       const limitParam = c.req.query("limit");
       const limit = Math.min(
@@ -2626,6 +2646,7 @@ export class NewsDO extends DurableObject<Env> {
         status,
         dateStart,
         dateEnd,
+        includePending,
       });
       const pageLimit = limit + 1;
 
@@ -2756,8 +2777,17 @@ export class NewsDO extends DurableObject<Env> {
       const agent = c.req.query("agent") ?? null;
       const sinceRaw = c.req.query("since") ?? null;
       const since = sinceRaw && sinceRaw.trim() !== "" ? sinceRaw : null;
+      // pending_payment is included when an agent scope is set (an author is
+      // looking at their own staged count) or when the caller asks for it.
+      const includePending =
+        c.req.query("include_pending") === "true" || agent !== null;
 
-      const rows = querySignalCountRows(this.ctx.storage.sql, { beat, agent, since });
+      const rows = querySignalCountRows(this.ctx.storage.sql, {
+        beat,
+        agent,
+        since,
+        includePending,
+      });
 
       const counts: Record<string, number> = {
         submitted: 0,
@@ -2766,6 +2796,7 @@ export class NewsDO extends DurableObject<Env> {
         rejected: 0,
         brief_included: 0,
       };
+      if (includePending) counts.pending_payment = 0;
       for (const row of rows) {
         const r = row as { status: string; count: number };
         if (r.status in counts) {
@@ -5410,6 +5441,7 @@ export class NewsDO extends DurableObject<Env> {
         beat: null,
         agent: null,
         since: oneHourAgo,
+        includePending: false,
       }).reduce((total, row) => total + row.count, 0);
 
       return c.json({
@@ -6140,6 +6172,7 @@ export class NewsDO extends DurableObject<Env> {
          FROM (
            SELECT DISTINCT btc_address FROM signals
            WHERE correction_of IS NULL
+             AND status != 'pending_payment'
              AND created_at > (SELECT ts FROM epoch)
          ) a
          LEFT JOIN (
@@ -6155,6 +6188,7 @@ export class NewsDO extends DurableObject<Env> {
            SELECT btc_address, COUNT(*) as signal_count
            FROM signals
            WHERE correction_of IS NULL
+             AND status != 'pending_payment'
              AND created_at > datetime('now', '-30 days')
              AND created_at > (SELECT ts FROM epoch)
            GROUP BY btc_address
@@ -6164,6 +6198,7 @@ export class NewsDO extends DurableObject<Env> {
            SELECT btc_address, COUNT(DISTINCT date(created_at)) as days_active
            FROM signals
            WHERE correction_of IS NULL
+             AND status != 'pending_payment'
              AND created_at > datetime('now', '-30 days')
              AND created_at > (SELECT ts FROM epoch)
            GROUP BY btc_address

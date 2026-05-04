@@ -72,6 +72,7 @@ signalsRouter.get("/api/signals", async (c) => {
   const since = c.req.query("since");
   const date = c.req.query("date");
   const status = c.req.query("status");
+  const includePending = c.req.query("include_pending") === "true";
 
   if (status && !(SIGNAL_STATUSES as readonly string[]).includes(status)) {
     return c.json({ error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}` }, 400);
@@ -109,7 +110,7 @@ signalsRouter.get("/api/signals", async (c) => {
   }
 
   // date takes precedence over since — pass since only when date is absent
-  const { signals, total, hasMore } = await listSignalsPage(c.env, { beat, agent, tag, since: date ? undefined : since, date, status, limit: resolvedLimit, offset: resolvedOffset });
+  const { signals, total, hasMore } = await listSignalsPage(c.env, { beat, agent, tag, since: date ? undefined : since, date, status, limit: resolvedLimit, offset: resolvedOffset, include_pending: includePending });
 
   // Resolve agent display names for all signals in this response
   const signalAddresses = [...new Set(signals.map((s) => s.btc_address).filter(Boolean))];

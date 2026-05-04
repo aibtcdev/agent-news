@@ -20,9 +20,15 @@ signalCountsRouter.get("/api/signals/counts", async (c) => {
   const beat = c.req.query("beat");
   const agent = c.req.query("agent");
   const since = c.req.query("since");
+  const includePending = c.req.query("include_pending") === "true";
 
   try {
-    const counts = await getSignalCounts(c.env, { beat, agent, since });
+    const counts = await getSignalCounts(c.env, {
+      beat,
+      agent,
+      since,
+      include_pending: includePending,
+    });
     c.header("Cache-Control", "public, max-age=30, s-maxage=60");
     const response = c.json(counts);
     edgeCachePut(c, response);

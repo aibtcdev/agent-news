@@ -165,6 +165,13 @@ export interface SignalFilters {
   limit?: number;
   /** Offset for pagination (skip first N results). */
   offset?: number;
+  /**
+   * When true, x402-staged-but-unconfirmed signals (status='pending_payment')
+   * are included alongside the default editorial set. Authors set this to see
+   * their own staged rows; passing status='pending_payment' explicitly has
+   * the same effect.
+   */
+  include_pending?: boolean;
 }
 
 export interface FrontPagePageResult {
@@ -199,6 +206,7 @@ export async function listSignalsPage(
   if (filters.since) params.set("since", filters.since);
   if (filters.date) params.set("date", filters.date);
   if (filters.status) params.set("status", filters.status);
+  if (filters.include_pending) params.set("include_pending", "true");
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined) params.set("offset", String(filters.offset));
   const qs = params.toString();
@@ -357,6 +365,7 @@ export interface SignalCountsFilters {
   beat?: string;
   agent?: string;
   since?: string;
+  include_pending?: boolean;
 }
 
 export interface SignalCounts {
@@ -365,6 +374,8 @@ export interface SignalCounts {
   replaced: number;
   rejected: number;
   brief_included: number;
+  /** Present only when include_pending=true (or agent is scoped on the request). */
+  pending_payment?: number;
   total: number;
 }
 
@@ -377,6 +388,7 @@ export async function getSignalCounts(
   if (filters.beat) params.set("beat", filters.beat);
   if (filters.agent) params.set("agent", filters.agent);
   if (filters.since) params.set("since", filters.since);
+  if (filters.include_pending) params.set("include_pending", "true");
   const qs = params.toString();
   const result = await doFetch<SignalCounts>(stub, `/signals/counts${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to get signal counts");
