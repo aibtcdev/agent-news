@@ -73,21 +73,6 @@ const signalReadRateLimit = createRateLimitMiddleware({
 
 // GET /api/signals — list signals with optional filters
 signalsRouter.get("/api/signals", async (c) => {
-  // Edge-cache short-circuit. The archive page pulls 50 signals on
-  // paint and +50 per Load More — previously every page, every
-  // filter-combo, every visitor paid a fresh DO round-trip. Cache key
-  // is the full request URL so ?beat=X&status=approved and
-  // ?agent=Y&limit=50 live as separate entries.
-  const cached = await edgeCacheMatch(c);
-  if (cached) return cached;
-
-  const blocked = await checkRateLimit(c, {
-    key: "signals-read",
-    binding: "read",
-    ...SIGNAL_READ_RATE_LIMIT,
-  });
-  if (blocked) return blocked;
-
   const beat = c.req.query("beat");
   const agent = c.req.query("agent");
   const tag = c.req.query("tag");
@@ -120,6 +105,28 @@ signalsRouter.get("/api/signals", async (c) => {
       return c.json({ error: authResult.error, code: authResult.code }, 401);
     }
   }
+
+  // Edge-cache short-circuit. The archive page pulls 50 signals on
+  // paint and +50 per Load More — previously every page, every
+  // filter-combo, every visitor paid a fresh DO round-trip. Cache key
+  // is the full request URL so ?beat=X&status=approved and
+  // ?agent=Y&limit=50 live as separate entries.
+  //
+  // Skipped for `wantsPending` requests because the cache key has no
+  // notion of the BIP-322 X-BTC-* headers that gate this path — caching
+  // an authed response would let an unauthenticated caller hit the same
+  // URL and get a cache HIT before the auth gate fires.
+  if (!wantsPending) {
+    const cached = await edgeCacheMatch(c);
+    if (cached) return cached;
+  }
+
+  const blocked = await checkRateLimit(c, {
+    key: "signals-read",
+    binding: "read",
+    ...SIGNAL_READ_RATE_LIMIT,
+  });
+  if (blocked) return blocked;
 
   if (since && Number.isNaN(new Date(since).getTime())) {
     return c.json({ error: "Invalid 'since' parameter. Use ISO 8601 format (e.g., 2026-03-25T00:00:00Z)" }, 400);
@@ -188,7 +195,10 @@ signalsRouter.get("/api/signals", async (c) => {
     };
   });
 
-  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  c.header(
+    "Cache-Control",
+    wantsPending ? "private, no-store" : "public, max-age=60, s-maxage=300"
+  );
   c.header("X-Timezone", "UTC");
   const response = c.json({
     signals: transformed,
@@ -201,7 +211,7 @@ signalsRouter.get("/api/signals", async (c) => {
     limit: resolvedLimit,
     offset: resolvedOffset,
   });
-  edgeCachePut(c, response);
+  if (!wantsPending) edgeCachePut(c, response);
   return response;
 });
 
@@ -502,11 +512,19 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
 
     // Idempotent retry: x402 reuses the same paymentId for retries of the
     // same signed transaction. If a previous attempt already staged this
-    // paymentId for a signal_submission, re-issue the original 202 instead
-    // of running cooldown / daily-cap (which would reject the retry) and
-    // creating a second staged row.
+    // paymentId for a signal_submission AND the stage is still live (not
+    // discarded by a prior terminal failure), re-issue the original 202
+    // instead of running cooldown / daily-cap (which would reject the
+    // retry) and creating a second staged row. A `discarded` stage means
+    // the relay has already terminally failed this paymentId — the agent
+    // needs a fresh paymentId, so we fall through to the normal stage
+    // path which will surface the relay error on the next attempt.
     const existingStage = await getPaymentStage(c.env, verification.paymentId);
-    if (existingStage && existingStage.payload.kind === "signal_submission") {
+    if (
+      existingStage &&
+      existingStage.payload.kind === "signal_submission" &&
+      existingStage.stageStatus !== "discarded"
+    ) {
       const checkStatusUrl = verification.checkStatusUrl
         ?? buildLocalPaymentStatusUrl(new URL(c.req.url).origin, verification.paymentId);
       return c.json(
@@ -555,8 +573,25 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     });
     if (!stageResult.ok || !stageResult.data) {
       // Roll back the pending row so a transient stagePayment failure does
-      // not strand the agent's cooldown / daily-cap slot for hours.
-      await deletePendingSignal(c.env, provisionalSignalId);
+      // not strand the agent's cooldown / daily-cap slot for hours. If the
+      // rollback itself fails the orphan can't be reached by the alarm
+      // sweep (no payment_staging row to reconcile against) — surface that
+      // as a 500 so the operator sees it instead of a misleading stage error.
+      const rollback = await deletePendingSignal(c.env, provisionalSignalId);
+      if (!rollback.ok) {
+        logger.error("rollback DELETE failed after stagePayment failure", {
+          signalId: provisionalSignalId,
+          paymentId: verification.paymentId,
+          stageError: stageResult.error,
+        });
+        return c.json(
+          {
+            error: "Failed to stage signal submission and rollback failed; pending row may be stranded",
+            signalId: provisionalSignalId,
+          },
+          500
+        );
+      }
       logger.warn("rolled back pending signal after stagePayment failure", {
         signalId: provisionalSignalId,
         paymentId: verification.paymentId,

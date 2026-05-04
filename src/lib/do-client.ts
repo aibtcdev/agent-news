@@ -596,12 +596,20 @@ export async function getPaymentStage(
 
 /** Delete a `pending_payment` signal row (and its tags). Safe-by-construction:
  *  the DO-side route is scoped to status='pending_payment' so it cannot delete
- *  a finalised signal. Used to roll back stage-payment failure leaks. */
-export async function deletePendingSignal(env: Env, signalId: string): Promise<void> {
+ *  a finalised signal. Used to roll back stage-payment failure leaks. Returns
+ *  `{ok}` so callers can surface a rollback failure (which would strand the
+ *  agent's cooldown slot — the alarm sweep can't reach an orphan with no
+ *  payment_staging row). */
+export async function deletePendingSignal(
+  env: Env,
+  signalId: string
+): Promise<{ ok: boolean }> {
   const stub = getStub(env);
-  await stub.fetch(`https://do/signals/${encodeURIComponent(signalId)}/pending`, {
-    method: "DELETE",
-  });
+  const res = await stub.fetch(
+    `https://do/signals/${encodeURIComponent(signalId)}/pending`,
+    { method: "DELETE" }
+  );
+  return { ok: res.ok };
 }
 
 export interface ReviewClassifiedInput {
