@@ -305,6 +305,13 @@ export interface CreateSignalInput {
    * x402 finalize hook fires (or deletes the row on discard).
    */
   pending_payment?: boolean;
+  /**
+   * On-chain sBTC settlement txid. Used by the x402 HTTP-fallback path that
+   * confirms synchronously without a paymentId — the row is written directly
+   * with status='submitted' so we attach the txid here. Omitted for the
+   * staged path (finalize stamps it from the staging payload).
+   */
+  payment_txid?: string | null;
 }
 
 export interface CooldownInfo {

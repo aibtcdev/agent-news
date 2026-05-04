@@ -2942,9 +2942,12 @@ export class NewsDO extends DurableObject<Env> {
       // referral commit effects are deferred until finalizeSignalSubmission
       // — that keeps the agent's visible totals in sync with finalized
       // signals only, even if a payment is later discarded.
+      const paymentTxid = typeof body.payment_txid === "string" && body.payment_txid.trim().length > 0
+        ? body.payment_txid.trim()
+        : null;
       this.ctx.storage.sql.exec(
-        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, quality_score, score_breakdown)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)`,
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, quality_score, score_breakdown, payment_txid)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -2956,7 +2959,8 @@ export class NewsDO extends DurableObject<Env> {
         stagedPending ? "pending_payment" : "submitted",
         disclosure,
         signalScore.total,
-        JSON.stringify(signalScore.breakdown)
+        JSON.stringify(signalScore.breakdown),
+        paymentTxid
       );
 
       for (const t of signalTags) {

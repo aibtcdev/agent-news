@@ -18,11 +18,14 @@ import {
   getBeat,
   getActiveBeatSlugs,
   getConfig,
+  reconcilePaymentStage,
+  stagePayment,
 } from "../lib/do-client";
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
-import { buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
-import { toUTCDate, resolveNamesWithTimeout } from "../lib/helpers";
+import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
+import { toUTCDate, resolveNamesWithTimeout, generateId } from "../lib/helpers";
+import { logPaymentEvent } from "../lib/payment-logging";
 import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -320,70 +323,255 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     );
   }
 
-  // Payment gate (when enabled)
+  // Payment gate (when enabled). The `requirePayment + !isPublisher` branch
+  // exits with its own 201 / 202 / 402 / 409 / 503 response — fall-through
+  // to the no-payment createSignal call below is only for publishers and
+  // for environments where SIGNALS_REQUIRE_PAYMENT is disabled (legacy /
+  // dev). Once payments are universally on, the only fall-through is the
+  // publisher bypass.
   const requirePayment = c.env.SIGNALS_REQUIRE_PAYMENT === "true";
+  const sanitizedBody = signalContent ? sanitizeString(signalContent, 1000) : null;
+  const sanitizedDisclosure = typeof disclosure === "string" ? disclosure : undefined;
 
-  if (!isPublisher) {
-    if (requirePayment) {
-      const paymentHeader =
-        c.req.header("X-PAYMENT") ?? c.req.header("payment-signature");
+  if (!isPublisher && requirePayment) {
+    const logger = c.get("logger");
+    const paymentHeader =
+      c.req.header("X-PAYMENT") ?? c.req.header("payment-signature");
 
-      if (!paymentHeader) {
-        const logger = c.get("logger");
-        logger.debug("402 payment required sent for POST /api/signals", {
+    if (!paymentHeader) {
+      logPaymentEvent(logger, "info", "payment.required", {
+        route: "/api/signals",
+        action: "return_402_payment_required",
+      });
+      return buildPaymentRequired({
+        amount: SIGNAL_PRICE_SATS,
+        description: `Signal submission — file a signal for ${SIGNAL_PRICE_SATS} sats sBTC`,
+      });
+    }
+
+    const verification = await verifyPayment(paymentHeader, SIGNAL_PRICE_SATS, c.env, {
+      logger,
+      route: "/api/signals",
+    });
+    if (!verification.valid) {
+      const { body: errorBody, status, headers } = mapVerificationError(verification);
+      logPaymentEvent(logger, status === 503 ? "error" : "warn", "payment.retry_decision", {
+        route: "/api/signals",
+        paymentId: verification.paymentId,
+        status: verification.paymentState ?? null,
+        terminalReason: verification.terminalReason ?? null,
+        action: status === 409
+          ? "retry_after_nonce_recovery"
+          : status === 503
+            ? "retry_after_relay_recovery"
+            : errorBody.retryable
+              ? "repay_or_resubmit"
+              : "stop_retry",
+      });
+
+      if (status === 409) {
+        logger.warn("nonce conflict during payment verification for POST /api/signals", {
+          btc_address, errorCode: verification.errorCode,
+        });
+      } else if (status === 503) {
+        logger.error("relay error during payment verification for POST /api/signals", {
           btc_address,
         });
-        return buildPaymentRequired({
-          amount: SIGNAL_PRICE_SATS,
-          description: `Signal submission — file a signal for ${SIGNAL_PRICE_SATS} sats sBTC`,
+      } else {
+        logger.warn("payment verification failed for POST /api/signals", {
+          btc_address, relayReason: verification.relayReason,
         });
       }
 
-      const verification = await verifyPayment(paymentHeader, SIGNAL_PRICE_SATS, c.env);
-      if (!verification.valid) {
-        const logger = c.get("logger");
-        const { body: errorBody, status, headers } = mapVerificationError(verification);
-
-        if (status === 409) {
-          logger.warn("nonce conflict during payment verification for POST /api/signals", {
-            btc_address, errorCode: verification.errorCode,
-          });
-        } else if (status === 503) {
-          logger.error("relay error during payment verification for POST /api/signals", {
-            btc_address,
-          });
-        } else {
-          logger.warn("payment verification failed for POST /api/signals", {
-            btc_address, relayReason: verification.relayReason,
-          });
-        }
-
-        if (status === 402 && verification.retryable !== false) {
-          return buildPaymentRequired({
-            amount: SIGNAL_PRICE_SATS,
-            description: `${errorBody.error} Please pay ${SIGNAL_PRICE_SATS} sats sBTC to file a signal.`,
-            code: errorBody.code,
-          });
-        }
-
-        if (headers) {
-          for (const [key, value] of Object.entries(headers)) {
-            c.header(key, value);
-          }
-        }
-        return c.json(errorBody, status);
+      if (status === 402 && verification.retryable !== false) {
+        return buildPaymentRequired({
+          amount: SIGNAL_PRICE_SATS,
+          description: `${errorBody.error} Please pay ${SIGNAL_PRICE_SATS} sats sBTC to file a signal.`,
+          code: errorBody.code,
+        });
       }
+
+      if (headers) {
+        for (const [key, value] of Object.entries(headers)) {
+          c.header(key, value);
+        }
+      }
+      return c.json(errorBody, status);
     }
+
+    const provisionalSignalId = generateId();
+    logPaymentEvent(logger, "info", "payment.accepted", {
+      route: "/api/signals",
+      paymentId: verification.paymentId,
+      status: verification.paymentState ?? "confirmed",
+      action: "payment_verified",
+      checkStatusUrl_present: Boolean(verification.checkStatusUrl),
+    });
+    logger.info("payment verified for POST /api/signals", {
+      btc_address,
+      txid: verification.txid,
+      paymentStatus: verification.paymentStatus,
+      paymentId: verification.paymentId,
+      stagedSignalId: provisionalSignalId,
+    });
+
+    // HTTP-fallback: relay confirmed synchronously without a paymentId.
+    // Write the signal directly with status='submitted' and the txid from
+    // the relay verification. No staging is needed because there is no
+    // payment lifecycle to track.
+    if (verification.paymentState === "confirmed" && !verification.paymentId) {
+      const createResult = await createSignal(c.env, {
+        signal_id: provisionalSignalId,
+        beat_slug: beat_slug as string,
+        btc_address: btc_address as string,
+        headline: headline as string,
+        body: sanitizedBody,
+        sources,
+        tags,
+        disclosure: sanitizedDisclosure,
+        payment_txid: verification.txid ?? null,
+      });
+      if (!createResult.ok) {
+        if (createResult.daily_limit) {
+          const res = c.json(
+            { error: createResult.error, daily_limit: createResult.daily_limit },
+            429
+          );
+          res.headers.set("Retry-After", String(createResult.daily_limit.retry_after));
+          return res;
+        }
+        if (createResult.cooldown) {
+          return c.json({ error: createResult.error, cooldown: createResult.cooldown }, 429);
+        }
+        return c.json({ error: createResult.error }, createResult.status ?? 400);
+      }
+      logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
+        route: "/api/signals",
+        paymentId: null,
+        status: "confirmed",
+        action: "signal_submission_confirmed_http_fallback",
+        compat_shim_used: true,
+      });
+      return c.json({ ...(createResult.data as object), paymentId: null, message: "Signal submitted" }, 201);
+    }
+
+    if (!verification.paymentId) {
+      return c.json(
+        { error: "Relay accepted payment but did not provide a paymentId for signal staging" },
+        503
+      );
+    }
+
+    // Stage path: insert the signal at status='pending_payment' and stage
+    // the x402 record. The cooldown / daily-cap checks inside the DO are
+    // run pre-insert, so this call returns 429 (with cooldown / daily_limit
+    // metadata) when the agent is over-limit. We MUST do this before
+    // calling stagePayment so we don't end up with an orphaned staged
+    // payment for a request that the agent isn't allowed to file anyway.
+    const stagedSignalResult = await createSignal(c.env, {
+      signal_id: provisionalSignalId,
+      beat_slug: beat_slug as string,
+      btc_address: btc_address as string,
+      headline: headline as string,
+      body: sanitizedBody,
+      sources,
+      tags,
+      disclosure: sanitizedDisclosure,
+      pending_payment: true,
+    });
+    if (!stagedSignalResult.ok) {
+      if (stagedSignalResult.daily_limit) {
+        const res = c.json(
+          { error: stagedSignalResult.error, daily_limit: stagedSignalResult.daily_limit },
+          429
+        );
+        res.headers.set("Retry-After", String(stagedSignalResult.daily_limit.retry_after));
+        return res;
+      }
+      if (stagedSignalResult.cooldown) {
+        return c.json({ error: stagedSignalResult.error, cooldown: stagedSignalResult.cooldown }, 429);
+      }
+      return c.json({ error: stagedSignalResult.error }, stagedSignalResult.status ?? 400);
+    }
+
+    const stageResult = await stagePayment(c.env, {
+      paymentId: verification.paymentId,
+      payload: {
+        kind: "signal_submission",
+        signal_id: provisionalSignalId,
+        btc_address: btc_address as string,
+        beat_slug: beat_slug as string,
+        headline: headline as string,
+        body: sanitizedBody,
+        sources: sources as { url: string; title: string }[],
+        tags: tags as string[],
+        disclosure: sanitizedDisclosure ?? null,
+        payment_txid: verification.txid ?? null,
+      },
+    });
+    if (!stageResult.ok || !stageResult.data) {
+      return c.json({ error: stageResult.error ?? "Failed to stage signal submission" }, stageResult.status ?? 500);
+    }
+    logPaymentEvent(logger, "info", "payment.delivery_staged", {
+      route: "/api/signals",
+      paymentId: verification.paymentId,
+      status: verification.paymentState ?? "queued",
+      action: verification.paymentStatus === "pending"
+        ? "return_202_pending"
+        : "stage_signal_submission",
+      checkStatusUrl_present: Boolean(verification.checkStatusUrl),
+      compat_shim_used: false,
+    });
+
+    if (verification.paymentState === "confirmed") {
+      await reconcilePaymentStage(c.env, verification.paymentId, {
+        status: "confirmed",
+        txid: verification.txid,
+      });
+
+      const finalized = await getSignal(c.env, provisionalSignalId);
+      if (!finalized) {
+        return c.json({ error: "Failed to finalize confirmed signal submission" }, 500);
+      }
+      logger.info("signal finalized after confirmed payment", {
+        id: finalized.id,
+        paymentId: verification.paymentId,
+      });
+      logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
+        route: "/api/signals",
+        paymentId: verification.paymentId,
+        status: "confirmed",
+        action: "signal_submission_finalized",
+      });
+      return c.json({ ...finalized, paymentId: verification.paymentId, message: "Signal submitted" }, 201);
+    }
+
+    const checkStatusUrl = verification.checkStatusUrl
+      ?? buildLocalPaymentStatusUrl(new URL(c.req.url).origin, verification.paymentId);
+
+    return c.json(
+      {
+        signalId: provisionalSignalId,
+        paymentId: verification.paymentId,
+        paymentStatus: "pending",
+        status: verification.paymentState ?? "queued",
+        checkStatusUrl,
+        message: "Signal submission is staged until the payment is confirmed.",
+      },
+      202
+    );
   }
 
+  // Publisher bypass / payments-disabled fall-through. createSignal writes
+  // the row at status='submitted' and runs commit effects in-band.
   const result = await createSignal(c.env, {
     beat_slug: beat_slug as string,
     btc_address: btc_address as string,
     headline: headline as string,
-    body: signalContent ? sanitizeString(signalContent, 1000) : null,
+    body: sanitizedBody,
     sources,
     tags,
-    disclosure: disclosure as string | undefined,
+    disclosure: sanitizedDisclosure,
   });
 
   if (!result.ok) {
@@ -411,20 +599,11 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     btc_address: btc_address as string,
   });
 
-  // Grace period warning: notify non-publisher agents that payment will be required
-  const disclosureValue = disclosure as string | undefined;
-  const warnings: string[] = [];
-  if (!isPublisher && !requirePayment) {
-    warnings.push(
-      "Signal submission will soon require a 100 sat sBTC x402 payment. " +
-      "Update your tooling to handle HTTP 402 responses on POST /api/signals."
-    );
-  }
-
   // Soft-launch disclosure enforcement: warn when disclosure is absent or empty,
   // including for non-AI signals, to encourage adoption across all correspondents.
   // Do NOT reject the signal — enforcement will be required in a future release.
-  if (!disclosureValue || disclosureValue.trim() === "") {
+  const warnings: string[] = [];
+  if (!sanitizedDisclosure || sanitizedDisclosure.trim() === "") {
     warnings.push(
       "disclosure is empty — you must declare the model and skill file used to produce this signal. " +
       'Example: "claude-sonnet-4-5-20250514, https://aibtc.news/api/skills?slug=btc-macro". ' +
