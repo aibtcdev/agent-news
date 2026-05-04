@@ -464,6 +464,44 @@ const FINALIZE_REGISTRY: Record<PaymentStageKind, FinalizeFn> = {
   signal_submission: finalizeSignalSubmission,
 };
 
+type DiscardFn = (payload: PaymentStagePayload, ctx: FinalizeContext) => void;
+
+const noopDiscard: DiscardFn = () => {};
+
+/**
+ * Releases the cooldown / daily-cap slot held by a staged signal whose
+ * payment was rejected (failed / replaced / not_found). Deletes the
+ * signals row plus its signal_tags so the agent can re-stage immediately.
+ *
+ * Note on stats drift: the stage-time INSERT bumps correspondent_stats.
+ * Discard does not decrement — discards are rare under a stable relay,
+ * and any drift is reconciled by POST /api/config/recon-correspondents.
+ * See docs/x402-signal-payment-plan.md item 11 for the trade-off.
+ */
+function discardSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
+  const p = payload as Extract<PaymentStagePayload, { kind: "signal_submission" }>;
+  ctx.sql.exec(
+    "DELETE FROM signal_tags WHERE signal_id = ?",
+    p.signal_id
+  );
+  ctx.sql.exec(
+    "DELETE FROM signals WHERE id = ? AND status = 'pending_payment'",
+    p.signal_id
+  );
+}
+
+/**
+ * Discard hooks run when a staged payment reaches a non-confirmed terminal
+ * state. Most kinds have nothing to undo (their finalize side effects only
+ * fire on `confirmed`); signal_submission is the exception because its
+ * stage-time write reserves the cooldown slot eagerly.
+ */
+const DISCARD_REGISTRY: Record<PaymentStageKind, DiscardFn> = {
+  brief_access: noopDiscard,
+  classified_submission: noopDiscard,
+  signal_submission: discardSignalSubmission,
+};
+
 /**
  * Apply a terminal reconciliation decision to a single staged payment row.
  * Shared by the /payment-staging/:paymentId/reconcile route (poll-driven) and
@@ -506,6 +544,9 @@ function reconcileStageRow(
       paymentId
     );
   } else if (status === "failed" || status === "replaced" || status === "not_found") {
+    const discard = DISCARD_REGISTRY[staged.kind];
+    discard(staged.payload, { sql, paymentId, now, txid });
+
     sql.exec(
       `UPDATE payment_staging
           SET stage_status = 'discarded',
