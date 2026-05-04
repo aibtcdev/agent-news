@@ -10,6 +10,7 @@ import {
   validateTags,
   sanitizeString,
 } from "../lib/validators";
+import type { CreateSignalResult } from "../lib/do-client";
 import {
   listSignalsPage,
   getSignal,
@@ -21,6 +22,7 @@ import {
   reconcilePaymentStage,
   stagePayment,
 } from "../lib/do-client";
+import type { Context } from "hono";
 import { verifyAuth } from "../services/auth";
 import { checkAgentIdentity } from "../services/identity-gate";
 import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
@@ -29,6 +31,24 @@ import { logPaymentEvent } from "../lib/payment-logging";
 import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+
+/** Maps a non-ok createSignal response to the right HTTP shape. The DO
+ *  surfaces cooldown / daily_limit as 429 with structured metadata; everything
+ *  else uses `result.status` (400 / 403 / 404 / 410) or 400 fallback. */
+function respondCreateSignalError(
+  c: Context<{ Bindings: Env; Variables: AppVariables }>,
+  result: CreateSignalResult
+): Response {
+  if (result.daily_limit) {
+    const res = c.json({ error: result.error, daily_limit: result.daily_limit }, 429);
+    res.headers.set("Retry-After", String(result.daily_limit.retry_after));
+    return res;
+  }
+  if (result.cooldown) {
+    return c.json({ error: result.error, cooldown: result.cooldown }, 429);
+  }
+  return c.json({ error: result.error }, result.status ?? 400);
+}
 
 const signalRateLimit = createRateLimitMiddleware({
   key: "signals",
@@ -324,12 +344,6 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     );
   }
 
-  // Payment gate (when enabled). The `requirePayment + !isPublisher` branch
-  // exits with its own 201 / 202 / 402 / 409 / 503 response — fall-through
-  // to the no-payment createSignal call below is only for publishers and
-  // for environments where SIGNALS_REQUIRE_PAYMENT is disabled (legacy /
-  // dev). Once payments are universally on, the only fall-through is the
-  // publisher bypass.
   const requirePayment = c.env.SIGNALS_REQUIRE_PAYMENT === "true";
   const sanitizedBody = signalContent ? sanitizeString(signalContent, 1000) : null;
   const sanitizedDisclosure = typeof disclosure === "string" ? disclosure : undefined;
@@ -416,10 +430,9 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
       stagedSignalId: provisionalSignalId,
     });
 
-    // HTTP-fallback: relay confirmed synchronously without a paymentId.
-    // Write the signal directly with status='submitted' and the txid from
-    // the relay verification. No staging is needed because there is no
-    // payment lifecycle to track.
+    // HTTP-fallback: relay confirmed synchronously without a paymentId. Write
+    // the signal at status='submitted' with the on-chain txid attached;
+    // there is no payment lifecycle to track.
     if (verification.paymentState === "confirmed" && !verification.paymentId) {
       const createResult = await createSignal(c.env, {
         signal_id: provisionalSignalId,
@@ -432,20 +445,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
         disclosure: sanitizedDisclosure,
         payment_txid: verification.txid ?? null,
       });
-      if (!createResult.ok) {
-        if (createResult.daily_limit) {
-          const res = c.json(
-            { error: createResult.error, daily_limit: createResult.daily_limit },
-            429
-          );
-          res.headers.set("Retry-After", String(createResult.daily_limit.retry_after));
-          return res;
-        }
-        if (createResult.cooldown) {
-          return c.json({ error: createResult.error, cooldown: createResult.cooldown }, 429);
-        }
-        return c.json({ error: createResult.error }, createResult.status ?? 400);
-      }
+      if (!createResult.ok) return respondCreateSignalError(c, createResult);
       logPaymentEvent(logger, "info", "payment.delivery_confirmed", {
         route: "/api/signals",
         paymentId: null,
@@ -463,12 +463,9 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
       );
     }
 
-    // Stage path: insert the signal at status='pending_payment' and stage
-    // the x402 record. The cooldown / daily-cap checks inside the DO are
-    // run pre-insert, so this call returns 429 (with cooldown / daily_limit
-    // metadata) when the agent is over-limit. We MUST do this before
-    // calling stagePayment so we don't end up with an orphaned staged
-    // payment for a request that the agent isn't allowed to file anyway.
+    // Run cooldown / daily-cap checks via the DO before staging the payment
+    // so an over-limit agent never produces an orphan staged payment for a
+    // request that would have been rejected anyway.
     const stagedSignalResult = await createSignal(c.env, {
       signal_id: provisionalSignalId,
       beat_slug: beat_slug as string,
@@ -480,20 +477,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
       disclosure: sanitizedDisclosure,
       pending_payment: true,
     });
-    if (!stagedSignalResult.ok) {
-      if (stagedSignalResult.daily_limit) {
-        const res = c.json(
-          { error: stagedSignalResult.error, daily_limit: stagedSignalResult.daily_limit },
-          429
-        );
-        res.headers.set("Retry-After", String(stagedSignalResult.daily_limit.retry_after));
-        return res;
-      }
-      if (stagedSignalResult.cooldown) {
-        return c.json({ error: stagedSignalResult.error, cooldown: stagedSignalResult.cooldown }, 429);
-      }
-      return c.json({ error: stagedSignalResult.error }, stagedSignalResult.status ?? 400);
-    }
+    if (!stagedSignalResult.ok) return respondCreateSignalError(c, stagedSignalResult);
 
     const stageResult = await stagePayment(c.env, {
       paymentId: verification.paymentId,
@@ -563,8 +547,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     );
   }
 
-  // Publisher bypass / payments-disabled fall-through. createSignal writes
-  // the row at status='submitted' and runs commit effects in-band.
+  // Publisher bypass / payments-disabled fall-through.
   const result = await createSignal(c.env, {
     beat_slug: beat_slug as string,
     btc_address: btc_address as string,
@@ -575,23 +558,7 @@ signalsRouter.post("/api/signals", signalRateLimit, async (c) => {
     disclosure: sanitizedDisclosure,
   });
 
-  if (!result.ok) {
-    if (result.daily_limit) {
-      const res = c.json(
-        { error: result.error, daily_limit: result.daily_limit },
-        429
-      );
-      res.headers.set("Retry-After", String(result.daily_limit.retry_after));
-      return res;
-    }
-    if (result.cooldown) {
-      return c.json(
-        { error: result.error, cooldown: result.cooldown },
-        429
-      );
-    }
-    return c.json({ error: result.error }, result.status ?? 400);
-  }
+  if (!result.ok) return respondCreateSignalError(c, result);
 
   const logger = c.get("logger");
   logger.info("signal created", {

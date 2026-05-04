@@ -110,6 +110,9 @@ export const SIGNAL_STATUSES = [
   "brief_included",
 ] as const;
 
+/** Single source of truth for the staged-but-unconfirmed status string. */
+export const PENDING_PAYMENT_STATUS = "pending_payment" as const;
+
 export const REVIEWABLE_SIGNAL_STATUSES = [
   "submitted",
   "approved",

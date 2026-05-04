@@ -1,81 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { SELF } from "cloudflare:test";
-
-const BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+import {
+  FIXTURE_BTC_ADDRESS as BTC_ADDRESS,
+  reconcileStage,
+  seedPendingSignal,
+  stageSignalSubmission,
+} from "./_payment-fixtures";
 
 /**
- * End-to-end coverage for the visibility / counts / finalize behaviour of
- * x402-paid signal submissions. The full HTTP path through `POST /api/signals`
- * (verifyPayment + identity gate + BIP-322 auth) is exercised separately by
- * the smoke test on the staging preview; these tests pin the parts of the
- * registry contract that any unit or integration regression would touch:
- *
- *  - default `GET /api/signals` hides `pending_payment` rows
- *  - `?include_pending=true` and `?status=pending_payment` opt the author in
- *  - `GET /api/signals/counts` adds the `pending_payment` bucket only when
- *    the request is agent-scoped or `include_pending=true` is set
- *  - finalize via the staging endpoint flips the row to `submitted`, after
- *    which it shows up in the default listing
- *  - a discarded stage deletes the row entirely (cooldown / daily-cap slot is
- *    naturally released because the row no longer exists)
+ * Coverage for the visibility / counts / finalize behaviour of x402-paid signal
+ * submissions. The full HTTP path through POST /api/signals (verifyPayment +
+ * identity gate + BIP-322 auth) is exercised by the staging-preview smoke test;
+ * these tests pin the registry contract that any regression would touch.
  */
-
-async function seedPendingSignal(id: string, btcAddress = BTC_ADDRESS): Promise<void> {
-  const res = await SELF.fetch("http://example.com/api/test-seed", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      signals: [
-        {
-          id,
-          beat_slug: "agent-economy",
-          btc_address: btcAddress,
-          headline: `Pending signal ${id}`,
-          body: null,
-          sources: JSON.stringify([{ url: "https://example.com", title: "Example" }]),
-          created_at: "2026-04-22T13:00:00.000Z",
-          status: "pending_payment",
-        },
-      ],
-    }),
-  });
-  expect(res.status).toBe(200);
-}
-
-async function stage(paymentId: string, signalId: string): Promise<void> {
-  const res = await SELF.fetch("http://example.com/api/test/payment-stage", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      paymentId,
-      payload: {
-        kind: "signal_submission",
-        signal_id: signalId,
-        btc_address: BTC_ADDRESS,
-        beat_slug: "agent-economy",
-        headline: `Pending signal ${signalId}`,
-        body: null,
-        sources: [{ url: "https://example.com", title: "Example" }],
-        tags: [],
-        disclosure: null,
-        payment_txid: null,
-      },
-    }),
-  });
-  expect(res.status).toBe(201);
-}
-
-async function reconcile(paymentId: string, status: string, extra: Record<string, unknown> = {}): Promise<void> {
-  const res = await SELF.fetch(
-    `http://example.com/api/test/payment-stage/${paymentId}/reconcile`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, ...extra }),
-    }
-  );
-  expect(res.status).toBe(200);
-}
 
 describe("signal x402 visibility + finalize flow", () => {
   it("hides pending_payment from default GET /api/signals listings", async () => {
@@ -126,7 +63,7 @@ describe("signal x402 visibility + finalize flow", () => {
 
   it("includes pending_payment bucket on /api/signals/counts when agent is scoped", async () => {
     const isolatedAddr = "bc1qpending0counts0agent000000000000000000";
-    await seedPendingSignal("sig-counts-include-agent-001", isolatedAddr);
+    await seedPendingSignal("sig-counts-include-agent-001", { btcAddress: isolatedAddr });
 
     const res = await SELF.fetch(`http://example.com/api/signals/counts?agent=${isolatedAddr}`);
     expect(res.status).toBe(200);
@@ -146,13 +83,13 @@ describe("signal x402 visibility + finalize flow", () => {
   it("flips a finalised signal into the default listing after a confirmed reconcile", async () => {
     const signalId = "sig-flow-finalise-001";
     await seedPendingSignal(signalId);
-    await stage("pay_signal_flow_finalize", signalId);
+    await stageSignalSubmission("pay_signal_flow_finalize", signalId);
 
     const beforeRes = await SELF.fetch(`http://example.com/api/signals?agent=${BTC_ADDRESS}`);
     const beforeBody = await beforeRes.json<{ signals: Array<{ id: string }> }>();
     expect(beforeBody.signals.find((s) => s.id === signalId)).toBeUndefined();
 
-    await reconcile("pay_signal_flow_finalize", "confirmed", { txid: "a".repeat(64) });
+    await reconcileStage("pay_signal_flow_finalize", "confirmed", { txid: "a".repeat(64) });
 
     const afterRes = await SELF.fetch(`http://example.com/api/signals?agent=${BTC_ADDRESS}`);
     const afterBody = await afterRes.json<{ signals: Array<{ id: string; status: string }> }>();
@@ -164,9 +101,9 @@ describe("signal x402 visibility + finalize flow", () => {
   it("removes the staged row entirely when a signal_submission stage is discarded", async () => {
     const signalId = "sig-flow-discard-001";
     await seedPendingSignal(signalId);
-    await stage("pay_signal_flow_discard", signalId);
+    await stageSignalSubmission("pay_signal_flow_discard", signalId);
 
-    await reconcile("pay_signal_flow_discard", "failed", { terminalReason: "sender_nonce_stale" });
+    await reconcileStage("pay_signal_flow_discard", "failed", { terminalReason: "sender_nonce_stale" });
 
     const directRes = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
     expect(directRes.status).toBe(404);

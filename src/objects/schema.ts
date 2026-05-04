@@ -815,14 +815,10 @@ export const MIGRATION_CORRESPONDENT_STATS_SQL = [
 ] as const;
 
 /**
- * MIGRATION_SIGNAL_PAYMENT_SQL — x402 payment columns on signals.
- *
- * Adds `payment_txid` so finalizeSignalSubmission can record the on-chain
- * sBTC txid backing a paid signal submission. The signals table has no
- * CHECK constraint on `status`, so introducing the new `pending_payment`
- * status requires no schema change — only the TS-side SIGNAL_STATUSES
- * constant. The added (status, btc_address, created_at) index keeps
- * cooldown / daily-cap queries fast as `pending_payment` rows accumulate.
+ * x402 payment columns on signals. The signals.status column has no CHECK
+ * constraint, so the new `pending_payment` status needs only the TS-side
+ * SIGNAL_STATUSES update — no schema change. The composite index keeps
+ * cooldown / daily-cap queries fast as pending rows accumulate.
  */
 export const MIGRATION_SIGNAL_PAYMENT_SQL = [
   "ALTER TABLE signals ADD COLUMN payment_txid TEXT",

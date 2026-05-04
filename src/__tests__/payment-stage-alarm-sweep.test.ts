@@ -1,52 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { SELF } from "cloudflare:test";
-
-const BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
-
-async function seedPendingSignal(signalId: string): Promise<void> {
-  const res = await SELF.fetch("http://example.com/api/test-seed", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      signals: [
-        {
-          id: signalId,
-          beat_slug: "agent-economy",
-          btc_address: BTC_ADDRESS,
-          headline: "Sweep test pending signal",
-          body: null,
-          sources: JSON.stringify([{ url: "https://example.com", title: "Example" }]),
-          created_at: "2026-04-22T12:00:00.000Z",
-          status: "pending_payment",
-        },
-      ],
-    }),
-  });
-  expect(res.status).toBe(200);
-}
-
-async function stageSignal(paymentId: string, signalId: string): Promise<void> {
-  const res = await SELF.fetch("http://example.com/api/test/payment-stage", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      paymentId,
-      payload: {
-        kind: "signal_submission",
-        signal_id: signalId,
-        btc_address: BTC_ADDRESS,
-        beat_slug: "agent-economy",
-        headline: "Sweep test pending signal",
-        body: null,
-        sources: [{ url: "https://example.com", title: "Example" }],
-        tags: [],
-        disclosure: null,
-        payment_txid: null,
-      },
-    }),
-  });
-  expect(res.status).toBe(201);
-}
+import {
+  FIXTURE_BTC_ADDRESS as BTC_ADDRESS,
+  seedPendingSignal,
+  stageSignalSubmission,
+} from "./_payment-fixtures";
 
 async function stageClassified(paymentId: string, classifiedId: string) {
   const res = await SELF.fetch("http://example.com/api/test/payment-stage", {
@@ -213,7 +171,7 @@ describe("payment staging alarm sweep (#572)", () => {
     const paymentId = "pay_sweep_signal_confirmed";
     const signalId = "sig-sweep-signal-confirmed";
     await seedPendingSignal(signalId);
-    await stageSignal(paymentId, signalId);
+    await stageSignalSubmission(paymentId, signalId);
 
     const reconciled = await runSweep({
       [paymentId]: { status: "confirmed", txid: "e".repeat(64) },
@@ -234,7 +192,7 @@ describe("payment staging alarm sweep (#572)", () => {
     const paymentId = "pay_sweep_signal_failed";
     const signalId = "sig-sweep-signal-failed";
     await seedPendingSignal(signalId);
-    await stageSignal(paymentId, signalId);
+    await stageSignalSubmission(paymentId, signalId);
 
     const reconciled = await runSweep({
       [paymentId]: { status: "failed", terminalReason: "sender_nonce_stale" },

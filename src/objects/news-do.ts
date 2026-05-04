@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
@@ -132,10 +132,13 @@ function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; p
     clauses.push("s.status = ?");
     params.push(filters.status);
   } else if (!filters.includePending) {
-    // Default listings hide x402-staged-but-unconfirmed rows. An explicit
-    // status filter (including status=pending_payment) bypasses this; a
-    // caller passing includePending=true bypasses it too.
-    clauses.push("s.status != 'pending_payment'");
+    // Default listings hide x402-staged-but-unconfirmed rows. Use an explicit
+    // IN list (the non-pending statuses) so SQLite can hit
+    // idx_signals_status_created instead of falling back to a range/scan
+    // that an inequality would force.
+    const placeholders = COUNTED_SIGNAL_STATUSES.map(() => "?").join(", ");
+    clauses.push(`s.status IN (${placeholders})`);
+    params.push(...COUNTED_SIGNAL_STATUSES);
   }
   if (filters.dateStart) {
     clauses.push("s.created_at >= ?");
@@ -399,12 +402,8 @@ function getPaymentStageRow(
   return rowToPaymentStage(rows[0] as Record<string, unknown>);
 }
 
-/**
- * Context object handed to each finalize callback. `sql` is the DO's SQL
- * storage handle; `paymentId` and `now` are precomputed by the dispatcher
- * for consistency across writes; `txid` is the on-chain settlement txid
- * reported by the relay (preferred over any payload-embedded txid).
- */
+/** Per-stage commit context. `txid` is the relay-reported on-chain settlement
+ *  and takes precedence over any payload-embedded txid. */
 type FinalizeContext = {
   sql: DurableObjectState["storage"]["sql"];
   paymentId: string;
@@ -414,10 +413,7 @@ type FinalizeContext = {
 
 type FinalizeFn = (payload: PaymentStagePayload, ctx: FinalizeContext) => void;
 
-/**
- * Inserts the classified row that the agent paid for. INSERT OR IGNORE
- * keeps the call idempotent under poll+sweep reconcile races.
- */
+/** INSERT OR IGNORE keeps the call idempotent under poll+sweep reconcile races. */
 function finalizeClassifiedSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
   const p = payload as Extract<PaymentStagePayload, { kind: "classified_submission" }>;
   ctx.sql.exec(
@@ -435,11 +431,8 @@ function finalizeClassifiedSubmission(payload: PaymentStagePayload, ctx: Finaliz
   );
 }
 
-/**
- * Records brief-revenue earnings for the paying address (if any). No-op
- * when payload.payer is null — payer is only resolved for authenticated
- * brief unlocks. INSERT OR IGNORE keeps it idempotent.
- */
+/** No-op when payload.payer is null — payer is only resolved for authenticated
+ *  brief unlocks. INSERT OR IGNORE keeps it idempotent. */
 function finalizeBriefAccess(payload: PaymentStagePayload, ctx: FinalizeContext): void {
   const p = payload as Extract<PaymentStagePayload, { kind: "brief_access" }>;
   if (!p.payer) return;
@@ -455,16 +448,8 @@ function finalizeBriefAccess(payload: PaymentStagePayload, ctx: FinalizeContext)
   );
 }
 
-/**
- * Bumps the materialised correspondent_stats row for a paid signal that is
- * landing on `submitted`. Mirrors the semantics of the legacy class method
- * (signal_count++, last/first_signal_at min/max, days_active recomputed)
- * but excludes `pending_payment` rows from the days_active subquery so a
- * still-staged signal does not inflate the visible total.
- *
- * Free function form so the finalize registry can call it; the createSignal
- * route handler wraps it with `applyCorrespondentStatsBumpForInsert`.
- */
+/** days_active subquery excludes pending_payment so a still-staged signal does
+ *  not inflate the visible total — the bump runs only on finalize. */
 function applyCorrespondentStatsBump(
   sql: DurableObjectState["storage"]["sql"],
   btcAddress: string,
@@ -489,13 +474,8 @@ function applyCorrespondentStatsBump(
   );
 }
 
-/**
- * Updates the streaks row for a finalized (non-correction) signal. Computes
- * day-over-day continuation from the streaks record's previous
- * `last_signal_date`, anchored to the *signal's* UTC date — not the moment
- * of finalization — so that an x402 settlement that crosses a UTC midnight
- * still credits the day the agent actually filed.
- */
+/** Anchored to the signal's UTC date — not the finalize time — so an x402
+ *  settlement that crosses a UTC midnight still credits the day filed. */
 function applyStreakBumpForSignal(
   sql: DurableObjectState["storage"]["sql"],
   btcAddress: string,
@@ -540,12 +520,6 @@ function applyStreakBumpForSignal(
   return { totalSignals };
 }
 
-/**
- * Credits a pending referral when this is the agent's first finalized
- * signal. No-op if no pending referral exists or the agent has already
- * filed before. Idempotent because the WHERE clause filters out already-
- * credited rows.
- */
 function applyReferralCreditOnFirstSignal(
   sql: DurableObjectState["storage"]["sql"],
   btcAddress: string,
@@ -569,16 +543,9 @@ function applyReferralCreditOnFirstSignal(
   );
 }
 
-/**
- * Flips an already-staged signals row from `pending_payment` → `submitted`,
- * stamps `payment_txid`, and runs the streak / correspondent_stats /
- * referral commit effects that were intentionally deferred at stage time.
- *
- * Idempotent: the status-flip UPDATE is bounded by `status='pending_payment'`,
- * and the commit effects only run when that flip changes the row (verified
- * by re-reading the row before vs after). Concurrent poll+sweep finalises
- * settle to a single set of side effects.
- */
+/** Idempotent under concurrent poll+sweep finalises: the pre-SELECT short-
+ *  circuits when the row has already flipped, and the UPDATE's WHERE clause
+ *  is bounded to `status='pending_payment'`. */
 function finalizeSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
   const p = payload as Extract<PaymentStagePayload, { kind: "signal_submission" }>;
 
@@ -590,7 +557,7 @@ function finalizeSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeCon
     .toArray();
   if (before.length === 0) return;
   const row = before[0] as { status: string; created_at: string; correction_of: string | null };
-  if (row.status !== "pending_payment") return;
+  if (row.status !== PENDING_PAYMENT_STATUS) return;
 
   ctx.sql.exec(
     `UPDATE signals
@@ -604,8 +571,9 @@ function finalizeSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeCon
     p.signal_id
   );
 
-  // Corrections are excluded from streaks / stats / referrals by the same
-  // rules the createSignal path applies (see news-do.ts createSignal flow).
+  // Corrections are routed through PATCH /signals/:id, never POST, so a
+  // signal_submission stage is non-correction by construction. The guard
+  // is defensive in case future code paths stage a correction.
   if (row.correction_of !== null) return;
 
   applyCorrespondentStatsBump(ctx.sql, p.btc_address, row.created_at);
@@ -619,20 +587,11 @@ const FINALIZE_REGISTRY: Record<PaymentStageKind, FinalizeFn> = {
   signal_submission: finalizeSignalSubmission,
 };
 
-type DiscardFn = (payload: PaymentStagePayload, ctx: FinalizeContext) => void;
+const noopDiscard: FinalizeFn = () => {};
 
-const noopDiscard: DiscardFn = () => {};
-
-/**
- * Releases the cooldown / daily-cap slot held by a staged signal whose
- * payment was rejected (failed / replaced / not_found). Deletes the
- * signals row plus its signal_tags so the agent can re-stage immediately.
- *
- * Note on stats drift: the stage-time INSERT bumps correspondent_stats.
- * Discard does not decrement — discards are rare under a stable relay,
- * and any drift is reconciled by POST /api/config/recon-correspondents.
- * See docs/x402-signal-payment-plan.md item 11 for the trade-off.
- */
+/** Releases the cooldown / daily-cap slot held by a staged signal whose
+ *  payment was rejected. brief_access and classified_submission stages have
+ *  nothing to undo because their commit effects only run on `confirmed`. */
 function discardSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
   const p = payload as Extract<PaymentStagePayload, { kind: "signal_submission" }>;
   ctx.sql.exec(
@@ -645,13 +604,7 @@ function discardSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeCont
   );
 }
 
-/**
- * Discard hooks run when a staged payment reaches a non-confirmed terminal
- * state. Most kinds have nothing to undo (their finalize side effects only
- * fire on `confirmed`); signal_submission is the exception because its
- * stage-time write reserves the cooldown slot eagerly.
- */
-const DISCARD_REGISTRY: Record<PaymentStageKind, DiscardFn> = {
+const DISCARD_REGISTRY: Record<PaymentStageKind, FinalizeFn> = {
   brief_access: noopDiscard,
   classified_submission: noopDiscard,
   signal_submission: discardSignalSubmission,
@@ -2946,9 +2899,6 @@ export class NewsDO extends DurableObject<Env> {
         return res;
       }
 
-      // x402 stage path: caller provides a provisional signal_id when staging
-      // a pending_payment row. This lets the route return the id in the 202
-      // response so agents can poll status before payment finalises.
       const stagedPending = body.pending_payment === true;
       const providedSignalId = typeof body.signal_id === "string" ? body.signal_id.trim() : "";
       const signalId = providedSignalId.length > 0 ? providedSignalId : generateId();
