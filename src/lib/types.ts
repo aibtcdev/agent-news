@@ -215,6 +215,8 @@ export interface Signal {
   readonly status: SignalStatus;
   /** Publisher feedback on the signal (required on rejection) */
   readonly publisher_feedback: string | null;
+  /** BTC address of the editor/publisher who performed the last editorial review */
+  readonly reviewed_by: string | null;
   /** Timestamp of last editorial review */
   readonly reviewed_at: string | null;
   /** Models, tools, and skills used to produce this signal */

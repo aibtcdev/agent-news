@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, MIGRATION_SIGNAL_REVIEWED_BY_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
@@ -54,6 +54,7 @@ interface RawSignalRow {
   tags_csv: string | null;
   status: SignalStatus;
   publisher_feedback: string | null;
+  reviewed_by: string | null;
   reviewed_at: string | null;
   disclosure: string;
   quality_score: number | null;
@@ -296,6 +297,7 @@ function rowToSignal(row: Record<string, unknown>): Signal {
     correction_of: raw.correction_of,
     status: raw.status ?? "submitted",
     publisher_feedback: raw.publisher_feedback ?? null,
+    reviewed_by: raw.reviewed_by ?? null,
     reviewed_at: raw.reviewed_at ?? null,
     disclosure: raw.disclosure ?? "",
     quality_score: raw.quality_score ?? null,
@@ -926,7 +928,10 @@ export class NewsDO extends DurableObject<Env> {
     // 26 = Partial UNIQUE index on classifieds.payment_txid for replay protection across both placement paths
     // 27 = Signal hot-path composite indexes for Cloudflare bill reduction
     // 28 = Correspondents bundle composite indexes for DO timeout reduction
-    const CURRENT_MIGRATION_VERSION = 30;
+    // 29 = Correspondent stats materialized aggregate table
+    // 30 = Signal payment finalization columns and indexes
+    // 31 = Signal review attribution column for existing production DOs
+    const CURRENT_MIGRATION_VERSION = 31;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -1370,6 +1375,21 @@ export class NewsDO extends DurableObject<Env> {
             const msg = e instanceof Error ? e.message : String(e);
             if (!msg.includes("already exists") && !msg.includes("duplicate column name")) {
               console.error("Signal payment migration failed:", e);
+            }
+          }
+        }
+      }
+
+      // Signal review attribution — add reviewed_by for existing production DOs
+      // that already advanced past Phase 0 before this PR introduced the column.
+      if (appliedVersion < 31) {
+        for (const stmt of MIGRATION_SIGNAL_REVIEWED_BY_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("duplicate column") && !msg.includes("already exists")) {
+              console.error("Signal reviewed_by migration statement failed:", e);
             }
           }
         }
@@ -1922,10 +1942,11 @@ export class NewsDO extends DurableObject<Env> {
 
       const now = nowDate.toISOString();
       this.ctx.storage.sql.exec(
-        `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
+        `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_by = ?, reviewed_at = ?, updated_at = ?
          WHERE id = ?`,
         newStatus,
         feedback ? sanitizeString(feedback, 1000) : null,
+        btc_address as string,
         now,
         now,
         id
@@ -5649,8 +5670,8 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(
               `INSERT OR IGNORE INTO signals
                (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at,
-                correction_of, status, reviewed_at, publisher_feedback, disclosure)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                correction_of, status, reviewed_at, reviewed_by, publisher_feedback, disclosure)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               row.id as string,
               row.beat_slug as string,
               row.btc_address as string,
@@ -5662,6 +5683,7 @@ export class NewsDO extends DurableObject<Env> {
               (row.correction_of as string | null) ?? null,
               (row.status as string) ?? "submitted",
               (row.reviewed_at as string | null) ?? null,
+              (row.reviewed_by as string | null) ?? null,
               (row.publisher_feedback as string | null) ?? null,
               (row.disclosure as string) ?? ""
             );
