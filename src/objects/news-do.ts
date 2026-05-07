@@ -4,15 +4,23 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_SIGNAL_REVIEWED_BY_SQL } from "./schema";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, MIGRATION_SIGNAL_REVIEWED_BY_SQL } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
 
-/** Valid editorial transitions for signals: submitted → approved/rejected → brief_included */
+/**
+ * Valid editorial transitions for signals: submitted → approved/rejected → brief_included.
+ *
+ * `pending_payment` → `submitted` is intentionally absent here: the transition
+ * is performed by `finalizeSignalSubmission` outside the editorial state
+ * machine (the pending row is not yet visible to reviewers). No editorial
+ * transitions originate from `pending_payment`.
+ */
 export const SIGNAL_VALID_TRANSITIONS: Record<SignalStatus, SignalStatus[]> = {
+  pending_payment: [],
   submitted: ["approved", "rejected"],
   approved: ["replaced", "rejected", "brief_included"],
   replaced: ["approved", "rejected"],
@@ -74,12 +82,22 @@ interface SignalListFilters {
   status: string | null;
   dateStart: string | null;
   dateEnd: string | null;
+  /**
+   * When false (default), `pending_payment` rows are excluded — staged-but-
+   * unconfirmed signals stay invisible to the public listings, leaderboard,
+   * and counts. Authors viewing their own staged rows pass true (or set
+   * status='pending_payment' explicitly) to see them.
+   */
+  includePending: boolean;
 }
 
 interface SignalCountFilters {
   beat: string | null;
   agent: string | null;
   since: string | null;
+  /** See SignalListFilters.includePending. When true the count response
+   *  carries a separate pending_payment bucket. */
+  includePending: boolean;
 }
 
 function appendSignalScopeFilters(
@@ -114,6 +132,14 @@ function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; p
   if (filters.status) {
     clauses.push("s.status = ?");
     params.push(filters.status);
+  } else if (!filters.includePending) {
+    // Default listings hide x402-staged-but-unconfirmed rows. Use an explicit
+    // IN list (the non-pending statuses) so SQLite can hit
+    // idx_signals_status_created instead of falling back to a range/scan
+    // that an inequality would force.
+    const placeholders = COUNTED_SIGNAL_STATUSES.map(() => "?").join(", ");
+    clauses.push(`s.status IN (${placeholders})`);
+    params.push(...COUNTED_SIGNAL_STATUSES);
   }
   if (filters.dateStart) {
     clauses.push("s.created_at >= ?");
@@ -183,7 +209,11 @@ function querySignalCountRows(
     return Number((countRows[0] as { count: number } | undefined)?.count) || 0;
   };
 
-  for (const status of COUNTED_SIGNAL_STATUSES) {
+  const statuses: readonly string[] = filters.includePending
+    ? [...COUNTED_SIGNAL_STATUSES, "pending_payment"]
+    : COUNTED_SIGNAL_STATUSES;
+
+  for (const status of statuses) {
     const reviewedStatus = (REVIEWED_SIGNAL_STATUSES as readonly string[]).includes(status);
     const baseClauses = ["s.status = ?"];
     const baseParams: SqlParam[] = [status];
@@ -374,6 +404,214 @@ function getPaymentStageRow(
   return rowToPaymentStage(rows[0] as Record<string, unknown>);
 }
 
+/** Per-stage commit context. `txid` is the relay-reported on-chain settlement
+ *  and takes precedence over any payload-embedded txid. */
+type FinalizeContext = {
+  sql: DurableObjectState["storage"]["sql"];
+  paymentId: string;
+  now: string;
+  txid?: string;
+};
+
+type FinalizeFn = (payload: PaymentStagePayload, ctx: FinalizeContext) => void;
+
+/** INSERT OR IGNORE keeps the call idempotent under poll+sweep reconcile races. */
+function finalizeClassifiedSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
+  const p = payload as Extract<PaymentStagePayload, { kind: "classified_submission" }>;
+  ctx.sql.exec(
+    `INSERT OR IGNORE INTO classifieds
+       (id, btc_address, category, headline, body, payment_txid, status, created_at, expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
+    p.classified_id,
+    p.btc_address,
+    p.category,
+    p.headline,
+    p.body,
+    ctx.txid ?? p.payment_txid,
+    ctx.now,
+    ctx.now
+  );
+}
+
+/** No-op when payload.payer is null — payer is only resolved for authenticated
+ *  brief unlocks. INSERT OR IGNORE keeps it idempotent. */
+function finalizeBriefAccess(payload: PaymentStagePayload, ctx: FinalizeContext): void {
+  const p = payload as Extract<PaymentStagePayload, { kind: "brief_access" }>;
+  if (!p.payer) return;
+  ctx.sql.exec(
+    `INSERT OR IGNORE INTO earnings
+       (id, btc_address, amount_sats, reason, reference_id, created_at)
+     VALUES (?, ?, ?, 'brief-revenue', ?, ?)`,
+    generateId(),
+    p.payer,
+    p.amount_sats,
+    ctx.paymentId,
+    ctx.now
+  );
+}
+
+/** days_active subquery excludes pending_payment so a still-staged signal does
+ *  not inflate the visible total — the bump runs only on finalize. */
+function applyCorrespondentStatsBump(
+  sql: DurableObjectState["storage"]["sql"],
+  btcAddress: string,
+  signalCreatedAt: string
+): void {
+  sql.exec(
+    `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+     VALUES (?1, 1, ?2, ?2, 1, datetime('now'))
+     ON CONFLICT(btc_address) DO UPDATE SET
+       signal_count = correspondent_stats.signal_count + 1,
+       last_signal_at = MAX(correspondent_stats.last_signal_at, excluded.last_signal_at),
+       first_signal_at = MIN(correspondent_stats.first_signal_at, excluded.first_signal_at),
+       days_active = (
+         SELECT COUNT(DISTINCT date(created_at)) FROM signals
+         WHERE btc_address = ?1
+           AND correction_of IS NULL
+           AND status != 'pending_payment'
+       ),
+       updated_at = datetime('now')`,
+    btcAddress,
+    signalCreatedAt
+  );
+}
+
+/** Anchored to the signal's UTC date — not the finalize time — so an x402
+ *  settlement that crosses a UTC midnight still credits the day filed. */
+function applyStreakBumpForSignal(
+  sql: DurableObjectState["storage"]["sql"],
+  btcAddress: string,
+  signalCreatedAt: string
+): { totalSignals: number } {
+  const signalDate = signalCreatedAt.slice(0, 10);
+  const yesterday = getUTCYesterday(new Date(signalCreatedAt));
+
+  const streakRows = sql
+    .exec("SELECT * FROM streaks WHERE btc_address = ?", btcAddress)
+    .toArray();
+
+  let currentStreak = 1;
+  let longestStreak = 1;
+  let totalSignals = 1;
+  const rec = streakRows[0] as unknown as Streak | undefined;
+
+  if (rec) {
+    totalSignals = (rec.total_signals ?? 0) + 1;
+    if (rec.last_signal_date === signalDate) {
+      currentStreak = rec.current_streak ?? 1;
+      longestStreak = rec.longest_streak ?? 1;
+    } else if (rec.last_signal_date === yesterday) {
+      currentStreak = (rec.current_streak ?? 0) + 1;
+      longestStreak = Math.max(currentStreak, rec.longest_streak ?? 0);
+    } else {
+      currentStreak = 1;
+      longestStreak = Math.max(1, rec.longest_streak ?? 0);
+    }
+  }
+
+  sql.exec(
+    `INSERT OR REPLACE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
+       VALUES (?, ?, ?, ?, ?)`,
+    btcAddress,
+    currentStreak,
+    longestStreak,
+    signalDate,
+    totalSignals
+  );
+
+  return { totalSignals };
+}
+
+function applyReferralCreditOnFirstSignal(
+  sql: DurableObjectState["storage"]["sql"],
+  btcAddress: string,
+  signalId: string,
+  nowIso: string,
+  totalSignals: number
+): void {
+  if (totalSignals !== 1) return;
+  const pendingRef = sql
+    .exec(
+      "SELECT id FROM referral_credits WHERE recruit_address = ? AND credited_at IS NULL",
+      btcAddress
+    )
+    .toArray();
+  if (pendingRef.length === 0) return;
+  sql.exec(
+    "UPDATE referral_credits SET credited_at = ?, first_signal_id = ? WHERE recruit_address = ? AND credited_at IS NULL",
+    nowIso,
+    signalId,
+    btcAddress
+  );
+}
+
+/** Idempotent under concurrent poll+sweep finalises: the pre-SELECT short-
+ *  circuits when the row has already flipped, and the UPDATE's WHERE clause
+ *  is bounded to `status='pending_payment'`. */
+function finalizeSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
+  const p = payload as Extract<PaymentStagePayload, { kind: "signal_submission" }>;
+
+  const before = ctx.sql
+    .exec(
+      "SELECT status, created_at, correction_of FROM signals WHERE id = ?",
+      p.signal_id
+    )
+    .toArray();
+  if (before.length === 0) return;
+  const row = before[0] as { status: string; created_at: string; correction_of: string | null };
+  if (row.status !== PENDING_PAYMENT_STATUS) return;
+
+  ctx.sql.exec(
+    `UPDATE signals
+        SET status = 'submitted',
+            payment_txid = COALESCE(?, payment_txid),
+            updated_at = ?
+      WHERE id = ?
+        AND status = 'pending_payment'`,
+    ctx.txid ?? p.payment_txid,
+    ctx.now,
+    p.signal_id
+  );
+
+  // Corrections are routed through PATCH /signals/:id, never POST, so a
+  // signal_submission stage is non-correction by construction. The guard
+  // is defensive in case future code paths stage a correction.
+  if (row.correction_of !== null) return;
+
+  applyCorrespondentStatsBump(ctx.sql, p.btc_address, row.created_at);
+  const { totalSignals } = applyStreakBumpForSignal(ctx.sql, p.btc_address, row.created_at);
+  applyReferralCreditOnFirstSignal(ctx.sql, p.btc_address, p.signal_id, ctx.now, totalSignals);
+}
+
+const FINALIZE_REGISTRY: Record<PaymentStageKind, FinalizeFn> = {
+  brief_access: finalizeBriefAccess,
+  classified_submission: finalizeClassifiedSubmission,
+  signal_submission: finalizeSignalSubmission,
+};
+
+const noopDiscard: FinalizeFn = () => {};
+
+/** Releases the cooldown / daily-cap slot held by a staged signal whose
+ *  payment was rejected. brief_access and classified_submission stages have
+ *  nothing to undo because their commit effects only run on `confirmed`. */
+function discardSignalSubmission(payload: PaymentStagePayload, ctx: FinalizeContext): void {
+  const p = payload as Extract<PaymentStagePayload, { kind: "signal_submission" }>;
+  ctx.sql.exec(
+    "DELETE FROM signal_tags WHERE signal_id = ?",
+    p.signal_id
+  );
+  ctx.sql.exec(
+    "DELETE FROM signals WHERE id = ? AND status = 'pending_payment'",
+    p.signal_id
+  );
+}
+
+const DISCARD_REGISTRY: Record<PaymentStageKind, FinalizeFn> = {
+  brief_access: noopDiscard,
+  classified_submission: noopDiscard,
+  signal_submission: discardSignalSubmission,
+};
+
 /**
  * Apply a terminal reconciliation decision to a single staged payment row.
  * Shared by the /payment-staging/:paymentId/reconcile route (poll-driven) and
@@ -399,36 +637,8 @@ function reconcileStageRow(
   const now = new Date().toISOString();
 
   if (status === "confirmed") {
-    if (staged.kind === "classified_submission") {
-      const payload = staged.payload as Extract<PaymentStagePayload, { kind: "classified_submission" }>;
-      sql.exec(
-        `INSERT OR IGNORE INTO classifieds
-           (id, btc_address, category, headline, body, payment_txid, status, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending_review', ?, ?)`,
-        payload.classified_id,
-        payload.btc_address,
-        payload.category,
-        payload.headline,
-        payload.body,
-        txid ?? payload.payment_txid,
-        now,
-        now
-      );
-    } else if (staged.kind === "brief_access") {
-      const payload = staged.payload as Extract<PaymentStagePayload, { kind: "brief_access" }>;
-      if (payload.payer) {
-        sql.exec(
-          `INSERT OR IGNORE INTO earnings
-             (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, ?, 'brief-revenue', ?, ?)`,
-          generateId(),
-          payload.payer,
-          payload.amount_sats,
-          paymentId,
-          now
-        );
-      }
-    }
+    const finalize = FINALIZE_REGISTRY[staged.kind];
+    finalize(staged.payload, { sql, paymentId, now, txid });
 
     sql.exec(
       `UPDATE payment_staging
@@ -444,6 +654,9 @@ function reconcileStageRow(
       paymentId
     );
   } else if (status === "failed" || status === "replaced" || status === "not_found") {
+    const discard = DISCARD_REGISTRY[staged.kind];
+    discard(staged.payload, { sql, paymentId, now, txid });
+
     sql.exec(
       `UPDATE payment_staging
           SET stage_status = 'discarded',
@@ -715,8 +928,10 @@ export class NewsDO extends DurableObject<Env> {
     // 26 = Partial UNIQUE index on classifieds.payment_txid for replay protection across both placement paths
     // 27 = Signal hot-path composite indexes for Cloudflare bill reduction
     // 28 = Correspondents bundle composite indexes for DO timeout reduction
-    // 29 = Signal review attribution column for existing production DOs
-    const CURRENT_MIGRATION_VERSION = 29;
+    // 29 = Correspondent stats materialized aggregate table
+    // 30 = Signal payment finalization columns and indexes
+    // 31 = Signal review attribution column for existing production DOs
+    const CURRENT_MIGRATION_VERSION = 31;
     const versionRows = this.ctx.storage.sql
       .exec("SELECT value FROM config WHERE key = 'migration_version'")
       .toArray();
@@ -1132,9 +1347,42 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
+      // Correspondent stats — materialised per-agent aggregates that replace
+      // the GROUP BY scans in /correspondents, /correspondents-bundle, /init,
+      // and the leaderboard's first-signal sub-select.
+      if (appliedVersion < 29) {
+        for (let i = 0; i < MIGRATION_CORRESPONDENT_STATS_SQL.length; i++) {
+          const stmt = MIGRATION_CORRESPONDENT_STATS_SQL[i];
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists")) {
+              console.error(`Correspondent stats migration (v29, stmt ${i}) failed:`, e);
+            }
+          }
+        }
+      }
+
+      // Signal payment columns — `payment_txid` for finalised x402 signal
+      // submissions plus a (status, btc_address, created_at) index that keeps
+      // cooldown/daily-cap queries fast as `pending_payment` rows accumulate.
+      if (appliedVersion < 30) {
+        for (const stmt of MIGRATION_SIGNAL_PAYMENT_SQL) {
+          try {
+            this.ctx.storage.sql.exec(stmt);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            if (!msg.includes("already exists") && !msg.includes("duplicate column name")) {
+              console.error("Signal payment migration failed:", e);
+            }
+          }
+        }
+      }
+
       // Signal review attribution — add reviewed_by for existing production DOs
       // that already advanced past Phase 0 before this PR introduced the column.
-      if (appliedVersion < 29) {
+      if (appliedVersion < 31) {
         for (const stmt of MIGRATION_SIGNAL_REVIEWED_BY_SQL) {
           try {
             this.ctx.storage.sql.exec(stmt);
@@ -1345,7 +1593,11 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
       const stageKind = body.payload.kind;
-      if (stageKind !== "brief_access" && stageKind !== "classified_submission") {
+      if (
+        stageKind !== "brief_access" &&
+        stageKind !== "classified_submission" &&
+        stageKind !== "signal_submission"
+      ) {
         return c.json(
           { ok: false, error: `Unsupported payment stage kind: ${stageKind as string}` } satisfies DOResult<PaymentStageMaterialized>,
           400
@@ -2161,6 +2413,18 @@ export class NewsDO extends DurableObject<Env> {
       try {
         this.ctx.storage.transactionSync(() => {
           if (signalCount > 0) {
+            // Capture authors before deletion so correspondent_stats can be
+            // recomputed for each affected agent in the same transaction.
+            const affectedRows = this.ctx.storage.sql
+              .exec(
+                "SELECT DISTINCT btc_address FROM signals WHERE beat_slug = ?",
+                slug
+              )
+              .toArray();
+            const affectedAddresses = affectedRows.map(
+              (r) => (r as { btc_address: string }).btc_address
+            );
+
             this.ctx.storage.sql.exec(
               "DELETE FROM signal_tags WHERE signal_id IN (SELECT id FROM signals WHERE beat_slug = ?)",
               slug
@@ -2174,6 +2438,8 @@ export class NewsDO extends DurableObject<Env> {
               slug
             );
             this.ctx.storage.sql.exec("DELETE FROM signals WHERE beat_slug = ?", slug);
+
+            this.recomputeCorrespondentStatsFor(affectedAddresses);
           }
           this.ctx.storage.sql.exec("DELETE FROM beat_claims WHERE beat_slug = ?", slug);
           this.ctx.storage.sql.exec("DELETE FROM beats WHERE slug = ?", slug);
@@ -2328,6 +2594,7 @@ export class NewsDO extends DurableObject<Env> {
       const since = c.req.query("since") ?? null;
       const tag = c.req.query("tag") ?? null;
       const status = c.req.query("status") ?? null;
+      const includePending = c.req.query("include_pending") === "true";
       const dateParam = c.req.query("date") ?? null;
       const limitParam = c.req.query("limit");
       const limit = Math.min(
@@ -2353,6 +2620,7 @@ export class NewsDO extends DurableObject<Env> {
         status,
         dateStart,
         dateEnd,
+        includePending,
       });
       const pageLimit = limit + 1;
 
@@ -2483,8 +2751,17 @@ export class NewsDO extends DurableObject<Env> {
       const agent = c.req.query("agent") ?? null;
       const sinceRaw = c.req.query("since") ?? null;
       const since = sinceRaw && sinceRaw.trim() !== "" ? sinceRaw : null;
+      // pending_payment is included only when the caller opts in. The route
+      // layer is responsible for gating include_pending behind BIP-322 auth
+      // matching the agent — see src/routes/signal-counts.ts.
+      const includePending = c.req.query("include_pending") === "true";
 
-      const rows = querySignalCountRows(this.ctx.storage.sql, { beat, agent, since });
+      const rows = querySignalCountRows(this.ctx.storage.sql, {
+        beat,
+        agent,
+        since,
+        includePending,
+      });
 
       const counts: Record<string, number> = {
         submitted: 0,
@@ -2493,6 +2770,7 @@ export class NewsDO extends DurableObject<Env> {
         rejected: 0,
         brief_included: 0,
       };
+      if (includePending) counts.pending_payment = 0;
       for (const row of rows) {
         const r = row as { status: string; count: number };
         if (r.status in counts) {
@@ -2529,6 +2807,23 @@ export class NewsDO extends DurableObject<Env> {
       const signal = rowToSignal(rows[0] as Record<string, unknown>);
 
       return c.json({ ok: true, data: signal } satisfies DOResult<Signal>);
+    });
+
+    // DELETE /signals/:id/pending — orphan cleanup for the route layer when
+    // stagePayment fails after a pending_payment row has been inserted. The
+    // status='pending_payment' guard is the safety net: nothing finalised
+    // can ever be deleted through this path.
+    this.router.delete("/signals/:id/pending", (c) => {
+      const id = c.req.param("id");
+      this.ctx.storage.sql.exec(
+        "DELETE FROM signal_tags WHERE signal_id = ?",
+        id
+      );
+      this.ctx.storage.sql.exec(
+        "DELETE FROM signals WHERE id = ? AND status = 'pending_payment'",
+        id
+      );
+      return c.json({ ok: true, data: { id } });
     });
 
     // POST /signals — atomic insert: signal + tags + streak + earning
@@ -2605,13 +2900,13 @@ export class NewsDO extends DurableObject<Env> {
       const now = new Date();
       const nowIso = now.toISOString();
 
-      // UTC date helpers (used for daily cap and streak)
+      // UTC date helpers (used for daily cap)
       const today = getUTCDate(now);
-      const yesterday = getUTCYesterday(now);
       const todayStart = getUTCDayStart(today);
 
       // Daily signal cap per agent — counts ALL signals including corrections
-      // (Previously excluded correction_of, allowing unlimited daily corrections)
+      // and pending_payment stages (the slot is reserved at stage time so the
+      // cap can't be bypassed by spamming unpaid stages).
       const dailyCountRows = this.ctx.storage.sql
         .exec(
           `SELECT COUNT(*) as count FROM signals
@@ -2642,7 +2937,10 @@ export class NewsDO extends DurableObject<Env> {
         return res;
       }
 
-      const signalId = generateId();
+      const stagedPending = body.pending_payment === true;
+      const providedSignalId = typeof body.signal_id === "string" ? body.signal_id.trim() : "";
+      const signalId = providedSignalId.length > 0 ? providedSignalId : generateId();
+
       const sourcesJson = JSON.stringify(sources ?? []);
       const sanitizedBody = signalBody ? sanitizeString(signalBody, 1000) : null;
       const signalTags = (tags as string[]) ?? [];
@@ -2658,39 +2956,17 @@ export class NewsDO extends DurableObject<Env> {
         disclosure,
       });
 
-      // Streak calculation (UTC)
-      const streakRows = this.ctx.storage.sql
-        .exec("SELECT * FROM streaks WHERE btc_address = ?", btc_address as string)
-        .toArray();
-
-      let currentStreak = 1;
-      let longestStreak = 1;
-      let totalSignals = 1;
-      const currentStreakRecord = streakRows[0] as unknown as Streak | undefined;
-
-      if (currentStreakRecord) {
-        totalSignals = (currentStreakRecord.total_signals ?? 0) + 1;
-        if (currentStreakRecord.last_signal_date === today) {
-          // Already filed today (UTC) — no streak change, but always count the new signal
-          currentStreak = currentStreakRecord.current_streak ?? 1;
-          longestStreak = currentStreakRecord.longest_streak ?? 1;
-        } else if (currentStreakRecord.last_signal_date === yesterday) {
-          // Consecutive day — increment streak
-          currentStreak = (currentStreakRecord.current_streak ?? 0) + 1;
-          longestStreak = Math.max(currentStreak, currentStreakRecord.longest_streak ?? 0);
-        } else {
-          // Gap — reset streak
-          currentStreak = 1;
-          longestStreak = Math.max(1, currentStreakRecord.longest_streak ?? 0);
-        }
-      }
-
-      // Insert signal, tags, and streak as individual statements.
-      // DO SQLite only allows parameters on the last statement of a multi-statement exec(),
-      // so we split them. Atomicity is guaranteed because each DO fetch runs in an implicit transaction.
+      // Insert the signal row. When stagedPending the row lands at
+      // status='pending_payment' and the streak / correspondent_stats /
+      // referral commit effects are deferred until finalizeSignalSubmission
+      // — that keeps the agent's visible totals in sync with finalized
+      // signals only, even if a payment is later discarded.
+      const paymentTxid = typeof body.payment_txid === "string" && body.payment_txid.trim().length > 0
+        ? body.payment_txid.trim()
+        : null;
       this.ctx.storage.sql.exec(
-        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, quality_score, score_breakdown)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 'submitted', ?, ?, ?)`,
+        `INSERT INTO signals (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at, correction_of, status, disclosure, quality_score, score_breakdown, payment_txid)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
         signalId,
         beat_slug as string,
         btc_address as string,
@@ -2699,9 +2975,11 @@ export class NewsDO extends DurableObject<Env> {
         sourcesJson,
         nowIso,
         nowIso,
+        stagedPending ? "pending_payment" : "submitted",
         disclosure,
         signalScore.total,
-        JSON.stringify(signalScore.breakdown)
+        JSON.stringify(signalScore.breakdown),
+        paymentTxid
       );
 
       for (const t of signalTags) {
@@ -2712,35 +2990,20 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
-      this.ctx.storage.sql.exec(
-        `INSERT OR REPLACE INTO streaks (btc_address, current_streak, longest_streak, last_signal_date, total_signals)
-           VALUES (?, ?, ?, ?, ?)`,
-        btc_address as string,
-        currentStreak,
-        longestStreak,
-        today,
-        totalSignals
-      );
-
-      // Credit referral on first signal — if a scout registered a referral
-      // for this agent and they haven't been credited yet, credit now.
-      // Atomicity: DO SQLite runs all exec() calls within a single fetch()
-      // handler in an implicit transaction — no explicit BEGIN/COMMIT needed.
-      if (totalSignals === 1) {
-        const pendingRef = this.ctx.storage.sql
-          .exec(
-            "SELECT id FROM referral_credits WHERE recruit_address = ? AND credited_at IS NULL",
-            btc_address as string
-          )
-          .toArray();
-        if (pendingRef.length > 0) {
-          this.ctx.storage.sql.exec(
-            "UPDATE referral_credits SET credited_at = ?, first_signal_id = ? WHERE recruit_address = ? AND credited_at IS NULL",
-            nowIso,
-            signalId,
-            btc_address as string
-          );
-        }
+      if (!stagedPending) {
+        applyCorrespondentStatsBump(this.ctx.storage.sql, btc_address as string, nowIso);
+        const { totalSignals } = applyStreakBumpForSignal(
+          this.ctx.storage.sql,
+          btc_address as string,
+          nowIso
+        );
+        applyReferralCreditOnFirstSignal(
+          this.ctx.storage.sql,
+          btc_address as string,
+          signalId,
+          nowIso,
+          totalSignals
+        );
       }
 
       // Fetch the created signal with tags
@@ -3457,23 +3720,79 @@ export class NewsDO extends DurableObject<Env> {
     // Correspondents — agents grouped from signals
     // -------------------------------------------------------------------------
 
-    // GET /correspondents — agents with signal counts, last active
+    // POST /recon-correspondents — publisher-gated drift check / repair for
+    // correspondent_stats. Compares the materialised aggregate to a fresh
+    // GROUP BY scan and returns per-address mismatches; with `{ repair: true }`
+    // the drifted rows are recomputed in place. Both paths run a full table
+    // scan, so use sparingly — they exist to backstop maintenance bugs.
+    this.router.post("/recon-correspondents", async (c) => {
+      const body = await parseRequiredJson(c);
+      if (!body) {
+        return c.json(
+          { ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const { btc_address, repair } = body as { btc_address?: unknown; repair?: unknown };
+      if (typeof btc_address !== "string" || !btc_address) {
+        return c.json(
+          { ok: false, error: "Missing or invalid field: btc_address" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      if (repair !== undefined && typeof repair !== "boolean") {
+        return c.json(
+          { ok: false, error: "Field 'repair' must be a boolean if provided" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const shouldRepair = repair === true;
+      const pub = verifyPublisher(this.ctx.storage.sql, btc_address);
+      if (!pub.ok) {
+        return c.json(
+          { ok: false, error: pub.error } satisfies DOResult<unknown>,
+          pub.status
+        );
+      }
+
+      const { expected_rows, actual_rows, drift, driftedAddresses } =
+        this.computeCorrespondentDrift();
+      let repaired = 0;
+      if (shouldRepair && driftedAddresses.size > 0) {
+        this.recomputeCorrespondentStatsFor([...driftedAddresses]);
+        repaired = driftedAddresses.size;
+      }
+
+      return c.json({
+        ok: true,
+        data: {
+          expected_rows,
+          actual_rows,
+          drift_count: drift.length, // field-level mismatches across all addresses
+          affected_addresses: driftedAddresses.size, // unique addresses with at least one mismatch
+          drift,
+          repaired,
+        },
+      });
+    });
+
+    // GET /correspondents — agents with signal counts, last active.
+    // Reads from materialised correspondent_stats (~430 rows) instead of
+    // grouping over the full signals table.
     this.router.get("/correspondents", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
-          `SELECT s.btc_address,
-                  COUNT(s.id) as signal_count,
-                  MAX(s.created_at) as last_signal,
-                  COUNT(DISTINCT date(s.created_at)) as days_active,
+          `SELECT cs.btc_address,
+                  cs.signal_count,
+                  cs.last_signal_at as last_signal,
+                  cs.days_active,
                   st.current_streak,
                   st.longest_streak,
                   st.total_signals,
                   st.last_signal_date
-           FROM signals s
-           LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE s.correction_of IS NULL
-           GROUP BY s.btc_address
-           ORDER BY signal_count DESC`
+           FROM correspondent_stats cs
+           LEFT JOIN streaks st ON cs.btc_address = st.btc_address
+           ORDER BY cs.signal_count DESC`
         )
         .toArray();
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
@@ -4911,19 +5230,17 @@ export class NewsDO extends DurableObject<Env> {
     this.router.get("/correspondents-bundle", (c) => {
       const correspondents = this.ctx.storage.sql
         .exec(
-          `SELECT s.btc_address,
-                  COUNT(s.id) as signal_count,
-                  MAX(s.created_at) as last_signal,
-                  COUNT(DISTINCT date(s.created_at)) as days_active,
+          `SELECT cs.btc_address,
+                  cs.signal_count,
+                  cs.last_signal_at as last_signal,
+                  cs.days_active,
                   st.current_streak,
                   st.longest_streak,
                   st.total_signals,
                   st.last_signal_date
-           FROM signals s
-           LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE s.correction_of IS NULL
-           GROUP BY s.btc_address
-           ORDER BY signal_count DESC`
+           FROM correspondent_stats cs
+           LEFT JOIN streaks st ON cs.btc_address = st.btc_address
+           ORDER BY cs.signal_count DESC`
         )
         .toArray();
 
@@ -5062,22 +5379,20 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray() as unknown as Classified[];
 
-      // Correspondents
+      // Correspondents — materialised aggregate (see /correspondents).
       const correspondentRows = this.ctx.storage.sql
         .exec(
-          `SELECT s.btc_address,
-                  COUNT(s.id) as signal_count,
-                  MAX(s.created_at) as last_signal,
-                  COUNT(DISTINCT date(s.created_at)) as days_active,
+          `SELECT cs.btc_address,
+                  cs.signal_count,
+                  cs.last_signal_at as last_signal,
+                  cs.days_active,
                   st.current_streak,
                   st.longest_streak,
                   st.total_signals,
                   st.last_signal_date
-           FROM signals s
-           LEFT JOIN streaks st ON s.btc_address = st.btc_address
-           WHERE s.correction_of IS NULL
-           GROUP BY s.btc_address
-           ORDER BY signal_count DESC`
+           FROM correspondent_stats cs
+           LEFT JOIN streaks st ON cs.btc_address = st.btc_address
+           ORDER BY cs.signal_count DESC`
         )
         .toArray();
 
@@ -5114,6 +5429,7 @@ export class NewsDO extends DurableObject<Env> {
         beat: null,
         agent: null,
         since: oneHourAgo,
+        includePending: false,
       }).reduce((total, row) => total + row.count, 0);
 
       return c.json({
@@ -5347,6 +5663,7 @@ export class NewsDO extends DurableObject<Env> {
       };
 
       // Seed signals
+      const seededSignalAddresses = new Set<string>();
       if (Array.isArray(body.signals)) {
         for (const row of body.signals as Array<Record<string, unknown>>) {
           try {
@@ -5371,10 +5688,19 @@ export class NewsDO extends DurableObject<Env> {
               (row.disclosure as string) ?? ""
             );
             inserted.signals++;
+            if (typeof row.btc_address === "string") {
+              seededSignalAddresses.add(row.btc_address);
+            }
           } catch {
             // Skip invalid rows silently
           }
         }
+      }
+      // Bulk-seed bypasses the live INSERT helper, so refresh
+      // correspondent_stats for every affected agent before tests assert
+      // the read endpoints.
+      if (seededSignalAddresses.size > 0) {
+        this.recomputeCorrespondentStatsFor([...seededSignalAddresses]);
       }
 
       // Seed signal_tags
@@ -5585,12 +5911,183 @@ export class NewsDO extends DurableObject<Env> {
         }
       }
 
-      return c.json({ ok: true, data: { inserted } });
+      // Seed correspondent_stats overrides (test-only — used to corrupt the
+      // materialised aggregate so the recon path can be exercised end-to-end).
+      if (Array.isArray(body.correspondent_stats)) {
+        for (const row of body.correspondent_stats as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT INTO correspondent_stats
+               (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+               VALUES (?, ?, ?, ?, ?, datetime('now'))
+               ON CONFLICT(btc_address) DO UPDATE SET
+                 signal_count = excluded.signal_count,
+                 last_signal_at = excluded.last_signal_at,
+                 first_signal_at = excluded.first_signal_at,
+                 days_active = excluded.days_active,
+                 updated_at = datetime('now')`,
+              row.btc_address as string,
+              (row.signal_count as number) ?? 0,
+              (row.last_signal_at as string | null) ?? null,
+              (row.first_signal_at as string | null) ?? null,
+              (row.days_active as number) ?? 0
+            );
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Optional: trigger the recon path inline so tests can assert the
+      // drift-detection / repair surface without needing BIP-322 auth.
+      // Mirrors the response shape of POST /recon-correspondents.
+      let recon: unknown = undefined;
+      if (body.recon && typeof body.recon === "object") {
+        const reconBody = body.recon as { repair?: boolean };
+        const { expected_rows, actual_rows, drift, driftedAddresses } =
+          this.computeCorrespondentDrift();
+        let repaired = 0;
+        if (reconBody.repair === true && driftedAddresses.size > 0) {
+          this.recomputeCorrespondentStatsFor([...driftedAddresses]);
+          repaired = driftedAddresses.size;
+        }
+        recon = {
+          expected_rows,
+          actual_rows,
+          drift_count: drift.length,
+          affected_addresses: driftedAddresses.size,
+          drift,
+          repaired,
+        };
+      }
+
+      return c.json({ ok: true, data: { inserted, ...(recon !== undefined ? { recon } : {}) } });
     });
 
     this.router.all("*", (c) => {
       return c.json({ ok: false, error: "Not found" }, 404);
     });
+  }
+
+  /**
+   * Compare the materialised `correspondent_stats` table to a fresh
+   * aggregate over `signals`, returning per-field mismatches plus the
+   * unique set of drifted addresses. Shared between the publisher-only
+   * recon endpoint and the test-seed `recon` hook so the two paths
+   * cannot diverge as the table evolves.
+   */
+  private computeCorrespondentDrift(): {
+    expected_rows: number;
+    actual_rows: number;
+    drift: Array<{ btc_address: string; field: string; expected: unknown; actual: unknown }>;
+    driftedAddresses: Set<string>;
+  } {
+    type Row = {
+      btc_address: string;
+      signal_count: number;
+      last_signal_at: string | null;
+      first_signal_at: string | null;
+      days_active: number;
+    };
+    const expected = this.ctx.storage.sql
+      .exec(
+        `SELECT btc_address,
+                COUNT(*) as signal_count,
+                MAX(created_at) as last_signal_at,
+                MIN(created_at) as first_signal_at,
+                COUNT(DISTINCT date(created_at)) as days_active
+           FROM signals
+          WHERE correction_of IS NULL
+            AND status != 'pending_payment'
+          GROUP BY btc_address`
+      )
+      .toArray() as Row[];
+    const actual = this.ctx.storage.sql
+      .exec(
+        "SELECT btc_address, signal_count, last_signal_at, first_signal_at, days_active FROM correspondent_stats"
+      )
+      .toArray() as Row[];
+
+    const actualByAddr = new Map(actual.map((r) => [r.btc_address, r]));
+    const expectedByAddr = new Map(expected.map((r) => [r.btc_address, r]));
+    const drift: Array<{ btc_address: string; field: string; expected: unknown; actual: unknown }> = [];
+
+    for (const exp of expected) {
+      const act = actualByAddr.get(exp.btc_address);
+      if (!act) {
+        drift.push({ btc_address: exp.btc_address, field: "row", expected: "present", actual: "missing" });
+        continue;
+      }
+      if (exp.signal_count !== act.signal_count)
+        drift.push({ btc_address: exp.btc_address, field: "signal_count", expected: exp.signal_count, actual: act.signal_count });
+      if (exp.last_signal_at !== act.last_signal_at)
+        drift.push({ btc_address: exp.btc_address, field: "last_signal_at", expected: exp.last_signal_at, actual: act.last_signal_at });
+      if (exp.first_signal_at !== act.first_signal_at)
+        drift.push({ btc_address: exp.btc_address, field: "first_signal_at", expected: exp.first_signal_at, actual: act.first_signal_at });
+      if (exp.days_active !== act.days_active)
+        drift.push({ btc_address: exp.btc_address, field: "days_active", expected: exp.days_active, actual: act.days_active });
+    }
+    for (const act of actual) {
+      if (!expectedByAddr.has(act.btc_address)) {
+        drift.push({ btc_address: act.btc_address, field: "row", expected: "missing", actual: "present" });
+      }
+    }
+
+    return {
+      expected_rows: expected.length,
+      actual_rows: actual.length,
+      drift,
+      driftedAddresses: new Set(drift.map((d) => d.btc_address)),
+    };
+  }
+
+  /**
+   * Recompute `correspondent_stats` rows for the given addresses. Used by
+   * code paths that bulk-mutate `signals` (currently only beat deletion);
+   * each affected agent's row is rebuilt from its own bounded signal
+   * history, and rows for agents who no longer have any non-correction
+   * signal are removed entirely.
+   */
+  private recomputeCorrespondentStatsFor(btcAddresses: string[]): void {
+    for (const btcAddress of btcAddresses) {
+      const rows = this.ctx.storage.sql
+        .exec(
+          `SELECT COUNT(*) as c,
+                  MAX(created_at) as last_at,
+                  MIN(created_at) as first_at,
+                  COUNT(DISTINCT date(created_at)) as days
+           FROM signals
+           WHERE btc_address = ?
+             AND correction_of IS NULL
+             AND status != 'pending_payment'`,
+          btcAddress
+        )
+        .toArray();
+      const row = rows[0] as Record<string, unknown> | undefined;
+      const count = Number(row?.c ?? 0);
+      if (count === 0) {
+        this.ctx.storage.sql.exec(
+          "DELETE FROM correspondent_stats WHERE btc_address = ?",
+          btcAddress
+        );
+        continue;
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+         VALUES (?, ?, ?, ?, ?, datetime('now'))
+         ON CONFLICT(btc_address) DO UPDATE SET
+           signal_count = excluded.signal_count,
+           last_signal_at = excluded.last_signal_at,
+           first_signal_at = excluded.first_signal_at,
+           days_active = excluded.days_active,
+           updated_at = excluded.updated_at`,
+        btcAddress,
+        count,
+        row?.last_at as string | null,
+        row?.first_at as string | null,
+        Number(row?.days ?? 0)
+      );
+    }
   }
 
   /**
@@ -5664,6 +6161,7 @@ export class NewsDO extends DurableObject<Env> {
          FROM (
            SELECT DISTINCT btc_address FROM signals
            WHERE correction_of IS NULL
+             AND status != 'pending_payment'
              AND created_at > (SELECT ts FROM epoch)
          ) a
          LEFT JOIN (
@@ -5679,6 +6177,7 @@ export class NewsDO extends DurableObject<Env> {
            SELECT btc_address, COUNT(*) as signal_count
            FROM signals
            WHERE correction_of IS NULL
+             AND status != 'pending_payment'
              AND created_at > datetime('now', '-30 days')
              AND created_at > (SELECT ts FROM epoch)
            GROUP BY btc_address
@@ -5688,6 +6187,7 @@ export class NewsDO extends DurableObject<Env> {
            SELECT btc_address, COUNT(DISTINCT date(created_at)) as days_active
            FROM signals
            WHERE correction_of IS NULL
+             AND status != 'pending_payment'
              AND created_at > datetime('now', '-30 days')
              AND created_at > (SELECT ts FROM epoch)
            GROUP BY btc_address
@@ -5715,13 +6215,11 @@ export class NewsDO extends DurableObject<Env> {
            FROM earnings WHERE amount_sats > 0 AND voided_at IS NULL AND payout_txid IS NULL
            GROUP BY btc_address
          ) ua ON a.btc_address = ua.btc_address
-         LEFT JOIN (
-           -- Earliest-ever non-correction signal per scout — used as tenure tie-breaker.
-           -- Not windowed: a scout who joined 2 years ago always beats a newcomer with the same score.
-           SELECT btc_address, MIN(created_at) AS first_signal_at
-           FROM signals WHERE correction_of IS NULL
-           GROUP BY btc_address
-         ) fs ON a.btc_address = fs.btc_address
+         -- Earliest-ever non-correction signal per scout — used as tenure tie-breaker.
+         -- Not windowed: a scout who joined 2 years ago always beats a newcomer with the same score.
+         -- Reads from materialised correspondent_stats (~430 rows) instead of
+         -- a full-table MIN/GROUP BY scan.
+         LEFT JOIN correspondent_stats fs ON a.btc_address = fs.btc_address
          -- 4-level deterministic tie-breaking for competition fairness:
          --   1. score DESC          — highest score wins
          --   2. current_streak DESC — longest active streak breaks score ties

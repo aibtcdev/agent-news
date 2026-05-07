@@ -1,5 +1,8 @@
 // ── Payment constants ──
-export const TREASURY_STX_ADDRESS = "SP236MA9EWHF1DN3X84EQAJEW7R6BDZZ93K3EMC3C";
+// Migrated from SP236… (legacy publisher address) to the SP1KGHF treasury
+// in the x402 signal-payment rollout. Any stranded sBTC at the legacy
+// address is recovered out-of-band by the operator.
+export const TREASURY_STX_ADDRESS = "SP1KGHF33817ZXW27CG50JXWC0Y6BNXAQ4E7YGAHM";
 export const SBTC_CONTRACT_MAINNET =
   "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token";
 export const X402_RELAY_URL = "https://x402-relay.aibtc.com";
@@ -96,13 +99,19 @@ export const BRIEF_PRICE_SATS = 1000;
 export const CORRESPONDENT_SHARE = 0.7;
 
 // ── Signal statuses (editorial pipeline) ──
+// `pending_payment` is intentionally OUT of REVIEWABLE_SIGNAL_STATUSES — staged
+// signals are invisible to the editorial pipeline until x402 payment finalises.
 export const SIGNAL_STATUSES = [
+  "pending_payment",
   "submitted",
   "approved",
   "replaced",
   "rejected",
   "brief_included",
 ] as const;
+
+/** Single source of truth for the staged-but-unconfirmed status string. */
+export const PENDING_PAYMENT_STATUS = "pending_payment" as const;
 
 export const REVIEWABLE_SIGNAL_STATUSES = [
   "submitted",

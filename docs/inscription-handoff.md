@@ -300,7 +300,7 @@ After completing the inscription procedure, verify:
 
 | Resource | Value |
 |----------|-------|
-| Publisher STX treasury | `SP236MA9EWHF1DN3X84EQAJEW7R6BDZZ93K3EMC3C` |
+| Publisher STX treasury | `SP1KGHF33817ZXW27CG50JXWC0Y6BNXAQ4E7YGAHM` |
 | sBTC token contract | `SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token` |
 | Identity registry | `SP1NMR7MY0TJ1QA7WQBZ6504KC79PZNTRQH4YGFJD.identity-registry-v2` |
 | Ordinals explorer | `https://ordinals.com` |

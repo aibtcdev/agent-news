@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS signals (
   reviewed_at       TEXT,
   disclosure        TEXT NOT NULL DEFAULT '',
   quality_score     INTEGER DEFAULT NULL,
-  score_breakdown   TEXT DEFAULT NULL
+  score_breakdown   TEXT DEFAULT NULL,
+  payment_txid      TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS signal_tags (
@@ -134,6 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_signals_btc_address      ON signals(btc_address);
 CREATE INDEX IF NOT EXISTS idx_signals_btc_created      ON signals(btc_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_created_at       ON signals(created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_status_created   ON signals(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_signals_status_btc_created ON signals(status, btc_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed_created ON signals(status, reviewed_at DESC, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_of    ON signals(correction_of);
 CREATE INDEX IF NOT EXISTS idx_earnings_btc_address     ON earnings(btc_address);
@@ -774,6 +776,63 @@ export const MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL = [
   "CREATE INDEX IF NOT EXISTS idx_signals_beat_btc_correction_created ON signals(beat_slug, btc_address, correction_of, created_at DESC)",
   "CREATE INDEX IF NOT EXISTS idx_beat_claims_status_beat_address ON beat_claims(status, beat_slug, btc_address)",
   "CREATE INDEX IF NOT EXISTS idx_earnings_unpaid_leaderboard ON earnings(voided_at, payout_txid, btc_address)",
+] as const;
+
+/**
+ * MIGRATION_CORRESPONDENT_STATS_SQL — materialised per-agent aggregates.
+ *
+ * Replaces the ~27.8K-row `GROUP BY btc_address` scans in /correspondents,
+ * /correspondents-bundle, /init's correspondents block, and the leaderboard's
+ * first-signal sub-select with bounded ~430-row reads (one row per agent).
+ *
+ * Maintained on every signal insert via bumpCorrespondentStatsForInsert; on
+ * beat deletion (which bulk-deletes signals) the affected agents are
+ * recomputed in place. Drift is reconciled by POST /api/config/recon-correspondents
+ * (Publisher-only; see scripts/recon-correspondent-stats.ts for the CLI).
+ */
+export const MIGRATION_CORRESPONDENT_STATS_SQL = [
+  `CREATE TABLE IF NOT EXISTS correspondent_stats (
+     btc_address TEXT PRIMARY KEY,
+     signal_count INTEGER NOT NULL DEFAULT 0,
+     last_signal_at TEXT,
+     first_signal_at TEXT,
+     days_active INTEGER NOT NULL DEFAULT 0,
+     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+   )`,
+  "CREATE INDEX IF NOT EXISTS idx_correspondent_stats_signal_count ON correspondent_stats(signal_count DESC)",
+  "CREATE INDEX IF NOT EXISTS idx_correspondent_stats_last_signal ON correspondent_stats(last_signal_at DESC)",
+  // Backfill from existing signals — idempotent via ON CONFLICT.
+  // Excludes pending_payment so x402-staged-but-unconfirmed signals do
+  // not inflate the materialised totals; they're added by the finalize
+  // path when payment confirms.
+  `INSERT INTO correspondent_stats (btc_address, signal_count, last_signal_at, first_signal_at, days_active, updated_at)
+     SELECT btc_address,
+            COUNT(*),
+            MAX(created_at),
+            MIN(created_at),
+            COUNT(DISTINCT date(created_at)),
+            datetime('now')
+       FROM signals
+      WHERE correction_of IS NULL
+        AND status != 'pending_payment'
+      GROUP BY btc_address
+   ON CONFLICT(btc_address) DO UPDATE SET
+     signal_count = excluded.signal_count,
+     last_signal_at = excluded.last_signal_at,
+     first_signal_at = excluded.first_signal_at,
+     days_active = excluded.days_active,
+     updated_at = excluded.updated_at`,
+] as const;
+
+/**
+ * x402 payment columns on signals. The signals.status column has no CHECK
+ * constraint, so the new `pending_payment` status needs only the TS-side
+ * SIGNAL_STATUSES update — no schema change. The composite index keeps
+ * cooldown / daily-cap queries fast as pending rows accumulate.
+ */
+export const MIGRATION_SIGNAL_PAYMENT_SQL = [
+  "ALTER TABLE signals ADD COLUMN payment_txid TEXT",
+  "CREATE INDEX IF NOT EXISTS idx_signals_status_btc_created ON signals(status, btc_address, created_at DESC)",
 ] as const;
 
 export const MIGRATION_APR7_EARNINGS_SQL = [

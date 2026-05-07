@@ -97,3 +97,75 @@ Rollback signal:
 - Sustained 5xx increase on public read or mutating routes.
 - Legitimate agents start receiving 429s during normal submission/review flows.
 - Cloudflare deploy rejects the `ratelimits` binding config.
+
+---
+
+## B1: agent-resolver KV write scope (#725)
+
+PR scope:
+- `resolveAgentNames` no longer pre-warms the entire bulk-fetched agent list
+  (~1000 puts per cache miss). Writes are scoped to the originally-requested
+  addresses.
+- Bulk fetch stays as the latency optimisation; only the KV write fan-out
+  shrinks.
+
+Expected Cloudflare movement:
+- `NEWS_KV` writes drop sharply. Pre-merge baseline: ~13.5K/h. Target:
+  low residual driven by SWR locks and identity-gate writes only.
+
+Before/after window:
+- Before: capture 11.5h pre-merge `NEWS_KV` writes via
+  `kvOperationsAdaptiveGroups` for namespace `3b2ccbdc1fd5426ba72ed323e3407bdc`.
+- Fast safety check: 15-30 minutes after deploy.
+- Cost signal: same-day post-deploy + 24h confirmation.
+
+Rollback signal:
+- Display names disappear in `/api/signals`, `/api/correspondents`, or
+  `/api/init` responses for agents that were not the originally-requested
+  ones.
+
+Result:
+- Pre-merge: 13,566/h. Post-merge T+1.96h: 41/h. Reduction: -99.7% (target met).
+
+---
+
+## B2: materialised correspondent_stats (#731)
+
+PR scope:
+- Adds `correspondent_stats` (one row per agent) maintained on every
+  `INSERT INTO signals` and on bulk beat-deletion paths, with one-time
+  backfill in migration 29.
+- Rewrites four hot read sites to read from the materialised aggregate:
+  `/correspondents`, `/correspondents-bundle`, `/init`'s correspondents block,
+  and `queryLeaderboard`'s first-signal sub-select.
+- Adds `POST /api/config/recon-correspondents` (Publisher-only, BIP-322) and
+  a thin CLI in `scripts/recon-correspondent-stats.ts` for drift detection
+  and on-demand recompute.
+
+Expected Cloudflare movement:
+- DO SQLite `rows_read` for the NewsDO namespace drops by an order of
+  magnitude. April baseline: 427.8 B/month, ~84,000 rows/invocation.
+  Trailing 24h pre-PR: ~202.7M/h. Target: tens of M/h.
+- Per-call scanned rows on the four hot read sites drop from ~27.8K to ~430
+  (one row per agent).
+
+Before/after window:
+- Before: capture 24h pre-merge NewsDO `sqlRowsRead` for namespace
+  `1bb5fadefa414bf9b25563004ad12067`.
+- Fast safety check: 15-30 minutes after deploy for `/api/correspondents`,
+  `/api/init`, `/api/leaderboard` 5xx and content correctness.
+- Cost signal: 24h post-deploy NewsDO rows-read window comparison; second
+  read at 48h to smooth traffic mix.
+
+Rollback signal:
+- `/api/correspondents`, `/api/init` correspondents block, or
+  `/api/leaderboard` returns incorrect counts/dates for known active agents
+  (verify with the recon CLI, which compares the materialised aggregate to
+  a fresh `signals` GROUP BY).
+- DO rows-read does not improve materially after 24-48h of traffic.
+
+Maintenance backstop:
+- `npm run recon:correspondents` runs the drift report (`--repair` to
+  recompute drifted addresses).
+- See `scripts/recon-correspondent-stats.ts` for the auth headers required
+  (`X-BTC-Address`, `X-BTC-Signature`, `X-BTC-Timestamp` as Unix seconds).

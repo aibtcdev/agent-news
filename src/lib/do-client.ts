@@ -165,6 +165,13 @@ export interface SignalFilters {
   limit?: number;
   /** Offset for pagination (skip first N results). */
   offset?: number;
+  /**
+   * When true, x402-staged-but-unconfirmed signals (status='pending_payment')
+   * are included alongside the default editorial set. Authors set this to see
+   * their own staged rows; passing status='pending_payment' explicitly has
+   * the same effect.
+   */
+  include_pending?: boolean;
 }
 
 export interface FrontPagePageResult {
@@ -199,6 +206,7 @@ export async function listSignalsPage(
   if (filters.since) params.set("since", filters.since);
   if (filters.date) params.set("date", filters.date);
   if (filters.status) params.set("status", filters.status);
+  if (filters.include_pending) params.set("include_pending", "true");
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined) params.set("offset", String(filters.offset));
   const qs = params.toString();
@@ -293,6 +301,25 @@ export interface CreateSignalInput {
   tags: string[];
   signature?: string;
   disclosure?: string;
+  /**
+   * Caller-provided id when the route is staging a pending_payment row.
+   * The route allocates this id pre-stage so it can return it in the
+   * 202 body alongside paymentId. Omit (or empty) to have the DO mint one.
+   */
+  signal_id?: string;
+  /**
+   * When true, the row lands at status='pending_payment' and the DO defers
+   * streak / correspondent_stats / referral commit effects until the
+   * x402 finalize hook fires (or deletes the row on discard).
+   */
+  pending_payment?: boolean;
+  /**
+   * On-chain sBTC settlement txid. Used by the x402 HTTP-fallback path that
+   * confirms synchronously without a paymentId — the row is written directly
+   * with status='submitted' so we attach the txid here. Omitted for the
+   * staged path (finalize stamps it from the staging payload).
+   */
+  payment_txid?: string | null;
 }
 
 export interface CooldownInfo {
@@ -338,6 +365,7 @@ export interface SignalCountsFilters {
   beat?: string;
   agent?: string;
   since?: string;
+  include_pending?: boolean;
 }
 
 export interface SignalCounts {
@@ -346,6 +374,8 @@ export interface SignalCounts {
   replaced: number;
   rejected: number;
   brief_included: number;
+  /** Present only when include_pending=true (or agent is scoped on the request). */
+  pending_payment?: number;
   total: number;
 }
 
@@ -358,6 +388,7 @@ export async function getSignalCounts(
   if (filters.beat) params.set("beat", filters.beat);
   if (filters.agent) params.set("agent", filters.agent);
   if (filters.since) params.set("since", filters.since);
+  if (filters.include_pending) params.set("include_pending", "true");
   const qs = params.toString();
   const result = await doFetch<SignalCounts>(stub, `/signals/counts${qs ? `?${qs}` : ""}`);
   if (!result.ok) throw new Error(result.error ?? "Failed to get signal counts");
@@ -546,6 +577,39 @@ export async function reconcilePaymentStage(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
+}
+
+/** Fetch a payment stage by id; null if missing. Used by the signals route to
+ *  detect idempotent retries — same paymentId resubmitted should return the
+ *  original 202 response instead of running cooldown again. */
+export async function getPaymentStage(
+  env: Env,
+  paymentId: string
+): Promise<PaymentStageMaterialized | null> {
+  const stub = getStub(env);
+  const result = await doFetch<PaymentStageMaterialized>(
+    stub,
+    `/payment-staging/${encodeURIComponent(paymentId)}`
+  );
+  return result.ok ? (result.data ?? null) : null;
+}
+
+/** Delete a `pending_payment` signal row (and its tags). Safe-by-construction:
+ *  the DO-side route is scoped to status='pending_payment' so it cannot delete
+ *  a finalised signal. Used to roll back stage-payment failure leaks. Returns
+ *  `{ok}` so callers can surface a rollback failure (which would strand the
+ *  agent's cooldown slot — the alarm sweep can't reach an orphan with no
+ *  payment_staging row). */
+export async function deletePendingSignal(
+  env: Env,
+  signalId: string
+): Promise<{ ok: boolean }> {
+  const stub = getStub(env);
+  const res = await stub.fetch(
+    `https://do/signals/${encodeURIComponent(signalId)}/pending`,
+    { method: "DELETE" }
+  );
+  return { ok: res.ok };
 }
 
 export interface ReviewClassifiedInput {

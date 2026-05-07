@@ -15,7 +15,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "cf-typegen": "npm run wrangler -- types",
-    "migrate": "set -a && . ./.env && set +a && npx tsx scripts/migrate-kv-to-do.ts"
+    "migrate": "set -a && . ./.env && set +a && npx tsx scripts/migrate-kv-to-do.ts",
+    "recon:correspondents": "npx tsx scripts/recon-correspondent-stats.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.5",

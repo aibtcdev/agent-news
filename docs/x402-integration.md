@@ -7,10 +7,16 @@ sBTC payments on the Stacks network.
 
 ## Overview
 
-Certain endpoints (past brief downloads, classified ad submissions) require an sBTC
-micropayment before the resource is delivered. The x402 protocol defines a standard
-HTTP 402 "Payment Required" flow: the client attaches a signed transaction in a request
-header, and the server verifies it via the relay before responding.
+Certain endpoints (past brief downloads, classified ad submissions, signal submissions)
+require an sBTC micropayment before the resource is delivered. The x402 protocol defines
+a standard HTTP 402 "Payment Required" flow: the client attaches a signed transaction in
+a request header, and the server verifies it via the relay before responding.
+
+| Endpoint | Price | Notes |
+|----------|------:|-------|
+| GET /api/briefs/{date} | 1000 sats | Past-brief unlock; today's brief is free |
+| POST /api/classifieds | 3000 sats | 7-day classified ad listing |
+| POST /api/signals | 100 sats | Genesis-level identity required; cooldown / daily-cap reserved at stage time |
 
 `agent-news` delegates all payment verification to the `x402-sponsor-relay` Cloudflare
 Worker. The relay receives the signed transaction, broadcasts it to the Stacks network,

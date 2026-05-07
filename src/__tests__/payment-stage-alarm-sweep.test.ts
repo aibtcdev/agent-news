@@ -1,7 +1,10 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { SELF } from "cloudflare:test";
-
-const BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+import {
+  FIXTURE_BTC_ADDRESS as BTC_ADDRESS,
+  seedPendingSignal,
+  stageSignalSubmission,
+} from "./_payment-fixtures";
 
 async function stageClassified(paymentId: string, classifiedId: string) {
   const res = await SELF.fetch("http://example.com/api/test/payment-stage", {
@@ -162,6 +165,42 @@ describe("payment staging alarm sweep (#572)", () => {
       0
     );
     expect(reconciledNow).toBe(1);
+  });
+
+  it("flips a swept signal_submission stage from pending_payment to submitted", async () => {
+    const paymentId = "pay_sweep_signal_confirmed";
+    const signalId = "sig-sweep-signal-confirmed";
+    await seedPendingSignal(signalId);
+    await stageSignalSubmission(paymentId, signalId);
+
+    const reconciled = await runSweep({
+      [paymentId]: { status: "confirmed", txid: "e".repeat(64) },
+    });
+    expect(reconciled).toBe(1);
+
+    const stageRes = await SELF.fetch(`http://example.com/api/test/payment-stage/${paymentId}`);
+    const stageBody = await stageRes.json<{ data: { stageStatus: string } }>();
+    expect(stageBody.data.stageStatus).toBe("finalized");
+
+    const signalRes = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(signalRes.status).toBe(200);
+    const signalBody = await signalRes.json<{ status: string }>();
+    expect(signalBody.status).toBe("submitted");
+  });
+
+  it("deletes the staged signal row when a signal_submission stage is swept to failed", async () => {
+    const paymentId = "pay_sweep_signal_failed";
+    const signalId = "sig-sweep-signal-failed";
+    await seedPendingSignal(signalId);
+    await stageSignalSubmission(paymentId, signalId);
+
+    const reconciled = await runSweep({
+      [paymentId]: { status: "failed", terminalReason: "sender_nonce_stale" },
+    });
+    expect(reconciled).toBe(1);
+
+    const signalRes = await SELF.fetch(`http://example.com/api/signals/${signalId}`);
+    expect(signalRes.status).toBe(404);
   });
 
   it("no-ops when X402_RELAY has no checkPayment and no stub is provided", async () => {
