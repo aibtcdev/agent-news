@@ -120,6 +120,14 @@ async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
 
 // GET /api/correspondents — ranked correspondents with signal counts, streaks, and names.
 correspondentsRouter.get("/api/correspondents", async (c) => {
+  // Operational escape hatch: `?bust=...` bypasses the existing SWR entry and
+  // rebuilds the canonical cache key below. This lets maintainers evict a
+  // structurally valid but now-incorrect 7200s-pinned payload without adding
+  // hot-path purge plumbing or changing normal cache keys.
+  if (c.req.query("bust")) {
+    return buildCorrespondentsResponse(c);
+  }
+
   const hit = await edgeCacheMatchSWR(c, {
     cacheKeyPath: CACHE_KEY_PATH,
     freshSeconds: FRESH_SECONDS,
