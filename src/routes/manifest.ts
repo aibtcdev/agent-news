@@ -252,6 +252,22 @@ manifestRouter.get("/api", (c) => {
           409: "Per-beat daily cap reached — provide displace_signal_id to swap",
         },
       },
+      "POST /api/editor/bulk-review": {
+        description:
+          "Bulk editorial review v1 for close-out sweeps. Supports reject-only batches so editors can clear cap-displaced signals without many parallel single-review calls.",
+        body: {
+          btc_address: "Reviewer BTC address — editor or publisher (required)",
+          actions:
+            "Array of up to 50 { signal_id, status: 'rejected', feedback } actions. feedback is required for every rejection.",
+        },
+        returns:
+          "{ results: [{ signal_id, success, status?, error?, noop? }], summary: { total, succeeded, noop, failed } }",
+        errors: {
+          400: "Invalid batch shape, unsupported status, or missing rejection feedback",
+          401: "Invalid BIP-322 authentication",
+          413: "More than 50 actions in one batch",
+        },
+      },
       "POST /api/beats/:slug/editors": {
         description:
           "Register an editor for a beat (Publisher-only, BIP-322 auth). One active editor per beat — registering a new editor deactivates any existing one.",

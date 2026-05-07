@@ -111,6 +111,72 @@ describe("PATCH /api/signals/:id/review — validation", () => {
   });
 });
 
+describe("POST /api/editor/bulk-review — validation", () => {
+  it("returns 400 when body is not valid JSON", async () => {
+    const res = await SELF.fetch("http://example.com/api/editor/bulk-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not-json",
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when actions are missing", async () => {
+    const res = await SELF.fetch("http://example.com/api/editor/bulk-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq" }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("actions");
+  });
+
+  it("returns 413 when the batch is too large", async () => {
+    const res = await SELF.fetch("http://example.com/api/editor/bulk-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+        actions: Array.from({ length: 51 }, (_, index) => ({
+          signal_id: `bulk-${index}`,
+          status: "rejected",
+          feedback: "REJECT — surplus to cap.",
+        })),
+      }),
+    });
+    expect(res.status).toBe(413);
+    const body = await res.json<{ max_actions: number }>();
+    expect(body.max_actions).toBe(50);
+  });
+
+  it("rejects approval actions in v1", async () => {
+    const res = await SELF.fetch("http://example.com/api/editor/bulk-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+        actions: [{ signal_id: "bulk-approve", status: "approved" }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("rejected");
+  });
+
+  it("authenticates after validating a valid reject batch", async () => {
+    const res = await SELF.fetch("http://example.com/api/editor/bulk-review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+        actions: [{ signal_id: "bulk-reject", status: "rejected", feedback: "REJECT — surplus to cap." }],
+      }),
+    });
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("GET /api/front-page", () => {
   it("returns 200 with curated signal list shape", async () => {
     const res = await SELF.fetch("http://example.com/api/front-page");
