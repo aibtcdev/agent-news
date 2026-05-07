@@ -1805,9 +1805,6 @@ export class NewsDO extends DurableObject<Env> {
 
       for (const action of validActions) {
         try {
-          if (action.currentStatus === "brief_included") {
-            this.ctx.storage.sql.exec("BEGIN");
-          }
           this.ctx.storage.sql.exec(
             `UPDATE signals SET status = 'rejected', publisher_feedback = ?, reviewed_at = ?, updated_at = ?
              WHERE id = ?`,
@@ -1822,17 +1819,9 @@ export class NewsDO extends DurableObject<Env> {
               "UPDATE earnings SET voided_at = ? WHERE reason = 'brief_inclusion' AND reference_id = ? AND payout_txid IS NULL AND voided_at IS NULL",
               now, action.id
             );
-            this.ctx.storage.sql.exec("COMMIT");
           }
           results.push({ signal_id: action.id, success: true, status: "rejected" });
         } catch {
-          if (action.currentStatus === "brief_included") {
-            try {
-              this.ctx.storage.sql.exec("ROLLBACK");
-            } catch {
-              // Ignore rollback failures; the per-action result below remains failed.
-            }
-          }
           results.push({ signal_id: action.id, success: false, error: "storage_error" });
         }
       }
