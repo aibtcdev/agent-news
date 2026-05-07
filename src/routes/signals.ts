@@ -77,6 +77,7 @@ signalsRouter.get("/api/signals", async (c) => {
   const agent = c.req.query("agent");
   const tag = c.req.query("tag");
   const since = c.req.query("since");
+  const reviewedSince = c.req.query("reviewed_since");
   const date = c.req.query("date");
   const status = c.req.query("status");
   const includePending = c.req.query("include_pending") === "true";
@@ -132,6 +133,10 @@ signalsRouter.get("/api/signals", async (c) => {
     return c.json({ error: "Invalid 'since' parameter. Use ISO 8601 format (e.g., 2026-03-25T00:00:00Z)" }, 400);
   }
 
+  if (reviewedSince && Number.isNaN(new Date(reviewedSince).getTime())) {
+    return c.json({ error: "Invalid 'reviewed_since' parameter. Use ISO 8601 format (e.g., 2026-03-25T00:00:00Z)" }, 400);
+  }
+
   if (date) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(new Date(`${date}T12:00:00Z`).getTime())) {
       return c.json({ error: "Invalid 'date' parameter. Use YYYY-MM-DD format (UTC calendar day)" }, 400);
@@ -159,8 +164,8 @@ signalsRouter.get("/api/signals", async (c) => {
     return c.json({ error: `Invalid 'offset' parameter. Maximum allowed is ${MAX_OFFSET}.` }, 400);
   }
 
-  // date takes precedence over since — pass since only when date is absent
-  const { signals, total, hasMore } = await listSignalsPage(c.env, { beat, agent, tag, since: date ? undefined : since, date, status, limit: resolvedLimit, offset: resolvedOffset, include_pending: includePending });
+  // date takes precedence over timestamp filters — pass them only when date is absent
+  const { signals, total, hasMore } = await listSignalsPage(c.env, { beat, agent, tag, since: date ? undefined : since, reviewed_since: date ? undefined : reviewedSince, date, status, limit: resolvedLimit, offset: resolvedOffset, include_pending: includePending });
 
   // Resolve agent display names for all signals in this response
   const signalAddresses = [...new Set(signals.map((s) => s.btc_address).filter(Boolean))];

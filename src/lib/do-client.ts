@@ -159,6 +159,8 @@ export interface SignalFilters {
   agent?: string;
   tag?: string;
   since?: string;
+  /** Filters to signals reviewed after this ISO timestamp. Distinct from `since`, which filters by created_at. */
+  reviewed_since?: string;
   /** UTC calendar day (YYYY-MM-DD) — filters to signals within that day's UTC boundaries. */
   date?: string;
   status?: string;
@@ -204,6 +206,7 @@ export async function listSignalsPage(
   if (filters.agent) params.set("agent", filters.agent);
   if (filters.tag) params.set("tag", filters.tag);
   if (filters.since) params.set("since", filters.since);
+  if (filters.reviewed_since) params.set("reviewed_since", filters.reviewed_since);
   if (filters.date) params.set("date", filters.date);
   if (filters.status) params.set("status", filters.status);
   if (filters.include_pending) params.set("include_pending", "true");

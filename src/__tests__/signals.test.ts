@@ -161,6 +161,49 @@ describe("GET /api/signals — bounded pagination metadata", () => {
   }, 30_000);
 });
 
+describe("GET /api/signals — reviewed_since filter", () => {
+  it("filters reviewed signals by reviewed_at without excluding older created_at rows", async () => {
+    await seed({
+      signals: [
+        {
+          id: "reviewed-since-old-created-new-review",
+          beat_slug: "agent-social",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Older signal reviewed inside the window",
+          sources: "[]",
+          created_at: "2026-04-01T12:00:00.000Z",
+          status: "approved",
+          reviewed_at: "2026-04-30T12:04:00.000Z",
+        },
+        {
+          id: "reviewed-since-old-review",
+          beat_slug: "agent-social",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Older review outside the window",
+          sources: "[]",
+          created_at: "2026-04-30T12:10:00.000Z",
+          status: "approved",
+          reviewed_at: "2026-04-29T12:00:00.000Z",
+        },
+      ],
+    });
+
+    const res = await SELF.fetch(
+      "http://example.com/api/signals?beat=agent-social&status=approved&reviewed_since=2026-04-30T00:00:00.000Z&limit=10"
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json<{ signals: Array<{ id: string }> }>();
+    const ids = body.signals.map((signal) => signal.id);
+    expect(ids).toContain("reviewed-since-old-created-new-review");
+    expect(ids).not.toContain("reviewed-since-old-review");
+  }, 30_000);
+
+  it("rejects invalid reviewed_since timestamps", async () => {
+    const res = await SELF.fetch("http://example.com/api/signals?reviewed_since=not-a-date");
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("GET /api/signals/:id — not found", () => {
   it("returns 404 for a nonexistent signal ID", async () => {
     const res = await SELF.fetch(
