@@ -165,6 +165,14 @@ export const MIGRATION_PHASE0_SQL = [
 ] as const;
 
 /**
+ * Signal review attribution migration.
+ * Adds reviewed_by to existing production Durable Objects that already passed Phase 0.
+ */
+export const MIGRATION_SIGNAL_REVIEWED_BY_SQL = [
+  "ALTER TABLE signals ADD COLUMN reviewed_by TEXT",
+] as const;
+
+/**
  * sBTC transfer tracking migration.
  * Adds payout_txid to earnings so the Publisher can record an sBTC txid
  * after sending, enabling audit trails for correspondent payouts.
