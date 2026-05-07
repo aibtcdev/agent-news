@@ -109,6 +109,17 @@ describe("GET /api/leaderboard", () => {
           editor_covered_at: "2026-04-09T23:59:59.000Z",
           editor_payout_txid: "editor-flat-fee-txid",
         },
+        {
+          id: "uncovered-unpaid-earning-1",
+          btc_address: address,
+          amount_sats: 12_500,
+          reason: "brief_inclusion",
+          reference_id: "uncovered-brief-inclusion",
+          created_at: "2026-04-09T13:00:00.000Z",
+          payout_txid: null,
+          editor_covered_at: null,
+          editor_payout_txid: null,
+        },
       ],
     });
 
@@ -119,7 +130,7 @@ describe("GET /api/leaderboard", () => {
 
     expect(entry).toBeDefined();
     expect(entry?.breakdown.briefInclusions).toBe(1);
-    expect(entry?.breakdown.unpaidSats).toBe(0);
+    expect(entry?.breakdown.unpaidSats).toBe(12_500);
     expect(entry?.breakdown.totalEarnedSats).toBe(0);
   });
 });
