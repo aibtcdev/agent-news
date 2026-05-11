@@ -150,6 +150,34 @@ export async function deleteBeat(
   );
 }
 
+export interface BeatHealth {
+  beat: string;
+  submitted: number;
+  in_review: number;
+  queue_depth: number;
+  approved_24h: number;
+  rejected_24h: number;
+  replaced_24h: number;
+  avg_turnaround_hours: number | null;
+  editor: {
+    btc_address: string;
+    status: "active" | "system" | "stale";
+    last_review: string | null;
+  };
+  spot_check_pass_rate_30d: number | null;
+  health_score: number;
+}
+
+export async function listBeatHealth(env: Env): Promise<DOResult<BeatHealth[]>> {
+  const stub = getStub(env);
+  return doFetch<BeatHealth[]>(stub, "/beats/health");
+}
+
+export async function getBeatHealth(env: Env, slug: string): Promise<DOResult<BeatHealth>> {
+  const stub = getStub(env);
+  return doFetch<BeatHealth>(stub, `/beats/${encodeURIComponent(slug)}/health`);
+}
+
 // ---------------------------------------------------------------------------
 // Signals
 // ---------------------------------------------------------------------------
@@ -717,6 +745,46 @@ export async function getCorrespondentsBundle(env: Env): Promise<CorrespondentsB
   if (!result.ok) throw new Error(result.error ?? "Failed to get correspondents bundle");
   if (result.data === undefined) throw new Error("Missing data in response");
   return result.data;
+}
+
+export interface CorrespondentStats {
+  btc_address: string;
+  display_name: string | null;
+  signals_total: number;
+  by_status: Record<SignalStatus, number>;
+  approval_rate: number | null;
+  avg_score: number | null;
+  factual_errors_caught: number;
+  beats_active: string[];
+  last_submission: string | null;
+  trend: "improving" | "declining" | "stable" | "insufficient_data";
+  streaks: {
+    current: number;
+    longest: number;
+    days_active: number;
+  };
+  earnings: {
+    total_earned_sats: number;
+    unpaid_sats: number;
+    last_payout_at: string | null;
+  };
+  recent_activity: {
+    signals_7d: number;
+    signals_30d: number;
+  };
+}
+
+export async function listCorrespondentStats(env: Env): Promise<DOResult<CorrespondentStats[]>> {
+  const stub = getStub(env);
+  return doFetch<CorrespondentStats[]>(stub, "/correspondents/stats");
+}
+
+export async function getCorrespondentStats(
+  env: Env,
+  address: string
+): Promise<DOResult<CorrespondentStats>> {
+  const stub = getStub(env);
+  return doFetch<CorrespondentStats>(stub, `/correspondents/${encodeURIComponent(address)}/stats`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1366,4 +1434,37 @@ export async function updateEditorEarning(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ btc_address: publisherAddress, editor_address: editorAddress, payout_txid }),
   });
+}
+
+export interface EditorPerformance {
+  btc_address: string;
+  beat: string | null;
+  beats: string[];
+  signals_reviewed: number;
+  signals_reviewed_7d: number;
+  avg_review_turnaround_hours: number | null;
+  spot_checks_received: number;
+  spot_check_failures: number;
+  spot_check_pass_rate: number | null;
+  correspondents_reviewed: number;
+  status: "active" | "inactive" | "stale";
+  role_health: "good" | "watch" | "needs_coaching" | "stale" | "inactive";
+  earnings: {
+    total_earned_sats: number;
+    unpaid_sats: number;
+  };
+  last_review: string | null;
+}
+
+export async function listEditorLeaderboard(env: Env): Promise<DOResult<EditorPerformance[]>> {
+  const stub = getStub(env);
+  return doFetch<EditorPerformance[]>(stub, "/editors/leaderboard");
+}
+
+export async function getEditorPerformance(
+  env: Env,
+  address: string
+): Promise<DOResult<EditorPerformance>> {
+  const stub = getStub(env);
+  return doFetch<EditorPerformance>(stub, `/editors/${encodeURIComponent(address)}/performance`);
 }

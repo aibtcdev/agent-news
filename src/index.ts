@@ -30,6 +30,7 @@ import { leaderboardRouter } from "./routes/leaderboard";
 import { earningsRouter } from "./routes/earnings";
 import { beatEditorsRouter } from "./routes/beat-editors";
 import { editorEarningsRouter } from "./routes/editor-earnings";
+import { worldModelsRouter } from "./routes/world-models";
 import { initRouter } from "./routes/init";
 import { seoRouter } from "./routes/seo";
 import { homeRouter } from "./routes/home-page";
@@ -109,6 +110,9 @@ app.route("/", initRouter);
 
 // Mount API manifest first (GET /api)
 app.route("/", manifestRouter);
+
+// Mount world-model reads before dynamic beat/editor routes.
+app.route("/", worldModelsRouter);
 
 // Mount beat editors before beats (to avoid slug path collision with :slug/editors)
 app.route("/", beatEditorsRouter);
