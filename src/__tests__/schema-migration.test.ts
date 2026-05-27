@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { SELF } from "cloudflare:test";
+import { EXPECTED_SIGNALS_INDEXES } from "../objects/schema";
+
+interface SchemaHealthBody {
+  healthy: boolean;
+  missing_signals_indexes: string[];
+  signals_row_count: number | null;
+  live_index_count: number;
+  live_indexes: string[];
+}
 
 /**
  * Migration-path tests that verify the DO constructor correctly runs
@@ -79,5 +88,35 @@ describe("DO constructor: schema initialization", () => {
     expect(slugs).not.toContain("comics");
     expect(slugs).not.toContain("dao-watch");
     expect(slugs).not.toContain("dev-tools");
+  });
+});
+
+describe("GET /api/config/schema-health", () => {
+  it("reports healthy with every expected signals index present on a fresh DB", async () => {
+    const res = await SELF.fetch("http://example.com/api/config/schema-health");
+    expect(res.status).toBe(200);
+    const body = await res.json<SchemaHealthBody>();
+    expect(body.healthy).toBe(true);
+    expect(body.missing_signals_indexes).toEqual([]);
+    // Guards against the EXPECTED set drifting from what SCHEMA_SQL creates:
+    // every expected index must actually exist in the live DB.
+    for (const idx of EXPECTED_SIGNALS_INDEXES) {
+      expect(body.live_indexes).toContain(idx);
+    }
+    expect(body.live_index_count).toBe(body.live_indexes.length);
+  });
+
+  it("omits the COUNT(*) scan by default, includes it on ?include_count=true", async () => {
+    const noCount = await (
+      await SELF.fetch("http://example.com/api/config/schema-health")
+    ).json<SchemaHealthBody>();
+    expect(noCount.signals_row_count).toBeNull();
+
+    const withCount = await (
+      await SELF.fetch(
+        "http://example.com/api/config/schema-health?include_count=true"
+      )
+    ).json<SchemaHealthBody>();
+    expect(typeof withCount.signals_row_count).toBe("number");
   });
 });

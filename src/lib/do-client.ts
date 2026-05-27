@@ -911,6 +911,29 @@ export async function setConfig(env: Env, key: string, value: string): Promise<D
   });
 }
 
+export interface SchemaHealth {
+  healthy: boolean;
+  missing_signals_indexes: string[];
+  /** null unless the caller requested includeCount (COUNT(*) full-scans signals). */
+  signals_row_count: number | null;
+  live_index_count: number;
+  live_indexes: string[];
+}
+
+export async function getSchemaHealth(
+  env: Env,
+  includeCount = false
+): Promise<SchemaHealth> {
+  const stub = getStub(env);
+  const result = await doFetch<SchemaHealth>(
+    stub,
+    `/schema-health${includeCount ? "?include_count=true" : ""}`
+  );
+  if (!result.ok) throw new Error(result.error ?? "Failed to read schema health");
+  if (result.data === undefined) throw new Error("Missing data in response");
+  return result.data;
+}
+
 // ---------------------------------------------------------------------------
 // Signal Review (Publisher editorial actions)
 // ---------------------------------------------------------------------------
