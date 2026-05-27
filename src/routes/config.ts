@@ -31,7 +31,9 @@ configRouter.get("/api/config/publisher", async (c) => {
 // set so a silently-dropped index surfaces on demand. Returns healthy:false +
 // the missing index names if any are absent.
 configRouter.get("/api/config/schema-health", async (c) => {
-  const health = await getSchemaHealth(c.env);
+  // include_count is opt-in: COUNT(*) full-scans signals, and this route is public.
+  const includeCount = c.req.query("include_count") === "true";
+  const health = await getSchemaHealth(c.env, includeCount);
   return c.json(health, health.healthy ? 200 : 503);
 });
 

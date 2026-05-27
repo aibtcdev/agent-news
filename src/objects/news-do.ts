@@ -3772,10 +3772,17 @@ export class NewsDO extends DurableObject<Env> {
         (name) => !liveSet.has(name)
       );
 
-      const countRows = this.ctx.storage.sql
-        .exec("SELECT COUNT(*) as count FROM signals")
-        .toArray();
-      const signalsRowCount = (countRows[0] as { count: number }).count;
+      // `signals_row_count` is opt-in: COUNT(*) full-scans the signals table,
+      // and this endpoint is public + unthrottled. Default off so routine /
+      // probing health checks add no rows-read; callers that want the count
+      // pass ?include_count=true.
+      let signalsRowCount: number | null = null;
+      if (c.req.query("include_count") === "true") {
+        const countRow = this.ctx.storage.sql
+          .exec("SELECT COUNT(*) as count FROM signals")
+          .toArray()[0] as { count: number };
+        signalsRowCount = countRow.count;
+      }
 
       return c.json({
         ok: true,

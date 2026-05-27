@@ -139,16 +139,27 @@ CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed_created ON signals(status
 CREATE INDEX IF NOT EXISTS idx_signals_correction_of    ON signals(correction_of);
 -- Hot-path composite indexes for the leaderboard / correspondents-bundle / report
 -- queries. These previously lived ONLY in version-gated cold-start migrations
--- (#16, #21, #27, #28). A migration that fails silently is never retried (the
+-- (#16, #21, #28). A migration that fails silently is never retried (the
 -- version counter advances regardless), so the index can go permanently missing
 -- in production while the code believes the schema is complete — the same class
 -- of bug that dropped landing-page's inbox indexes. Keeping them here in the
 -- always-re-applied base schema makes them self-heal on every cold start.
+--
+-- IMPORTANT: SCHEMA_SQL runs BEFORE the versioned migrations, so only columns
+-- present in the base signals CREATE TABLE above may be indexed here. Every
+-- column below (status, reviewed_at, correction_of, beat_slug, btc_address,
+-- created_at) is already referenced by a base-schema index, so it provably
+-- exists on the live DB. quality_score is deliberately NOT indexed here: it is
+-- added by versioned migration #24, and if that ALTER had silently failed, a
+-- base-schema index on it would throw a no-such-column error and brick DO
+-- construction before any migration could repair it. Its index stays in
+-- migration #24, where the column is guaranteed to exist.
+-- TODO: extend this self-heal + EXPECTED set to claims/earnings indexes once
+-- /schema-health confirms their version-gated indexes are also at risk.
 CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed          ON signals(status, reviewed_at);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_created       ON signals(correction_of, created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_btc_created   ON signals(correction_of, btc_address, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_signals_beat_btc_correction_created ON signals(beat_slug, btc_address, correction_of, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_signals_quality_score            ON signals(quality_score);
 CREATE INDEX IF NOT EXISTS idx_earnings_btc_address     ON earnings(btc_address);
 CREATE INDEX IF NOT EXISTS idx_classifieds_btc_address  ON classifieds(btc_address);
 CREATE INDEX IF NOT EXISTS idx_classifieds_expires_at   ON classifieds(expires_at);
@@ -183,7 +194,9 @@ export const EXPECTED_SIGNALS_INDEXES: readonly string[] = [
   "idx_signals_correction_created",
   "idx_signals_correction_btc_created",
   "idx_signals_beat_btc_correction_created",
-  "idx_signals_quality_score",
+  // NB: idx_signals_quality_score is intentionally excluded — it stays in
+  // versioned migration #24 because base SCHEMA_SQL runs before that column's
+  // ALTER (see the SCHEMA_SQL comment above).
 ];
 
 /**
