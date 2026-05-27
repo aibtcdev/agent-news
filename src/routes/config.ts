@@ -7,7 +7,7 @@
 
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getConfig, setConfig } from "../lib/do-client";
+import { getConfig, setConfig, getSchemaHealth } from "../lib/do-client";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 import { CONFIG_PUBLISHER_ADDRESS, PARENT_INSCRIPTION_ID } from "../lib/constants";
@@ -24,6 +24,15 @@ configRouter.get("/api/config/publisher", async (c) => {
     publisher: config.value,
     designated_at: config.updated_at,
   });
+});
+
+// GET /api/config/schema-health — read-only schema-drift report (public).
+// Diffs the live NewsDO sqlite_master against the cost-critical signals index
+// set so a silently-dropped index surfaces on demand. Returns healthy:false +
+// the missing index names if any are absent.
+configRouter.get("/api/config/schema-health", async (c) => {
+  const health = await getSchemaHealth(c.env);
+  return c.json(health, health.healthy ? 200 : 503);
 });
 
 // POST /api/config/publisher — designate a Publisher (BIP-322 auth required)
