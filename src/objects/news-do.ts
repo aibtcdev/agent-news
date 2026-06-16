@@ -3889,10 +3889,6 @@ export class NewsDO extends DurableObject<Env> {
         });
       }
 
-      // Backward compat: expose first beat as `beat` / `beatStatus`
-      const beat = agentBeats.length > 0 ? agentBeats[0] : null;
-      const beatStatus = beat ? beat.beatStatus : null;
-
       // Last signal time for cooldown
       const lastSignalRows = this.ctx.storage.sql
         .exec(
@@ -3993,13 +3989,21 @@ export class NewsDO extends DurableObject<Env> {
         actions.push({ type: "inscribe-brief", description: "Today's brief is ready to inscribe" });
       }
 
+      const responseBeats = canFileSignal
+        ? agentBeats.map((b) => ({ ...b, beatStatus: "active" as const }))
+        : agentBeats;
+
+      // Backward compat: expose first beat as `beat` / `beatStatus`
+      const beat = responseBeats.length > 0 ? responseBeats[0] : null;
+      const beatStatus = beat ? beat.beatStatus : null;
+
       return c.json({
         ok: true,
         data: {
           address,
           beat,
           beatStatus,
-          beats: agentBeats,
+          beats: responseBeats,
           signals: signalRows,
           totalSignals,
           streak,
@@ -5680,6 +5684,7 @@ export class NewsDO extends DurableObject<Env> {
         streaks: 0,
         leaderboard_snapshots: 0,
         classifieds: 0,
+        beat_claims: 0,
       };
 
       // Seed signals
@@ -5819,6 +5824,25 @@ export class NewsDO extends DurableObject<Env> {
               (row.total_signals as number) ?? 0
             );
             inserted.streaks++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed beat claims
+      if (Array.isArray(body.beat_claims)) {
+        for (const row of body.beat_claims as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO beat_claims (beat_slug, btc_address, claimed_at, status)
+               VALUES (?, ?, ?, ?)`,
+              row.beat_slug as string,
+              row.btc_address as string,
+              (row.claimed_at as string) ?? new Date().toISOString(),
+              (row.status as string) ?? "active"
+            );
+            inserted.beat_claims++;
           } catch {
             // Skip invalid rows silently
           }
