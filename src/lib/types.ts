@@ -114,6 +114,10 @@ export interface Env {
   ENVIRONMENT?: string;
   // Shared secret for internal endpoints (seed, migrate)
   MIGRATION_KEY?: string;
+  // Optional one-time operator secret. When set, allows POST /api/config/publisher
+  // to re-designate the Publisher without the current Publisher's key (handoff).
+  // Set via `wrangler secret put OPERATOR_KEY`; remove after the handoff.
+  OPERATOR_KEY?: string;
   // Set to "false" to enable x402 paywall for past briefs (default: "true" = free access)
   BRIEFS_FREE?: string;
   // Set to "true" to require x402 payment for signal submission (default: "false" = grace period)

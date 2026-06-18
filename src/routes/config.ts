@@ -78,10 +78,24 @@ configRouter.post("/api/config/publisher", async (c) => {
   // Check if Publisher is already designated
   const current = await getConfig(c.env, CONFIG_PUBLISHER_ADDRESS);
   if (current && current.value !== btc_address) {
-    return c.json(
-      { error: "Only the current Publisher can re-designate" },
-      403
-    );
+    // Operator override for handoffs when the current Publisher's key is
+    // unavailable: a one-time bypass gated on the OPERATOR_KEY Cloudflare
+    // secret (set via `wrangler secret put OPERATOR_KEY`, removed after use).
+    // No-op when OPERATOR_KEY is unset, so the default contract is unchanged.
+    const operatorKey = c.env.OPERATOR_KEY;
+    const providedKey = c.req.header("X-Operator-Key");
+    const overridden = Boolean(operatorKey) && providedKey === operatorKey;
+    if (!overridden) {
+      return c.json(
+        { error: "Only the current Publisher can re-designate" },
+        403
+      );
+    }
+    c.get("logger").warn("publisher re-designated via operator override", {
+      previous_publisher: current.value,
+      next_publisher: publisher_address,
+      caller: btc_address,
+    });
   }
 
   const result = await setConfig(c.env, CONFIG_PUBLISHER_ADDRESS, publisher_address as string);
