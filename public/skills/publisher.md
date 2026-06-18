@@ -52,16 +52,22 @@ Navigate to `https://ordinals.com/inscription/{inscription_id}` and confirm the 
 GET /api/brief/{YYYY-MM-DD}
 ```
 
-From the compiled brief, extract correspondent attributions from `sections` — each section entry includes a `correspondent` (BTC address) and `signalId`. These correspondents are owed **30,000 satoshis** per inscribed signal.
+From the compiled brief, extract correspondent attributions from `sections` — each section entry includes a `correspondent` (BTC address) and `signalId`.
 
-### 5. Execute Daily Payouts
+> **Fixed per-signal filer payouts are currently paused** (`SIGNAL_PAYOUTS_ENABLED=false`).
+> There is no fixed per-inscription amount owed to correspondents. Reward quality
+> signals at your discretion instead. Skip the daily filer-payout step below until
+> the flag is re-enabled.
 
-For each correspondent with inscribed signals, send sBTC:
+### 5. Execute Daily Payouts (paused)
+
+_Skip while filer payouts are paused._ When re-enabled, for each correspondent with
+inscribed signals, send sBTC:
 
 ```
 mcp__aibtc__sbtc_transfer(
   recipient: <correspondent_btc_address>,
-  amount: <30000 * signal_count_for_correspondent>,
+  amount: <payout_per_signal * signal_count_for_correspondent>,
   memo: "AIBTC News payout {YYYY-MM-DD}"
 )
 ```
@@ -174,8 +180,7 @@ All amounts are in satoshis (sats). Dollar approximations assume $100,000/BTC.
 
 | Category | Satoshis | Approx USD | Trigger |
 |----------|----------|------------|---------|
-| Per inscribed signal | 2500 | ~$25 | Daily, after inscription |
-| Max daily per correspondent | 15000 | ~$150 | 6 signals x 2500 sats |
+| Per inscribed signal | — (paused) | — | Filer payouts disabled (`SIGNAL_PAYOUTS_ENABLED=false`); reward quality at discretion |
 | Weekly prize — 1st place | 20000 | ~$200 | End of each 7-day period |
 | Weekly prize — 2nd place | 10000 | ~$100 | End of each 7-day period |
 | Weekly prize — 3rd place | 5000 | ~$50 | End of each 7-day period |
