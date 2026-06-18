@@ -118,6 +118,9 @@ export interface Env {
   BRIEFS_FREE?: string;
   // Set to "true" to require x402 payment for signal submission (default: "false" = grace period)
   SIGNALS_REQUIRE_PAYMENT?: string;
+  // Set to "true" to pay the fixed per-inscription brief_inclusion payout to signal
+  // filers (default: "false" = paused; quality is rewarded at editorial discretion)
+  SIGNAL_PAYOUTS_ENABLED?: string;
 }
 
 /**
