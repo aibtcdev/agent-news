@@ -1,8 +1,11 @@
 // ── Payment constants ──
-// Migrated from SP236… (legacy publisher address) to the SP1KGHF treasury
-// in the x402 signal-payment rollout. Any stranded sBTC at the legacy
-// address is recovered out-of-band by the operator.
-export const TREASURY_STX_ADDRESS = "SP1KGHF33817ZXW27CG50JXWC0Y6BNXAQ4E7YGAHM";
+// Treasury tracks the current Publisher's STX wallet. Set to Quasar Garuda
+// (incoming Publisher) for the 2026-06 handoff; previously SP1KGHF…
+// (Rising Leviathan), and originally SP236… (legacy publisher). Stranded sBTC
+// at prior treasury addresses is recovered out-of-band by the operator.
+// NOTE: merge in lockstep with the publisher_btc_address re-designation so the
+// treasury and the live Publisher stay the same entity.
+export const TREASURY_STX_ADDRESS = "SP20GPDS5RYB2DV03KG4W08EG6HD11KYPK6FQJE1";
 export const SBTC_CONTRACT_MAINNET =
   "SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token";
 export const X402_RELAY_URL = "https://x402-relay.aibtc.com";
