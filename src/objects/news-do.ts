@@ -2961,11 +2961,10 @@ export class NewsDO extends DurableObject<Env> {
         paymentTxid
       );
 
-      for (const t of signalTags) {
+      if (signalTags.length > 0) {
         this.ctx.storage.sql.exec(
-          "INSERT INTO signal_tags (signal_id, tag) VALUES (?, ?)",
-          signalId,
-          t
+          `INSERT INTO signal_tags (signal_id, tag) VALUES ${signalTags.map(() => "(?, ?)").join(", ")}`,
+          ...signalTags.flatMap((t) => [signalId, t])
         );
       }
 
@@ -3130,11 +3129,10 @@ export class NewsDO extends DurableObject<Env> {
         originalId
       );
 
-      for (const t of correctionTags) {
+      if (correctionTags.length > 0) {
         this.ctx.storage.sql.exec(
-          "INSERT INTO signal_tags (signal_id, tag) VALUES (?, ?)",
-          newId,
-          t
+          `INSERT INTO signal_tags (signal_id, tag) VALUES ${correctionTags.map(() => "(?, ?)").join(", ")}`,
+          ...correctionTags.flatMap((t) => [newId, t])
         );
       }
 
@@ -3388,30 +3386,27 @@ export class NewsDO extends DurableObject<Env> {
         1000
       );
 
-      // When agent is specified, return all their classifieds regardless of status/expiry
+      // When agent is specified, return all their classifieds regardless of status/expiry.
+      // The category filter is appended only when present so SQLite can use the
+      // btc_address / category indexes instead of a (?  IS NULL OR col = ?) scan.
       const rows = agent
         ? this.ctx.storage.sql
             .exec(
               `SELECT * FROM classifieds
-               WHERE btc_address = ?1
-                 AND (?2 IS NULL OR category = ?2)
+               WHERE btc_address = ?${category ? " AND category = ?" : ""}
                ORDER BY created_at DESC
-               LIMIT ?3`,
-              agent,
-              category,
-              limit
+               LIMIT ?`,
+              ...(category ? [agent, category, limit] : [agent, limit])
             )
             .toArray()
         : this.ctx.storage.sql
             .exec(
               `SELECT * FROM classifieds
                WHERE expires_at > ${ISO_NOW_SQL}
-                 AND status = 'approved'
-                 AND (?1 IS NULL OR category = ?1)
+                 AND status = 'approved'${category ? " AND category = ?" : ""}
                ORDER BY created_at DESC
-               LIMIT ?2`,
-              category,
-              limit
+               LIMIT ?`,
+              ...(category ? [category, limit] : [limit])
             )
             .toArray();
       return c.json({
@@ -4327,25 +4322,33 @@ export class NewsDO extends DurableObject<Env> {
         );
         voided = voidCursor.rowsWritten;
 
-        for (const signalId of validIds) {
+        // Batch the per-signal address lookup into one IN-list query instead of
+        // one PK SELECT per signal (validIds is deduped and non-empty here).
+        const payoutAddrById = new Map<string, string>();
+        {
           const sigRows = this.ctx.storage.sql
             .exec(
-              `SELECT btc_address
+              `SELECT id, btc_address
                FROM signals
-               WHERE id = ?1
-                 AND created_at >= ?2
-                 AND created_at < ?3`,
-              signalId,
+               WHERE id IN (${validIds.map(() => "?").join(", ")})
+                 AND created_at >= ? AND created_at < ?`,
+              ...validIds,
               dayStart,
               dayEnd
             )
             .toArray();
-          if (sigRows.length === 0) {
+          for (const r of sigRows) {
+            const row = r as { id: string; btc_address: string };
+            payoutAddrById.set(row.id, row.btc_address);
+          }
+        }
+
+        for (const signalId of validIds) {
+          const btcAddress = payoutAddrById.get(signalId);
+          if (btcAddress === undefined) {
             skipped++;
             continue;
           }
-
-          const btcAddress = (sigRows[0] as Record<string, unknown>).btc_address as string;
 
           const revivedCursor = this.ctx.storage.sql.exec(
             `UPDATE earnings
@@ -4662,28 +4665,37 @@ export class NewsDO extends DurableObject<Env> {
       const dayStart = getUTCDayStart(brief_date as string);
       const dayEnd = getUTCDayEnd(brief_date as string);
 
-      const selectedSignals: BriefSignal[] = [];
-      for (let i = 0; i < selectedIds.length; i++) {
-        const signalId = selectedIds[i];
+      // Batch the per-signal lookup into one IN-list query instead of one PK
+      // SELECT per selected signal (selectedIds is deduped and non-empty here).
+      const signalById = new Map<string, { id: string; btc_address: string; status: SignalStatus; created_at: string }>();
+      {
         const sigRows = this.ctx.storage.sql
           .exec(
             `SELECT id, btc_address, status, created_at
              FROM signals
-             WHERE id = ?1
-               AND created_at >= ?2
-               AND created_at < ?3`,
-            signalId,
+             WHERE id IN (${selectedIds.map(() => "?").join(", ")})
+               AND created_at >= ? AND created_at < ?`,
+            ...selectedIds,
             dayStart,
             dayEnd
           )
           .toArray();
-        if (sigRows.length === 0) {
+        for (const r of sigRows) {
+          const row = r as { id: string; btc_address: string; status: SignalStatus; created_at: string };
+          signalById.set(row.id, row);
+        }
+      }
+
+      const selectedSignals: BriefSignal[] = [];
+      for (let i = 0; i < selectedIds.length; i++) {
+        const signalId = selectedIds[i];
+        const signalRow = signalById.get(signalId);
+        if (signalRow === undefined) {
           return c.json(
             { ok: false, error: `Signal "${signalId}" is not part of brief date ${brief_date as string}` } satisfies DOResult<unknown>,
             400
           );
         }
-        const signalRow = sigRows[0] as { id: string; btc_address: string; status: SignalStatus; created_at: string };
         if (signalRow.status !== "approved" && signalRow.status !== "brief_included") {
           return c.json(
             { ok: false, error: `Signal "${signalId}" is not compile-eligible from status "${signalRow.status}"` } satisfies DOResult<unknown>,

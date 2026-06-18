@@ -171,6 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_corrections_address      ON corrections(btc_addre
 CREATE INDEX IF NOT EXISTS idx_referral_scout           ON referral_credits(scout_address);
 CREATE INDEX IF NOT EXISTS idx_referral_recruit         ON referral_credits(recruit_address);
 CREATE INDEX IF NOT EXISTS idx_payment_staging_status   ON payment_staging(stage_status);
+CREATE INDEX IF NOT EXISTS idx_payment_staging_status_created ON payment_staging(stage_status, created_at);
 `;
 
 /**
