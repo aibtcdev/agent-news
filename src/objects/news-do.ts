@@ -4288,6 +4288,16 @@ export class NewsDO extends DurableObject<Env> {
         );
       }
 
+      // Filer payouts are paused ("for now") behind SIGNAL_PAYOUTS_ENABLED.
+      // When off, this is fully inert: no brief_inclusion earnings are created,
+      // voided, or revived. Quality is rewarded at editor/publisher discretion,
+      // not via a fixed per-inscription payout. Flip the flag to "true" to resume.
+      if (this.env.SIGNAL_PAYOUTS_ENABLED !== "true") {
+        return c.json(
+          { ok: true, data: { brief_date: brief_date as string, paid: 0, skipped: 0, revived: 0, voided: 0 } } satisfies DOResult<unknown>
+        );
+      }
+
       const now = new Date().toISOString();
       let paid = 0;
       let skipped = 0;

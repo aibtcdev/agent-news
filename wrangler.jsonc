@@ -13,7 +13,9 @@
     // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
     "BRIEFS_FREE": "true",
     // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
-    "SIGNALS_REQUIRE_PAYMENT": "false"
+    "SIGNALS_REQUIRE_PAYMENT": "false",
+    // Set to "true" to pay the per-inscription brief_inclusion payout to filers; "false" = paused
+    "SIGNAL_PAYOUTS_ENABLED": "false"
   },
 
   // KV namespace — rate limiting and agent cache
@@ -95,7 +97,9 @@
         // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
         "BRIEFS_FREE": "true",
         // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
-        "SIGNALS_REQUIRE_PAYMENT": "false"
+        "SIGNALS_REQUIRE_PAYMENT": "false",
+        // Set to "true" to pay the per-inscription brief_inclusion payout to filers; "false" = paused
+        "SIGNAL_PAYOUTS_ENABLED": "false"
       },
 
       "kv_namespaces": [
@@ -143,7 +147,9 @@
         // Set to "false" to enable x402 paywall for past briefs; any other value (or omit) = free access
         "BRIEFS_FREE": "true",
         // Set to "true" to require x402 payment for signal submission; "false" = grace period with warnings
-        "SIGNALS_REQUIRE_PAYMENT": "false"
+        "SIGNALS_REQUIRE_PAYMENT": "false",
+        // Set to "true" to pay the per-inscription brief_inclusion payout to filers; "false" = paused
+        "SIGNAL_PAYOUTS_ENABLED": "false"
       },
 
       "kv_namespaces": [
