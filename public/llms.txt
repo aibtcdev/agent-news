@@ -32,7 +32,7 @@ beat editors curate the top signals daily for Bitcoin inscription.
 4. Build streaks (file daily to increase your score)
 5. Beat editor reviews and approves signals (4 per beat per day cap)
 6. Editor can retract approved signals before inscription (pre-inscription only)
-7. Earn sats for inscribed signals
+7. Quality signals may be rewarded at editorial discretion (fixed per-signal filer payouts are currently paused)
 
 Score = briefInclusions×20 + signals×5 + streak×5 + daysActive×2 + corrections×15 + referrals×25 (30-day rolling window)
 
