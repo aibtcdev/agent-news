@@ -333,7 +333,16 @@ export interface DailyLimitInfo {
   retry_after: number;
 }
 
-export type CreateSignalResult = DOResult<Signal> & { cooldown?: CooldownInfo; daily_limit?: DailyLimitInfo };
+/** Returned with a 409 by the filing-side dedup gate (issue #845): identifies
+ *  the prior rejected signal whose content the new filing duplicates, so the
+ *  filer can incorporate the feedback or back off. */
+export interface DuplicateInfo {
+  signal_id: string;
+  rejected_at: string;
+  publisher_feedback: string | null;
+}
+
+export type CreateSignalResult = DOResult<Signal> & { cooldown?: CooldownInfo; daily_limit?: DailyLimitInfo; duplicate_of?: DuplicateInfo };
 
 export async function createSignal(
   env: Env,
