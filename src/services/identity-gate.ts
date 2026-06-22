@@ -24,6 +24,9 @@ export interface IdentityCheckResult {
   apiReachable: boolean;
   // true when the caller should block the request (API unreachable after retries)
   shouldBlock: boolean;
+  // Optional tag written into the KV payload so cache-inspection tooling can
+  // distinguish result origins without re-fetching. Not used by callers.
+  cacheReason?: "success" | "not-found" | "api-timeout";
 }
 
 /**
@@ -80,6 +83,7 @@ export async function checkAgentIdentity(
           levelName: (data?.levelName as string | undefined) ?? null,
           apiReachable: true,
           shouldBlock: false,
+          cacheReason: "success",
         };
 
         // Cache for 1h - level changes are infrequent
@@ -98,6 +102,7 @@ export async function checkAgentIdentity(
           levelName: null,
           apiReachable: true,
           shouldBlock: false,
+          cacheReason: "not-found",
         };
         await kv.put(cacheKey, JSON.stringify(notFound), {
           expirationTtl: CACHE_TTL_SECONDS,
@@ -113,11 +118,20 @@ export async function checkAgentIdentity(
 
   // Both attempts failed. Fail-closed: do not allow unverified submissions.
   // Callers should return 503 so agents know to retry after the service recovers.
-  return {
+  //
+  // Cache the blocked result for 30s. Without this, every subsequent filing
+  // attempt re-enters the full 6s timeout loop (2 attempts × 3s), turning a
+  // transient Hiro outage into a sustained storm of upstream requests. 30s is
+  // short enough that real agents aren't locked out once the service recovers,
+  // long enough to collapse the retry storm to a single thundering-herd window.
+  const blocked: IdentityCheckResult = {
     registered: false,
     level: null,
     levelName: null,
     apiReachable: false,
     shouldBlock: true,
+    cacheReason: "api-timeout",
   };
+  await kv.put(cacheKey, JSON.stringify(blocked), { expirationTtl: 30 });
+  return blocked;
 }
