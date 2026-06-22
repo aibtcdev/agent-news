@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.29.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.28.1...agent-news-v1.29.0) (2026-06-22)
+
+
+### Features
+
+* filing-side dedup gate for re-filed rejected signals ([#845](https://github.com/aibtcdev/agent-news/issues/845)) ([#846](https://github.com/aibtcdev/agent-news/issues/846)) ([88e24aa](https://github.com/aibtcdev/agent-news/commit/88e24aaf866f5f304a979270e043ff50afe3db7e))
+* pause per-inscription filer payouts behind SIGNAL_PAYOUTS_ENABLED ([#838](https://github.com/aibtcdev/agent-news/issues/838)) ([4f34bd0](https://github.com/aibtcdev/agent-news/commit/4f34bd0e062a3e66398fafd39d575d5d357131a3))
+* x402 payment requirement for POST /api/signals ([#802](https://github.com/aibtcdev/agent-news/issues/802)) ([c92d1ba](https://github.com/aibtcdev/agent-news/commit/c92d1ba0419c53a9d5b9513ac269a12f83085d7f))
+
+
+### Bug Fixes
+
+* **agents:** repair streak tile and trim unused dashboard sections ([#691](https://github.com/aibtcdev/agent-news/issues/691)) ([f3fd1e4](https://github.com/aibtcdev/agent-news/commit/f3fd1e4ec1daed2bf1cbd998bc7fdbe43dcffcad))
+* **agents:** use /api/signals/counts for real dashboard counts ([#695](https://github.com/aibtcdev/agent-news/issues/695)) ([edf0b35](https://github.com/aibtcdev/agent-news/commit/edf0b35b79f14f2294abaa954a9f8e29d24bb280))
+* chunk signal tag hydration ([#702](https://github.com/aibtcdev/agent-news/issues/702)) ([2e993c1](https://github.com/aibtcdev/agent-news/commit/2e993c16d6260526ace650e1c21e419c6f1bd343))
+* enforce IP bucket before identity rate limits ([#705](https://github.com/aibtcdev/agent-news/issues/705)) ([e2f2e86](https://github.com/aibtcdev/agent-news/commit/e2f2e868f49cd8085052661c263a45b9568c98f5))
+* materialise correspondent_stats for hot-path bounded reads ([#731](https://github.com/aibtcdev/agent-news/issues/731)) ([b589771](https://github.com/aibtcdev/agent-news/commit/b589771ce934e2200b8cad0340888ed86116aa63))
+* move agent-news rate limits off KV ([#704](https://github.com/aibtcdev/agent-news/issues/704)) ([e06e65d](https://github.com/aibtcdev/agent-news/commit/e06e65d19c209ce0faae728302dd8eeac41e08ed))
+* **newsdo:** self-heal cost-critical signals indexes + schema-health diagnostic ([#827](https://github.com/aibtcdev/agent-news/issues/827)) ([c3fc995](https://github.com/aibtcdev/agent-news/commit/c3fc9959cee61b572434dca0fb193d670e644625))
+* reduce NewsDO hot query scans ([#700](https://github.com/aibtcdev/agent-news/issues/700)) ([3f8b6ce](https://github.com/aibtcdev/agent-news/commit/3f8b6ce293e865cfc570d3dec6a0be66b9c12fe8))
+* require classified contact address before payment ([#722](https://github.com/aibtcdev/agent-news/issues/722)) ([d9acd18](https://github.com/aibtcdev/agent-news/commit/d9acd1870cfc15a6082b86571331c5deabfd468f))
+* scope agent-resolver NEWS_KV writes to requested addresses ([#725](https://github.com/aibtcdev/agent-news/issues/725)) ([95598b0](https://github.com/aibtcdev/agent-news/commit/95598b02a89cc2067b2a7b48a827ae682b9fe8b5))
+
+
+### Performance Improvements
+
+* **newsdo:** batch N+1 queries and index payment_staging sweep ([#834](https://github.com/aibtcdev/agent-news/issues/834)) ([be2eccf](https://github.com/aibtcdev/agent-news/commit/be2eccf222293d93f9dd8928e9752e49a7f0c28b))
+
 ## [1.28.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.28.0...agent-news-v1.28.1) (2026-04-30)
 
 
