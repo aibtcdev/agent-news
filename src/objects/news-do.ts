@@ -99,6 +99,105 @@ interface SignalCountFilters {
   includePending: boolean;
 }
 
+interface BeatHealthRow {
+  beat: string;
+  submitted: number;
+  in_review: number;
+  approved_24h: number;
+  rejected_24h: number;
+  replaced_24h: number;
+  avg_turnaround_hours: number | null;
+  editor_address: string | null;
+  editor_registered_at: string | null;
+  editor_last_review: string | null;
+  spot_checks_30d: number;
+  spot_checks_passed_30d: number;
+}
+
+interface BeatHealthData {
+  beat: string;
+  submitted: number;
+  in_review: number;
+  queue_depth: number;
+  approved_24h: number;
+  rejected_24h: number;
+  replaced_24h: number;
+  avg_turnaround_hours: number | null;
+  editor: {
+    btc_address: string;
+    status: "active" | "system" | "stale";
+    last_review: string | null;
+  };
+  spot_check_pass_rate_30d: number | null;
+  health_score: number;
+}
+
+interface CorrespondentStatsRow {
+  btc_address: string;
+  signals_total: number;
+  pending_payment: number;
+  submitted: number;
+  approved: number;
+  replaced: number;
+  rejected: number;
+  brief_included: number;
+  avg_quality_score: number | null;
+  avg_review_score: number | null;
+  factual_errors_caught: number;
+  beats_csv: string | null;
+  last_submission: string | null;
+  current_streak: number | null;
+  longest_streak: number | null;
+  days_active: number | null;
+  total_earned_sats: number | null;
+  unpaid_sats: number | null;
+  last_payout_at: string | null;
+  signals_7d: number;
+  signals_30d: number;
+  current_approved: number;
+  current_reviewed: number;
+  previous_approved: number;
+  previous_reviewed: number;
+}
+
+interface EditorPerformanceRow {
+  btc_address: string;
+  beats_csv: string | null;
+  active_assignments: number | null;
+  first_registered_at: string | null;
+  latest_registered_at: string | null;
+  signals_reviewed: number | null;
+  signals_reviewed_7d: number | null;
+  avg_review_turnaround_hours: number | null;
+  spot_checks_received: number | null;
+  spot_checks_passed: number | null;
+  spot_check_failures: number | null;
+  correspondents_reviewed: number | null;
+  total_earned_sats: number | null;
+  unpaid_sats: number | null;
+  last_review: string | null;
+}
+
+interface EditorPerformanceData {
+  btc_address: string;
+  beat: string | null;
+  beats: string[];
+  signals_reviewed: number;
+  signals_reviewed_7d: number;
+  avg_review_turnaround_hours: number | null;
+  spot_checks_received: number;
+  spot_check_failures: number;
+  spot_check_pass_rate: number | null;
+  correspondents_reviewed: number;
+  status: "active" | "inactive" | "stale";
+  role_health: "good" | "watch" | "needs_coaching" | "stale" | "inactive";
+  earnings: {
+    total_earned_sats: number;
+    unpaid_sats: number;
+  };
+  last_review: string | null;
+}
+
 function appendSignalScopeFilters(
   clauses: string[],
   params: SqlParam[],
@@ -1548,6 +1647,24 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: { beat_slug: slug, editors: rows } } satisfies DOResult<unknown>);
     });
 
+    // GET /editors/leaderboard — Company World Model editor performance ranking
+    this.router.get("/editors/leaderboard", (c) => {
+      return c.json({ ok: true, data: this.queryEditorPerformance() } satisfies DOResult<EditorPerformanceData[]>);
+    });
+
+    // GET /editors/:address/performance — Company World Model editor performance detail
+    this.router.get("/editors/:address/performance", (c) => {
+      const address = c.req.param("address");
+      const [performance] = this.queryEditorPerformance(address);
+      if (!performance) {
+        return c.json(
+          { ok: false, error: `Editor "${address}" not found` } satisfies DOResult<EditorPerformanceData>,
+          404
+        );
+      }
+      return c.json({ ok: true, data: performance } satisfies DOResult<EditorPerformanceData>);
+    });
+
     // GET /editors/:address — List active beat assignments for an editor
     this.router.get("/editors/:address", (c) => {
       const address = c.req.param("address");
@@ -2054,6 +2171,11 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: beats } satisfies DOResult<Beat[]>);
     });
 
+    // GET /beats/health — Company World Model beat health for all non-retired beats
+    this.router.get("/beats/health", (c) => {
+      return c.json({ ok: true, data: this.queryBeatHealth() } satisfies DOResult<BeatHealthData[]>);
+    });
+
     // GET /beats/membership — query beats joined by a specific agent
     this.router.get("/beats/membership", (c) => {
       const btcAddress = c.req.query("btc_address");
@@ -2094,6 +2216,19 @@ export class NewsDO extends DurableObject<Env> {
         ok: true,
         data: { agent: btcAddress, beats, available_beats: availableBeats },
       } satisfies DOResult<{ agent: string; beats: Array<{ slug: string; joined_at: string; status: "active" }>; available_beats: string[] }>);
+    });
+
+    // GET /beats/:slug/health — Company World Model beat health for one beat
+    this.router.get("/beats/:slug/health", (c) => {
+      const slug = c.req.param("slug");
+      const [health] = this.queryBeatHealth(slug);
+      if (!health) {
+        return c.json(
+          { ok: false, error: `Beat "${slug}" not found` } satisfies DOResult<BeatHealthData>,
+          404
+        );
+      }
+      return c.json({ ok: true, data: health } satisfies DOResult<BeatHealthData>);
     });
 
     // GET /beats/:slug — get a single beat by slug; retired status from DB, active/inactive computed from signal activity
@@ -3870,6 +4005,24 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
+    });
+
+    // GET /correspondents/stats — Company World Model correspondent quality stats
+    this.router.get("/correspondents/stats", (c) => {
+      return c.json({ ok: true, data: this.queryCorrespondentStats() } satisfies DOResult<unknown[]>);
+    });
+
+    // GET /correspondents/:address/stats — Company World Model stats for one correspondent
+    this.router.get("/correspondents/:address/stats", (c) => {
+      const address = c.req.param("address");
+      const [stats] = this.queryCorrespondentStats(address);
+      if (!stats) {
+        return c.json(
+          { ok: false, error: `Correspondent "${address}" not found` } satisfies DOResult<unknown>,
+          404
+        );
+      }
+      return c.json({ ok: true, data: stats } satisfies DOResult<unknown>);
     });
 
     // -------------------------------------------------------------------------
@@ -5753,15 +5906,43 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const inserted: Record<string, number> = {
+        beats: 0,
         signals: 0,
         signal_tags: 0,
         brief_signals: 0,
         corrections: 0,
         referral_credits: 0,
         streaks: 0,
+        beat_editors: 0,
         leaderboard_snapshots: 0,
         classifieds: 0,
+        earnings: 0,
       };
+
+      // Seed beats
+      if (Array.isArray(body.beats)) {
+        for (const row of body.beats as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO beats
+               (slug, name, description, color, created_by, created_at, updated_at, status, editor_review_rate_sats)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              row.slug as string,
+              (row.name as string) ?? row.slug,
+              (row.description as string | null) ?? null,
+              (row.color as string | null) ?? null,
+              (row.created_by as string) ?? "test",
+              (row.created_at as string) ?? new Date().toISOString(),
+              (row.updated_at as string) ?? new Date().toISOString(),
+              (row.status as string) ?? "active",
+              (row.editor_review_rate_sats as number | null) ?? null
+            );
+            inserted.beats++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
 
       // Seed signals
       const seededSignalAddresses = new Set<string>();
@@ -5771,8 +5952,8 @@ export class NewsDO extends DurableObject<Env> {
             this.ctx.storage.sql.exec(
               `INSERT OR IGNORE INTO signals
                (id, beat_slug, btc_address, headline, body, sources, created_at, updated_at,
-                correction_of, status, reviewed_at, publisher_feedback, disclosure)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                correction_of, status, reviewed_at, publisher_feedback, disclosure, quality_score, score_breakdown)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               row.id as string,
               row.beat_slug as string,
               row.btc_address as string,
@@ -5785,7 +5966,9 @@ export class NewsDO extends DurableObject<Env> {
               (row.status as string) ?? "submitted",
               (row.reviewed_at as string | null) ?? null,
               (row.publisher_feedback as string | null) ?? null,
-              (row.disclosure as string) ?? ""
+              (row.disclosure as string) ?? "",
+              (row.quality_score as number | null) ?? null,
+              (row.score_breakdown as string | null) ?? null
             );
             inserted.signals++;
             if (typeof row.btc_address === "string") {
@@ -5846,8 +6029,9 @@ export class NewsDO extends DurableObject<Env> {
           try {
             this.ctx.storage.sql.exec(
               `INSERT OR IGNORE INTO corrections
-               (id, signal_id, btc_address, claim, correction, sources, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+               (id, signal_id, btc_address, claim, correction, sources, status, reviewed_by, reviewed_at,
+                created_at, type, score, factcheck_passed, beat_relevance, recommendation)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               row.id as string,
               row.signal_id as string,
               row.btc_address as string,
@@ -5855,7 +6039,14 @@ export class NewsDO extends DurableObject<Env> {
               (row.correction as string) ?? "test correction",
               (row.sources as string | null) ?? null,
               (row.status as string) ?? "approved",
-              row.created_at as string
+              (row.reviewed_by as string | null) ?? null,
+              (row.reviewed_at as string | null) ?? null,
+              row.created_at as string,
+              (row.type as string) ?? "correction",
+              (row.score as number | null) ?? null,
+              row.factcheck_passed === undefined ? null : ((row.factcheck_passed as boolean) ? 1 : 0),
+              (row.beat_relevance as number | null) ?? null,
+              (row.recommendation as string | null) ?? null
             );
             inserted.corrections++;
           } catch {
@@ -5900,6 +6091,28 @@ export class NewsDO extends DurableObject<Env> {
               (row.total_signals as number) ?? 0
             );
             inserted.streaks++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
+
+      // Seed beat editors
+      if (Array.isArray(body.beat_editors)) {
+        for (const row of body.beat_editors as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR REPLACE INTO beat_editors
+               (beat_slug, btc_address, status, registered_at, registered_by, deactivated_at)
+               VALUES (?, ?, ?, ?, ?, ?)`,
+              row.beat_slug as string,
+              row.btc_address as string,
+              (row.status as string) ?? "active",
+              (row.registered_at as string) ?? new Date().toISOString(),
+              (row.registered_by as string) ?? "test-publisher",
+              (row.deactivated_at as string | null) ?? null
+            );
+            inserted.beat_editors++;
           } catch {
             // Skip invalid rows silently
           }
@@ -6005,6 +6218,7 @@ export class NewsDO extends DurableObject<Env> {
               (row.created_at as string) ?? new Date().toISOString(),
               (row.payout_txid as string | null) ?? null
             );
+            inserted.earnings++;
           } catch {
             // Skip invalid rows silently
           }
@@ -6067,6 +6281,451 @@ export class NewsDO extends DurableObject<Env> {
     this.router.all("*", (c) => {
       return c.json({ ok: false, error: "Not found" }, 404);
     });
+  }
+
+  private round(value: number, digits = 2): number {
+    const factor = 10 ** digits;
+    return Math.round(value * factor) / factor;
+  }
+
+  private clampScore(score: number): number {
+    return Math.max(0, Math.min(100, Math.round(score)));
+  }
+
+  private csvToList(value: string | null): string[] {
+    if (!value) return [];
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  private withinDays(timestamp: string | null, days: number): boolean {
+    if (!timestamp) return false;
+    const time = new Date(timestamp).getTime();
+    if (!Number.isFinite(time)) return false;
+    return Date.now() - time <= days * 24 * 3600 * 1000;
+  }
+
+  private editorStatus(
+    editorAddress: string | null,
+    registeredAt: string | null,
+    lastReview: string | null
+  ): "active" | "system" | "stale" {
+    if (!editorAddress) return "system";
+    const lastActivity = lastReview ?? registeredAt;
+    return this.withinDays(lastActivity, 7) ? "active" : "stale";
+  }
+
+  private queryBeatHealth(slug?: string): BeatHealthData[] {
+    const whereSql = slug
+      ? "WHERE b.slug = ?"
+      : "WHERE COALESCE(b.status, 'active') != 'retired'";
+    const params = slug ? [slug] : [];
+    const rows = this.ctx.storage.sql
+      .exec(
+        `WITH target_beats AS (
+           SELECT b.slug
+           FROM beats b
+           ${whereSql}
+         ),
+         status_counts AS (
+           SELECT s.beat_slug,
+                  SUM(CASE WHEN s.status = 'submitted' THEN 1 ELSE 0 END) AS submitted,
+                  SUM(CASE WHEN s.status = 'approved'
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) >= julianday('now', '-24 hours')
+                           THEN 1 ELSE 0 END) AS approved_24h,
+                  SUM(CASE WHEN s.status = 'rejected'
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) >= julianday('now', '-24 hours')
+                           THEN 1 ELSE 0 END) AS rejected_24h,
+                  SUM(CASE WHEN s.status = 'replaced'
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) >= julianday('now', '-24 hours')
+                           THEN 1 ELSE 0 END) AS replaced_24h,
+                  AVG(CASE WHEN s.reviewed_at IS NOT NULL
+                             AND s.status IN ('approved', 'brief_included', 'rejected', 'replaced')
+                           THEN (julianday(s.reviewed_at) - julianday(s.created_at)) * 24.0
+                           ELSE NULL END) AS avg_turnaround_hours
+           FROM signals s
+           JOIN target_beats tb ON tb.slug = s.beat_slug
+           WHERE s.correction_of IS NULL
+             AND s.status != 'pending_payment'
+           GROUP BY s.beat_slug
+         ),
+         pending_reviews AS (
+           SELECT s.beat_slug, COUNT(DISTINCT c.signal_id) AS in_review
+           FROM corrections c
+           JOIN signals s ON s.id = c.signal_id
+           JOIN target_beats tb ON tb.slug = s.beat_slug
+           WHERE c.type = 'editorial_review'
+             AND c.status = 'pending'
+           GROUP BY s.beat_slug
+         ),
+         editor_reviews AS (
+           SELECT s.beat_slug, c.btc_address, MAX(c.created_at) AS last_review
+           FROM corrections c
+           JOIN signals s ON s.id = c.signal_id
+           JOIN target_beats tb ON tb.slug = s.beat_slug
+           WHERE c.type = 'editorial_review'
+           GROUP BY s.beat_slug, c.btc_address
+         ),
+         spot_checks AS (
+           SELECT s.beat_slug,
+                  COUNT(*) AS spot_checks_30d,
+                  SUM(CASE WHEN c.status = 'approved' THEN 1 ELSE 0 END) AS spot_checks_passed_30d
+           FROM corrections c
+           JOIN signals s ON s.id = c.signal_id
+           JOIN target_beats tb ON tb.slug = s.beat_slug
+           WHERE c.type = 'editorial_review'
+             AND c.status IN ('approved', 'rejected')
+             AND julianday(c.created_at) >= julianday('now', '-30 days')
+           GROUP BY s.beat_slug
+         )
+         SELECT tb.slug AS beat,
+                COALESCE(sc.submitted, 0) AS submitted,
+                COALESCE(pr.in_review, 0) AS in_review,
+                COALESCE(sc.approved_24h, 0) AS approved_24h,
+                COALESCE(sc.rejected_24h, 0) AS rejected_24h,
+                COALESCE(sc.replaced_24h, 0) AS replaced_24h,
+                sc.avg_turnaround_hours AS avg_turnaround_hours,
+                be.btc_address AS editor_address,
+                be.registered_at AS editor_registered_at,
+                er.last_review AS editor_last_review,
+                COALESCE(sp.spot_checks_30d, 0) AS spot_checks_30d,
+                COALESCE(sp.spot_checks_passed_30d, 0) AS spot_checks_passed_30d
+         FROM target_beats tb
+         LEFT JOIN status_counts sc ON sc.beat_slug = tb.slug
+         LEFT JOIN pending_reviews pr ON pr.beat_slug = tb.slug
+         LEFT JOIN beat_editors be ON be.beat_slug = tb.slug AND be.status = 'active'
+         LEFT JOIN editor_reviews er ON er.beat_slug = tb.slug AND er.btc_address = be.btc_address
+         LEFT JOIN spot_checks sp ON sp.beat_slug = tb.slug
+         ORDER BY tb.slug`,
+        ...params
+      )
+      .toArray() as unknown as BeatHealthRow[];
+
+    return rows.map((row) => {
+      const submitted = Number(row.submitted) || 0;
+      const inReview = Number(row.in_review) || 0;
+      const queueDepth = submitted + inReview;
+      const approved24h = Number(row.approved_24h) || 0;
+      const rejected24h = Number(row.rejected_24h) || 0;
+      const replaced24h = Number(row.replaced_24h) || 0;
+      const avgTurnaround = row.avg_turnaround_hours === null
+        ? null
+        : this.round(Number(row.avg_turnaround_hours), 2);
+      const spotTotal = Number(row.spot_checks_30d) || 0;
+      const spotPassed = Number(row.spot_checks_passed_30d) || 0;
+      const spotRate = spotTotal > 0 ? this.round(spotPassed / spotTotal, 2) : null;
+      const status = this.editorStatus(row.editor_address, row.editor_registered_at, row.editor_last_review);
+
+      let healthScore = 100 - Math.min(queueDepth * 5, 50);
+      if (avgTurnaround !== null) healthScore -= Math.min(Math.max(avgTurnaround - 4, 0) * 2, 20);
+      if (status === "system") healthScore -= 15;
+      if (status === "stale") healthScore -= 20;
+      if (spotRate !== null) healthScore -= (1 - spotRate) * 20;
+
+      return {
+        beat: row.beat,
+        submitted,
+        in_review: inReview,
+        queue_depth: queueDepth,
+        approved_24h: approved24h,
+        rejected_24h: rejected24h,
+        replaced_24h: replaced24h,
+        avg_turnaround_hours: avgTurnaround,
+        editor: {
+          btc_address: row.editor_address ?? "system",
+          status,
+          last_review: row.editor_last_review,
+        },
+        spot_check_pass_rate_30d: spotRate,
+        health_score: this.clampScore(healthScore),
+      };
+    });
+  }
+
+  private trendFor(row: CorrespondentStatsRow): "improving" | "declining" | "stable" | "insufficient_data" {
+    const currentReviewed = Number(row.current_reviewed) || 0;
+    const previousReviewed = Number(row.previous_reviewed) || 0;
+    if (currentReviewed < 2 || previousReviewed < 2) return "insufficient_data";
+    const currentRate = Number(row.current_approved) / currentReviewed;
+    const previousRate = Number(row.previous_approved) / previousReviewed;
+    const delta = currentRate - previousRate;
+    if (delta >= 0.1) return "improving";
+    if (delta <= -0.1) return "declining";
+    return "stable";
+  }
+
+  private queryCorrespondentStats(address?: string) {
+    const agentFilter = address ? "AND btc_address = ?" : "";
+    const rows = this.ctx.storage.sql
+      .exec(
+        `WITH target_agents AS (
+           SELECT DISTINCT btc_address
+           FROM signals
+           WHERE correction_of IS NULL
+             AND status != 'pending_payment'
+             ${agentFilter}
+         ),
+         signal_stats AS (
+           SELECT a.btc_address,
+                  COUNT(s.id) AS signals_total,
+                  0 AS pending_payment,
+                  SUM(CASE WHEN s.status = 'submitted' THEN 1 ELSE 0 END) AS submitted,
+                  SUM(CASE WHEN s.status = 'approved' THEN 1 ELSE 0 END) AS approved,
+                  SUM(CASE WHEN s.status = 'replaced' THEN 1 ELSE 0 END) AS replaced,
+                  SUM(CASE WHEN s.status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
+                  SUM(CASE WHEN s.status = 'brief_included' THEN 1 ELSE 0 END) AS brief_included,
+                  AVG(s.quality_score) AS avg_quality_score,
+                  GROUP_CONCAT(DISTINCT s.beat_slug) AS beats_csv,
+                  MAX(s.created_at) AS last_submission,
+                  SUM(CASE WHEN julianday(s.created_at) >= julianday('now', '-7 days') THEN 1 ELSE 0 END) AS signals_7d,
+                  SUM(CASE WHEN julianday(s.created_at) >= julianday('now', '-30 days') THEN 1 ELSE 0 END) AS signals_30d,
+                  SUM(CASE WHEN s.status IN ('approved', 'brief_included')
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) >= julianday('now', '-30 days')
+                           THEN 1 ELSE 0 END) AS current_approved,
+                  SUM(CASE WHEN s.status IN ('approved', 'brief_included', 'rejected', 'replaced')
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) >= julianday('now', '-30 days')
+                           THEN 1 ELSE 0 END) AS current_reviewed,
+                  SUM(CASE WHEN s.status IN ('approved', 'brief_included')
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) >= julianday('now', '-60 days')
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) < julianday('now', '-30 days')
+                           THEN 1 ELSE 0 END) AS previous_approved,
+                  SUM(CASE WHEN s.status IN ('approved', 'brief_included', 'rejected', 'replaced')
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) >= julianday('now', '-60 days')
+                            AND julianday(COALESCE(s.reviewed_at, s.updated_at, s.created_at)) < julianday('now', '-30 days')
+                           THEN 1 ELSE 0 END) AS previous_reviewed
+           FROM target_agents a
+           LEFT JOIN signals s ON s.btc_address = a.btc_address
+             AND s.correction_of IS NULL
+             AND s.status != 'pending_payment'
+           GROUP BY a.btc_address
+         ),
+         review_scores AS (
+           SELECT s.btc_address, AVG(c.score) AS avg_review_score
+           FROM corrections c
+           JOIN signals s ON s.id = c.signal_id
+           JOIN target_agents a ON a.btc_address = s.btc_address
+           WHERE c.type = 'editorial_review'
+             AND c.score IS NOT NULL
+           GROUP BY s.btc_address
+         ),
+         correction_counts AS (
+           SELECT c.btc_address, COUNT(*) AS factual_errors_caught
+           FROM corrections c
+           JOIN target_agents a ON a.btc_address = c.btc_address
+           WHERE c.type = 'correction'
+             AND c.status = 'approved'
+           GROUP BY c.btc_address
+         ),
+         earnings_agg AS (
+           SELECT e.btc_address,
+                  SUM(CASE WHEN e.amount_sats > 0 AND e.voided_at IS NULL AND e.payout_txid IS NOT NULL THEN e.amount_sats ELSE 0 END) AS total_earned_sats,
+                  SUM(CASE WHEN e.amount_sats > 0 AND e.voided_at IS NULL AND e.payout_txid IS NULL THEN e.amount_sats ELSE 0 END) AS unpaid_sats,
+                  MAX(CASE WHEN e.amount_sats > 0 AND e.voided_at IS NULL AND e.payout_txid IS NOT NULL THEN e.created_at ELSE NULL END) AS last_payout_at
+           FROM earnings e
+           JOIN target_agents a ON a.btc_address = e.btc_address
+           GROUP BY e.btc_address
+         )
+         SELECT ss.*,
+                rs.avg_review_score,
+                COALESCE(cc.factual_errors_caught, 0) AS factual_errors_caught,
+                st.current_streak,
+                st.longest_streak,
+                COALESCE(cs.days_active, st.total_signals, 0) AS days_active,
+                COALESCE(ea.total_earned_sats, 0) AS total_earned_sats,
+                COALESCE(ea.unpaid_sats, 0) AS unpaid_sats,
+                ea.last_payout_at
+         FROM signal_stats ss
+         LEFT JOIN review_scores rs ON rs.btc_address = ss.btc_address
+         LEFT JOIN correction_counts cc ON cc.btc_address = ss.btc_address
+         LEFT JOIN streaks st ON st.btc_address = ss.btc_address
+         LEFT JOIN correspondent_stats cs ON cs.btc_address = ss.btc_address
+         LEFT JOIN earnings_agg ea ON ea.btc_address = ss.btc_address
+         ORDER BY ss.signals_total DESC, ss.btc_address ASC`,
+        ...(address ? [address] : [])
+      )
+      .toArray() as unknown as CorrespondentStatsRow[];
+
+    return rows.map((row) => {
+      const approved = Number(row.approved) || 0;
+      const rejected = Number(row.rejected) || 0;
+      const replaced = Number(row.replaced) || 0;
+      const briefIncluded = Number(row.brief_included) || 0;
+      const reviewedTotal = approved + rejected + replaced + briefIncluded;
+      const avgScoreRaw = row.avg_quality_score ?? row.avg_review_score;
+      return {
+        btc_address: row.btc_address,
+        display_name: null,
+        signals_total: Number(row.signals_total) || 0,
+        by_status: {
+          pending_payment: Number(row.pending_payment) || 0,
+          submitted: Number(row.submitted) || 0,
+          approved,
+          replaced,
+          rejected,
+          brief_included: briefIncluded,
+        },
+        approval_rate: reviewedTotal > 0 ? this.round((approved + briefIncluded) / reviewedTotal, 2) : null,
+        avg_score: avgScoreRaw === null ? null : this.round(Number(avgScoreRaw), 2),
+        factual_errors_caught: Number(row.factual_errors_caught) || 0,
+        beats_active: this.csvToList(row.beats_csv),
+        last_submission: row.last_submission,
+        trend: this.trendFor(row),
+        streaks: {
+          current: Number(row.current_streak) || 0,
+          longest: Number(row.longest_streak) || 0,
+          days_active: Number(row.days_active) || 0,
+        },
+        earnings: {
+          total_earned_sats: Number(row.total_earned_sats) || 0,
+          unpaid_sats: Number(row.unpaid_sats) || 0,
+          last_payout_at: row.last_payout_at,
+        },
+        recent_activity: {
+          signals_7d: Number(row.signals_7d) || 0,
+          signals_30d: Number(row.signals_30d) || 0,
+        },
+      };
+    });
+  }
+
+  private roleHealthFor(
+    status: "active" | "inactive" | "stale",
+    reviewed7d: number,
+    passRate: number | null
+  ): "good" | "watch" | "needs_coaching" | "stale" | "inactive" {
+    if (status === "inactive") return "inactive";
+    if (status === "stale") return "stale";
+    if (passRate !== null && passRate < 0.7) return "needs_coaching";
+    if (reviewed7d === 0) return "watch";
+    return "good";
+  }
+
+  private queryEditorPerformance(address?: string): EditorPerformanceData[] {
+    const beatEditorFilter = address ? "AND btc_address = ?" : "";
+    const correctionFilter = address ? "AND btc_address = ?" : "";
+    const rows = this.ctx.storage.sql
+      .exec(
+        `WITH editor_addresses AS (
+           SELECT btc_address FROM beat_editors WHERE status = 'active' ${beatEditorFilter}
+           UNION
+           SELECT btc_address FROM corrections WHERE type = 'editorial_review' ${correctionFilter}
+         ),
+         assignments AS (
+           SELECT be.btc_address,
+                  GROUP_CONCAT(DISTINCT be.beat_slug) AS beats_csv,
+                  COUNT(*) AS active_assignments,
+                  MIN(be.registered_at) AS first_registered_at,
+                  MAX(be.registered_at) AS latest_registered_at
+           FROM beat_editors be
+           JOIN editor_addresses ea ON ea.btc_address = be.btc_address
+           WHERE be.status = 'active'
+           GROUP BY be.btc_address
+         ),
+         review_stats AS (
+           SELECT c.btc_address,
+                  COUNT(*) AS signals_reviewed,
+                  SUM(CASE WHEN julianday(c.created_at) >= julianday('now', '-7 days') THEN 1 ELSE 0 END) AS signals_reviewed_7d,
+                  AVG(CASE WHEN s.created_at IS NOT NULL THEN (julianday(c.created_at) - julianday(s.created_at)) * 24.0 ELSE NULL END) AS avg_review_turnaround_hours,
+                  COUNT(DISTINCT s.btc_address) AS correspondents_reviewed,
+                  MAX(c.created_at) AS last_review
+           FROM corrections c
+           LEFT JOIN signals s ON s.id = c.signal_id
+           JOIN editor_addresses ea ON ea.btc_address = c.btc_address
+           WHERE c.type = 'editorial_review'
+           GROUP BY c.btc_address
+         ),
+         spot_stats AS (
+           SELECT c.btc_address,
+                  COUNT(*) AS spot_checks_received,
+                  SUM(CASE WHEN c.status = 'approved' THEN 1 ELSE 0 END) AS spot_checks_passed,
+                  SUM(CASE WHEN c.status = 'rejected' THEN 1 ELSE 0 END) AS spot_check_failures
+           FROM corrections c
+           JOIN editor_addresses ea ON ea.btc_address = c.btc_address
+           WHERE c.type = 'editorial_review'
+             AND c.status IN ('approved', 'rejected')
+           GROUP BY c.btc_address
+         ),
+         earnings_agg AS (
+           SELECT e.btc_address,
+                  SUM(CASE WHEN e.amount_sats > 0 AND e.voided_at IS NULL AND e.payout_txid IS NOT NULL THEN e.amount_sats ELSE 0 END) AS total_earned_sats,
+                  SUM(CASE WHEN e.amount_sats > 0 AND e.voided_at IS NULL AND e.payout_txid IS NULL THEN e.amount_sats ELSE 0 END) AS unpaid_sats
+           FROM earnings e
+           JOIN editor_addresses ea ON ea.btc_address = e.btc_address
+           WHERE e.reason LIKE 'editor_%'
+           GROUP BY e.btc_address
+         )
+         SELECT ea.btc_address,
+                ass.beats_csv,
+                COALESCE(ass.active_assignments, 0) AS active_assignments,
+                ass.first_registered_at,
+                ass.latest_registered_at,
+                COALESCE(rs.signals_reviewed, 0) AS signals_reviewed,
+                COALESCE(rs.signals_reviewed_7d, 0) AS signals_reviewed_7d,
+                rs.avg_review_turnaround_hours,
+                COALESCE(ss.spot_checks_received, 0) AS spot_checks_received,
+                COALESCE(ss.spot_checks_passed, 0) AS spot_checks_passed,
+                COALESCE(ss.spot_check_failures, 0) AS spot_check_failures,
+                COALESCE(rs.correspondents_reviewed, 0) AS correspondents_reviewed,
+                COALESCE(earn.total_earned_sats, 0) AS total_earned_sats,
+                COALESCE(earn.unpaid_sats, 0) AS unpaid_sats,
+                rs.last_review
+         FROM editor_addresses ea
+         LEFT JOIN assignments ass ON ass.btc_address = ea.btc_address
+         LEFT JOIN review_stats rs ON rs.btc_address = ea.btc_address
+         LEFT JOIN spot_stats ss ON ss.btc_address = ea.btc_address
+         LEFT JOIN earnings_agg earn ON earn.btc_address = ea.btc_address`,
+        ...(address ? [address, address] : [])
+      )
+      .toArray() as unknown as EditorPerformanceRow[];
+
+    return rows
+      .map((row) => {
+        const beats = this.csvToList(row.beats_csv);
+        const reviewed7d = Number(row.signals_reviewed_7d) || 0;
+        const spotChecks = Number(row.spot_checks_received) || 0;
+        const spotPassed = Number(row.spot_checks_passed) || 0;
+        const passRate = spotChecks > 0 ? this.round(spotPassed / spotChecks, 2) : null;
+        const activeAssignments = Number(row.active_assignments) || 0;
+        const status: "active" | "inactive" | "stale" = activeAssignments === 0
+          ? "inactive"
+          : this.withinDays(row.last_review ?? row.latest_registered_at, 7)
+            ? "active"
+            : "stale";
+        const avgTurnaround = row.avg_review_turnaround_hours === null
+          ? null
+          : this.round(Number(row.avg_review_turnaround_hours), 2);
+
+        return {
+          btc_address: row.btc_address,
+          beat: beats[0] ?? null,
+          beats,
+          signals_reviewed: Number(row.signals_reviewed) || 0,
+          signals_reviewed_7d: reviewed7d,
+          avg_review_turnaround_hours: avgTurnaround,
+          spot_checks_received: spotChecks,
+          spot_check_failures: Number(row.spot_check_failures) || 0,
+          spot_check_pass_rate: passRate,
+          correspondents_reviewed: Number(row.correspondents_reviewed) || 0,
+          status,
+          role_health: this.roleHealthFor(status, reviewed7d, passRate),
+          earnings: {
+            total_earned_sats: Number(row.total_earned_sats) || 0,
+            unpaid_sats: Number(row.unpaid_sats) || 0,
+          },
+          last_review: row.last_review,
+        };
+      })
+      .sort((a, b) => {
+        const aRate = a.spot_check_pass_rate ?? -1;
+        const bRate = b.spot_check_pass_rate ?? -1;
+        return bRate - aRate ||
+          b.signals_reviewed - a.signals_reviewed ||
+          b.earnings.total_earned_sats - a.earnings.total_earned_sats ||
+          a.btc_address.localeCompare(b.btc_address);
+      });
   }
 
   /**
