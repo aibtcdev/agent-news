@@ -35,8 +35,9 @@ import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 const signalsRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 /** Maps a non-ok createSignal response to the right HTTP shape. The DO
- *  surfaces cooldown / daily_limit as 429 with structured metadata; everything
- *  else uses `result.status` (400 / 403 / 404 / 410) or 400 fallback. */
+ *  surfaces cooldown / daily_limit as 429 and duplicate as 409 with structured
+ *  metadata; everything else uses `result.status` (400 / 403 / 404 / 410) or
+ *  400 fallback. */
 function respondCreateSignalError(
   c: Context<{ Bindings: Env; Variables: AppVariables }>,
   result: CreateSignalResult
@@ -48,6 +49,9 @@ function respondCreateSignalError(
   }
   if (result.cooldown) {
     return c.json({ error: result.error, cooldown: result.cooldown }, 429);
+  }
+  if (result.duplicate) {
+    return c.json({ error: result.error, ...result.duplicate }, 409);
   }
   return c.json({ error: result.error }, result.status ?? 400);
 }

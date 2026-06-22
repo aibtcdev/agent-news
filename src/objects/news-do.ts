@@ -2916,6 +2916,46 @@ export class NewsDO extends DurableObject<Env> {
         return res;
       }
 
+      // Dedup gate: reject when the same primary source URL was already rejected
+      // for this agent + beat within the past 24h with no meaningful edit.
+      // Prevents auto-filer pipelines from burning their daily quota on repeated
+      // identical filings that editor feedback can never reach in time (issue #845).
+      const h24Ago = new Date(now.getTime() - 24 * 3600 * 1000).toISOString();
+      const incomingSources = (sources as Array<{ url: string }>) ?? [];
+      const primaryUrl = incomingSources.length > 0 ? (incomingSources[0].url ?? null) : null;
+      if (primaryUrl) {
+        const recentRejectRows = this.ctx.storage.sql
+          .exec(
+            `SELECT id, sources, publisher_feedback FROM signals
+             WHERE btc_address = ? AND beat_slug = ? AND status = 'rejected' AND created_at >= ?
+             ORDER BY created_at DESC LIMIT 20`,
+            btc_address as string,
+            beat_slug as string,
+            h24Ago
+          )
+          .toArray();
+        for (const row of recentRejectRows) {
+          const r = row as Record<string, unknown>;
+          try {
+            const priorSources = JSON.parse(r.sources as string) as Array<{ url: string }>;
+            if (priorSources.length > 0 && priorSources[0].url === primaryUrl) {
+              return c.json(
+                {
+                  ok: false,
+                  error: "Duplicate filing: this source URL was already rejected for this beat in the past 24h. Review editor feedback before refiling.",
+                  code: "DUPLICATE_REJECTED",
+                  rejected_signal_id: r.id as string,
+                  publisherFeedback: r.publisher_feedback as string | null,
+                } as unknown as DOResult<Signal>,
+                409
+              );
+            }
+          } catch {
+            // malformed sources JSON on a prior row — skip
+          }
+        }
+      }
+
       const stagedPending = body.pending_payment === true;
       const providedSignalId = typeof body.signal_id === "string" ? body.signal_id.trim() : "";
       const signalId = providedSignalId.length > 0 ? providedSignalId : generateId();

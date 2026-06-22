@@ -333,7 +333,13 @@ export interface DailyLimitInfo {
   retry_after: number;
 }
 
-export type CreateSignalResult = DOResult<Signal> & { cooldown?: CooldownInfo; daily_limit?: DailyLimitInfo };
+export interface DuplicateRejectedInfo {
+  code: "DUPLICATE_REJECTED";
+  rejected_signal_id: string;
+  publisherFeedback: string | null;
+}
+
+export type CreateSignalResult = DOResult<Signal> & { cooldown?: CooldownInfo; daily_limit?: DailyLimitInfo; duplicate?: DuplicateRejectedInfo };
 
 export async function createSignal(
   env: Env,
