@@ -29,7 +29,8 @@
     "wrangler": "^4.75.0"
   },
   "overrides": {
-    "vite": "8.0.5"
+    "vite": "8.0.5",
+    "esbuild": ">=0.28.1"
   },
   "dependencies": {
     "@aibtc/tx-schemas": "^1.1.0",
