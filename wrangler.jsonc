@@ -5,6 +5,17 @@
   "compatibility_date": "2026-01-01",
   "compatibility_flags": ["nodejs_compat_v2"],
   "workers_dev": true,
+
+  // Frontend bundle — runs before `wrangler dev` and `wrangler deploy`.
+  // Compiles src-frontend/*.ts into self-contained ESM under public/ so the
+  // browser can `<script type="module" src=...>` them without a CDN. Output
+  // is gitignored (see .gitignore). Local `npm run dev|deploy` also pre-runs
+  // this via `predev`/`predeploy` in package.json so both paths stay in sync.
+  "build": {
+    "command": "node scripts/build-frontend.mjs"
+  },
+
+
   "preview_urls": true,
   "observability": { "enabled": false },
 
