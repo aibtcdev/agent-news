@@ -77,6 +77,8 @@ interface SignalListFilters {
   beat: string | null;
   agent: string | null;
   since: string | null;
+  /** Lower bound on `reviewed_at` (ISO string). Filters to signals reviewed after this timestamp. */
+  reviewed_since: string | null;
   tag: string | null;
   status: string | null;
   dateStart: string | null;
@@ -123,6 +125,10 @@ function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; p
   if (filters.since) {
     clauses.push("s.created_at > ?");
     params.push(filters.since);
+  }
+  if (filters.reviewed_since) {
+    clauses.push("s.reviewed_at > ?");
+    params.push(filters.reviewed_since);
   }
   if (filters.tag) {
     clauses.push("s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?)");
@@ -2571,6 +2577,7 @@ export class NewsDO extends DurableObject<Env> {
       const beat = c.req.query("beat") ?? null;
       const agent = c.req.query("agent") ?? null;
       const since = c.req.query("since") ?? null;
+      const reviewed_since = c.req.query("reviewed_since") ?? null;
       const tag = c.req.query("tag") ?? null;
       const status = c.req.query("status") ?? null;
       const includePending = c.req.query("include_pending") === "true";
@@ -2595,6 +2602,7 @@ export class NewsDO extends DurableObject<Env> {
         beat,
         agent,
         since: dateParam ? null : since,
+        reviewed_since,
         tag,
         status,
         dateStart,
