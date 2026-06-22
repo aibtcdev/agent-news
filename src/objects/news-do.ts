@@ -3,8 +3,8 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
-import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
+import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate, signalContentFingerprint } from "../lib/helpers";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES } from "./schema";
 import { scoreSignal } from "../lib/signal-scorer";
 
@@ -2924,6 +2924,65 @@ export class NewsDO extends DurableObject<Env> {
       const sanitizedBody = signalBody ? sanitizeString(signalBody, 1000) : null;
       const signalTags = (tags as string[]) ?? [];
       const disclosure = body.disclosure ? sanitizeString(body.disclosure, 500) : "";
+
+      // Filing-side dedup gate (issue #845): if this agent already had a
+      // content-identical signal rejected on this beat within the dedup
+      // window, block the re-file and hand the editor's feedback back to the
+      // filer — so an auto-filer that doesn't read feedback either incorporates
+      // it (via a correction on the rejected signal) or backs off, instead of
+      // burning its daily cap (and any payment) on a filing that can't land.
+      // Runs after the cap checks so a quota-exhausted agent still sees the cap
+      // message first; runs for staged pending_payment rows too, so the gate
+      // fires before the agent pays.
+      const fingerprint = signalContentFingerprint({
+        headline: sanitizeString(headline, 120),
+        body: sanitizedBody,
+        sources: sources as Array<{ url?: string }> | null,
+      });
+      const dedupWindowStart = new Date(
+        Date.now() - SIGNAL_DEDUP_REJECT_WINDOW_HOURS * 3600 * 1000
+      ).toISOString();
+      const recentRejected = this.ctx.storage.sql
+        .exec(
+          `SELECT id, headline, body, sources, publisher_feedback, reviewed_at
+             FROM signals
+            WHERE btc_address = ? AND beat_slug = ? AND status = 'rejected'
+              AND reviewed_at IS NOT NULL AND reviewed_at >= ?
+            ORDER BY reviewed_at DESC`,
+          btc_address as string,
+          beat_slug as string,
+          dedupWindowStart
+        )
+        .toArray();
+      for (const r of recentRejected) {
+        const row = r as Record<string, unknown>;
+        let priorSources: Array<{ url?: string }> = [];
+        try {
+          priorSources = JSON.parse((row.sources as string) ?? "[]");
+        } catch {
+          priorSources = [];
+        }
+        const priorFingerprint = signalContentFingerprint({
+          headline: (row.headline as string) ?? "",
+          body: (row.body as string | null) ?? null,
+          sources: priorSources,
+        });
+        if (priorFingerprint === fingerprint) {
+          return c.json(
+            {
+              ok: false,
+              error:
+                "Duplicate of a signal you filed that was rejected within the last 24h, with no change since. Incorporate the editor's feedback (file a correction on the rejected signal) or change the content before re-filing.",
+              duplicate_of: {
+                signal_id: row.id as string,
+                rejected_at: row.reviewed_at as string,
+                publisher_feedback: (row.publisher_feedback as string | null) ?? null,
+              },
+            } as unknown as DOResult<Signal>,
+            409
+          );
+        }
+      }
 
       // Auto-score the signal before insert (pure function, no I/O)
       const signalScore = scoreSignal({

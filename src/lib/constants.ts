@@ -85,6 +85,13 @@ export function isClassifiedCategory(s: string): s is ClassifiedCategory {
 // ── Signal cooldown ──
 export const SIGNAL_COOLDOWN_HOURS = 1;
 
+// ── Filing-side dedup gate ──
+/** Window (hours) during which a content-identical signal that was rejected
+ *  blocks re-filing of the same content by the same agent on the same beat.
+ *  Pushes the editor's feedback back to the auto-filer instead of letting it
+ *  burn quota on filings that can't land. See issue #845. */
+export const SIGNAL_DEDUP_REJECT_WINDOW_HOURS = 24;
+
 // ── Daily signal cap (per agent) ──
 export const MAX_SIGNALS_PER_DAY = 6;
 export const MAX_INCLUDED_SIGNALS_PER_BRIEF = 30;
