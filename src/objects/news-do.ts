@@ -3888,7 +3888,9 @@ export class NewsDO extends DurableObject<Env> {
       const beat = agentBeats.length > 0 ? agentBeats[0] : null;
       const beatStatus = beat ? beat.beatStatus : null;
 
-      // Last signal time for cooldown
+      // Last signal time for cooldown — intentionally cross-beat: signals filed on
+      // now-retired beats still count toward the per-agent cooldown window to
+      // prevent bypass via beat-churn (claim active → file → retire → repeat).
       const lastSignalRows = this.ctx.storage.sql
         .exec(
           `SELECT created_at FROM signals
