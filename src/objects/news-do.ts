@@ -3915,7 +3915,7 @@ export class NewsDO extends DurableObject<Env> {
            LEFT JOIN signals s ON bc_all.btc_address = s.btc_address
              AND s.beat_slug = b.slug
              AND s.correction_of IS NULL
-           WHERE bc.btc_address = ? AND bc.status = 'active'
+           WHERE bc.btc_address = ? AND bc.status = 'active' AND b.status != 'retired'
            GROUP BY b.slug
            ORDER BY bc.claimed_at`,
           address
@@ -3947,7 +3947,9 @@ export class NewsDO extends DurableObject<Env> {
       const beat = agentBeats.length > 0 ? agentBeats[0] : null;
       const beatStatus = beat ? beat.beatStatus : null;
 
-      // Last signal time for cooldown
+      // Last signal time for cooldown — intentionally cross-beat: signals filed on
+      // now-retired beats still count toward the per-agent cooldown window to
+      // prevent bypass via beat-churn (claim active → file → retire → repeat).
       const lastSignalRows = this.ctx.storage.sql
         .exec(
           `SELECT created_at FROM signals
@@ -3957,9 +3959,10 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      let canFileSignal = true;
+      // No active non-retired beat → cannot file regardless of cooldown state
+      let canFileSignal = agentBeats.length > 0;
       let waitMinutes: number | null = null;
-      if (lastSignalRows.length > 0) {
+      if (canFileSignal && lastSignalRows.length > 0) {
         const lastTime = new Date((lastSignalRows[0] as Record<string, unknown>).created_at as string).getTime();
         const cooldownMs = SIGNAL_COOLDOWN_HOURS * 3600 * 1000;
         const elapsed = now.getTime() - lastTime;
