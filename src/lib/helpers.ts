@@ -50,10 +50,10 @@ export function generateId(): string {
  * so cosmetic-only changes still collide; reordering sources or editing the
  * body enough to change these normalized values produces a new fingerprint.
  *
- * Also normalizes 4+ digit numeric runs (block numbers, timestamps) to {N}
- * to catch template-bleed re-files where only rolling numeric fields change
- * (issue #849). This prevents auto-filer templates from bypassing the gate
- * when the same signal logic re-runs with updated block counts/prices.
+ * Also normalizes known rolling numeric fields (block heights, transaction
+ * counts, confirmation counts) to {N} to catch template-bleed re-files where
+ * only those counters change (issue #849). Years and other meaningful numeric
+ * identifiers are left intact so genuinely distinct signals stay distinct.
  *
  * Pass the same (sanitized) values that get persisted so a stored rejected
  * signal and a fresh filing of identical content yield the same string.
@@ -65,7 +65,11 @@ export function signalContentFingerprint(input: {
 }): string {
   const normalize = (s: string) => {
     const collapsed = s.trim().toLowerCase().replace(/\s+/g, " ");
-    return collapsed.replace(/\b\d{4,}\b/g, "{N}");
+    return collapsed
+      .replace(/\bblock\s+#?\d+\b/g, "block {N}")
+      .replace(/\bheight\s+#?\d+\b/g, "height {N}")
+      .replace(/\b\d+\s+transactions?\b/g, "{N} transactions")
+      .replace(/\b\d+\s+confirmations?\b/g, "{N} confirmations");
   };
   const primaryUrl = input.sources?.[0]?.url ? normalize(input.sources[0].url) : "";
   return [normalize(input.headline ?? ""), normalize(input.body ?? ""), primaryUrl].join(" ");

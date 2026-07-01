@@ -77,15 +77,18 @@ describe("signalContentFingerprint", () => {
     expect(signalContentFingerprint(filing1)).toBe(signalContentFingerprint(filing2));
   });
 
-  it("does not normalize 4-5 digit numbers (e.g. years, small counts)", () => {
+  it("does not normalize years — year-only change with identical body stays distinct", () => {
+    // Isolates a year-in-headline change with an otherwise identical body.
+    // With a blanket \d{4,} regex both "2025" and "2026" collapse to "{N}",
+    // falsely deduping signals that are genuinely different.
     const signal2025 = {
       headline: "SIP-031 Hard Fork scheduled for July 2025",
-      body: "The upgrade targets block 907740.",
+      body: "The upgrade targets the ecosystem.",
       sources: [{ url: "https://example.com/sip31" }],
     };
     const signal2026 = {
       headline: "SIP-031 Hard Fork scheduled for July 2026",
-      body: "The upgrade targeted block 907740.",
+      body: "The upgrade targets the ecosystem.",
       sources: [{ url: "https://example.com/sip31" }],
     };
     expect(signalContentFingerprint(signal2025)).not.toBe(signalContentFingerprint(signal2026));
