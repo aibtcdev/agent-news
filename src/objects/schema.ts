@@ -172,6 +172,18 @@ CREATE INDEX IF NOT EXISTS idx_referral_scout           ON referral_credits(scou
 CREATE INDEX IF NOT EXISTS idx_referral_recruit         ON referral_credits(recruit_address);
 CREATE INDEX IF NOT EXISTS idx_payment_staging_status   ON payment_staging(stage_status);
 CREATE INDEX IF NOT EXISTS idx_payment_staging_status_created ON payment_staging(stage_status, created_at);
+
+-- Materialised top-N leaderboard snapshot (single row, id = 1). Pure cache:
+-- queryLeaderboard() scans the signals table several times per call, so the hot
+-- read paths (/init, /leaderboard, /correspondents-bundle) read this one row
+-- instead of recomputing. Holds no durable data — if lost, the next read simply
+-- recomputes and repopulates it. Kept in the always-re-applied base schema so it
+-- self-heals on every cold start (no migration versioning needed).
+CREATE TABLE IF NOT EXISTS leaderboard_cache (
+  id          INTEGER PRIMARY KEY CHECK (id = 1),
+  computed_at TEXT NOT NULL,
+  entries     TEXT NOT NULL
+);
 `;
 
 /**
