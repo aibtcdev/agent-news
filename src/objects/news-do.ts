@@ -314,6 +314,13 @@ function rowToSignal(row: Record<string, unknown>): Signal {
 const FRONT_PAGE_WINDOW_SQL = "-2 days";
 const FRONT_PAGE_MAX_ROWS = 200;
 
+// Leaderboard materialisation — see getLeaderboardCached(). CACHE_SIZE is the
+// top-N stored; all hot read paths request ≤ this. TTL bounds staleness (and
+// therefore how often the expensive full-table scan runs) to one recompute per
+// window per read burst.
+const LEADERBOARD_CACHE_SIZE = 200;
+const LEADERBOARD_CACHE_TTL_MS = 60_000;
+
 // ISO 8601 'now' for SQLite comparators against ISO-stored timestamp columns
 // (e.g. classifieds.expires_at). Default datetime('now') returns
 // 'YYYY-MM-DD HH:MM:SS' (no T, no Z), and a same-day lex compare puts 'T'
@@ -5369,7 +5376,7 @@ export class NewsDO extends DurableObject<Env> {
       // doesn't break the correspondents endpoint (preserves old .catch(() => []) behavior)
       let leaderboard: Array<Record<string, unknown>> = [];
       try {
-        leaderboard = this.queryLeaderboard(200);
+        leaderboard = this.getLeaderboardCached(200);
       } catch (e) {
         console.error("Leaderboard query failed in correspondents bundle:", e);
       }
@@ -5500,7 +5507,7 @@ export class NewsDO extends DurableObject<Env> {
       // Leaderboard — wrapped in try/catch to preserve partial results on failure
       let leaderboard: Array<Record<string, unknown>> = [];
       try {
-        leaderboard = this.queryLeaderboard(200);
+        leaderboard = this.getLeaderboardCached(200);
       } catch (e) {
         console.error("Leaderboard query failed in init bundle:", e);
       }
@@ -5552,7 +5559,7 @@ export class NewsDO extends DurableObject<Env> {
 
     // GET /leaderboard — weighted scores across all roles
     this.router.get("/leaderboard", (c) => {
-      const rows = this.queryLeaderboard(200);
+      const rows = this.getLeaderboardCached(200);
       return c.json({ ok: true, data: rows } satisfies DOResult<unknown[]>);
     });
 
@@ -5716,6 +5723,11 @@ export class NewsDO extends DurableObject<Env> {
            )`
         );
 
+        // Invalidate the materialised leaderboard so post-reset reads recompute
+        // from the now-cleared scoring tables instead of serving stale scores
+        // for up to the cache TTL.
+        this.ctx.storage.sql.exec("DELETE FROM leaderboard_cache");
+
         return c.json({
           ok: true,
           data: {
@@ -5802,6 +5814,14 @@ export class NewsDO extends DurableObject<Env> {
       if (seededSignalAddresses.size > 0) {
         this.recomputeCorrespondentStatsFor([...seededSignalAddresses]);
       }
+
+      // Bulk seeding changes every leaderboard scoring input (signals,
+      // corrections, referrals, earnings, snapshots) but bypasses the normal
+      // write path, so drop the materialised leaderboard here too — same
+      // rationale as the correspondent_stats refresh above. Without this, tests
+      // that seed then read /leaderboard or /init would see a stale cached
+      // snapshot from a prior seed within the TTL window.
+      this.ctx.storage.sql.exec("DELETE FROM leaderboard_cache");
 
       // Seed signal_tags
       if (Array.isArray(body.signal_tags)) {
@@ -6330,6 +6350,63 @@ export class NewsDO extends DurableObject<Env> {
         limit
       )
       .toArray();
+  }
+
+  /**
+   * Read-through cache in front of queryLeaderboard().
+   *
+   * queryLeaderboard() scans the ~30k-row signals table several times per call
+   * (a DISTINCT-since-epoch scan plus two 30-day GROUP BY re-scans). It ran on
+   * every /init, /leaderboard, and /correspondents-bundle request — the single
+   * largest driver of the DO's rows-read usage. This materialises the top-N into
+   * `leaderboard_cache` (one row) and serves reads from it, recomputing at most
+   * once per LEADERBOARD_CACHE_TTL_MS.
+   *
+   * Staleness is bounded by the TTL — acceptable for a leaderboard already served
+   * to clients with minute-scale s-maxage. Callers that need exact, unbounded
+   * results (weekly payouts, per-address verify, reset snapshots) keep calling
+   * queryLeaderboard() directly. `/leaderboard/reset` clears this cache so a
+   * post-reset read never serves pre-reset scores.
+   *
+   * Best-effort: any cache read/parse/write failure falls back to a live query,
+   * so the leaderboard can never break on a cache blip.
+   */
+  private getLeaderboardCached(limit: number): Array<Record<string, unknown>> {
+    // The cache only holds the top LEADERBOARD_CACHE_SIZE; larger asks go live.
+    if (limit > LEADERBOARD_CACHE_SIZE) return this.queryLeaderboard(limit);
+
+    const now = Date.now();
+    try {
+      const rows = this.ctx.storage.sql
+        .exec("SELECT computed_at, entries FROM leaderboard_cache WHERE id = 1")
+        .toArray();
+      if (rows.length > 0) {
+        const row = rows[0] as { computed_at: string; entries: string };
+        const age = now - Date.parse(row.computed_at);
+        if (age >= 0 && age < LEADERBOARD_CACHE_TTL_MS) {
+          const entries = JSON.parse(row.entries) as Array<Record<string, unknown>>;
+          return entries.slice(0, limit);
+        }
+      }
+    } catch (e) {
+      console.error("[leaderboard cache] read failed, recomputing:", e);
+    }
+
+    const fresh = this.queryLeaderboard(LEADERBOARD_CACHE_SIZE);
+    try {
+      this.ctx.storage.sql.exec(
+        `INSERT INTO leaderboard_cache (id, computed_at, entries)
+         VALUES (1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           computed_at = excluded.computed_at,
+           entries = excluded.entries`,
+        new Date(now).toISOString(),
+        JSON.stringify(fresh)
+      );
+    } catch (e) {
+      console.error("[leaderboard cache] write failed:", e);
+    }
+    return fresh.slice(0, limit);
   }
 
   /**
