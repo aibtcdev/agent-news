@@ -1405,6 +1405,25 @@ export class NewsDO extends DurableObject<Env> {
     // Internal Hono router for DO-internal routing
     this.router = new Hono();
 
+    // Invalidate the materialised leaderboard after any successful mutating
+    // request. queryLeaderboard()'s scoring inputs — signals, brief_signals,
+    // corrections, referral_credits, earnings, streaks — are all written by
+    // non-GET routes, so one post-dispatch hook keeps the cache fresh on writes
+    // instead of waiting out LEADERBOARD_CACHE_TTL_MS. Gating on HTTP method
+    // (rather than an explicit route list) means new mutating routes are covered
+    // automatically and no scoring write can be missed; the only cost is an
+    // occasional redundant invalidation from a non-scoring write (e.g. /config),
+    // which merely triggers one extra recompute on the next read. The TTL remains
+    // the backstop for the one write path that is not a router request — the
+    // alarm's payment-finalize sweep, which invalidates explicitly (see alarm()).
+    this.router.use("*", async (c, next) => {
+      await next();
+      const method = c.req.method;
+      if (method !== "GET" && method !== "HEAD" && c.res.status < 400) {
+        this.invalidateLeaderboardCache();
+      }
+    });
+
     this.router.get("/health", (c) => {
       return c.json({ ok: true, migrated: true });
     });
@@ -5723,10 +5742,9 @@ export class NewsDO extends DurableObject<Env> {
            )`
         );
 
-        // Invalidate the materialised leaderboard so post-reset reads recompute
-        // from the now-cleared scoring tables instead of serving stale scores
-        // for up to the cache TTL.
-        this.ctx.storage.sql.exec("DELETE FROM leaderboard_cache");
+        // Note: the materialised leaderboard is invalidated by the router's
+        // post-dispatch mutation hook once this handler returns, so post-reset
+        // reads recompute from the now-cleared scoring tables.
 
         return c.json({
           ok: true,
@@ -5815,13 +5833,10 @@ export class NewsDO extends DurableObject<Env> {
         this.recomputeCorrespondentStatsFor([...seededSignalAddresses]);
       }
 
-      // Bulk seeding changes every leaderboard scoring input (signals,
-      // corrections, referrals, earnings, snapshots) but bypasses the normal
-      // write path, so drop the materialised leaderboard here too — same
-      // rationale as the correspondent_stats refresh above. Without this, tests
-      // that seed then read /leaderboard or /init would see a stale cached
+      // Note: the router's post-dispatch mutation hook drops the materialised
+      // leaderboard once this seed request returns, so a subsequent /leaderboard
+      // or /init read recomputes from the freshly seeded rows rather than a stale
       // snapshot from a prior seed within the TTL window.
-      this.ctx.storage.sql.exec("DELETE FROM leaderboard_cache");
 
       // Seed signal_tags
       if (Array.isArray(body.signal_tags)) {
@@ -6410,6 +6425,22 @@ export class NewsDO extends DurableObject<Env> {
   }
 
   /**
+   * Drop the materialised leaderboard so the next read recomputes from live
+   * tables. Single-row delete — cheap — and best-effort: a failure just leaves
+   * the LEADERBOARD_CACHE_TTL_MS window to expire the entry instead. Invoked by
+   * the post-dispatch mutation hook (see the router `use` middleware) and the
+   * alarm's payment-finalize path so writes reflect on the leaderboard without
+   * waiting out the TTL.
+   */
+  private invalidateLeaderboardCache(): void {
+    try {
+      this.ctx.storage.sql.exec("DELETE FROM leaderboard_cache");
+    } catch (e) {
+      console.error("[leaderboard cache] invalidate failed:", e);
+    }
+  }
+
+  /**
    * Reconcile staged x402 payments whose client never polled /api/payment-status.
    * Picks up to `limit` rows in 'staged' older than `graceMs`, queries the relay,
    * and applies terminal outcomes via reconcileStageRow. Returns the number of
@@ -6441,7 +6472,12 @@ export class NewsDO extends DurableObject<Env> {
    */
   async alarm(): Promise<void> {
     try {
-      await this.sweepStagedPayments();
+      // Finalising staged signals bumps scoring inputs (correspondent_stats,
+      // streaks, referral credits), so drop the leaderboard cache when the sweep
+      // actually reconciled rows. This is the one scoring write path that does
+      // not flow through the router's post-dispatch invalidation hook.
+      const reconciled = await this.sweepStagedPayments();
+      if (reconciled > 0) this.invalidateLeaderboardCache();
     } catch (err) {
       console.error("[alarm] sweepStagedPayments threw:", err);
     }
