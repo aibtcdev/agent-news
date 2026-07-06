@@ -59,9 +59,16 @@ async function doFetch<T>(
 // Beats
 // ---------------------------------------------------------------------------
 
-export async function listBeats(env: Env): Promise<Beat[]> {
+/**
+ * List beats. By default each beat carries `member_count` only; the full
+ * `members` roster (~thousands of rows across all beats) is fetched from the DO
+ * solely when `includeMembers` is true — the Bureau/leaderboard paths that need
+ * per-member addresses. Everything else (homepage, /api/beats without
+ * ?include=members, skills, sitemap) takes the cheap count.
+ */
+export async function listBeats(env: Env, includeMembers = false): Promise<Beat[]> {
   const stub = getStub(env);
-  const result = await doFetch<Beat[]>(stub, "/beats");
+  const result = await doFetch<Beat[]>(stub, includeMembers ? "/beats?include=members" : "/beats");
   if (!result.ok) throw new Error(result.error ?? "Failed to list beats");
   if (result.data === undefined) throw new Error("Missing data in response");
   return result.data;

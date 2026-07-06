@@ -1997,6 +1997,7 @@ export class NewsDO extends DurableObject<Env> {
 
     // GET /beats — list all beats ordered by name; retired status from DB, active/inactive computed from signal activity
     this.router.get("/beats", (c) => {
+      const includeMembers = c.req.query("include") === "members";
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT b.*, (
@@ -2014,24 +2015,44 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      // Fetch all active claims for member lists
-      const claimRows = this.ctx.storage.sql
-        .exec(
-          `SELECT beat_slug, btc_address, claimed_at, status
-           FROM beat_claims WHERE status = 'active'
-           ORDER BY claimed_at`
-        )
-        .toArray();
+      // Member data. The full per-member roster is only needed by
+      // ?include=members callers (Bureau page, leaderboard). The default path
+      // takes per-beat counts so a hot, frequently-hit endpoint doesn't
+      // materialise every active claim (~thousands of rows across all beats)
+      // into JS objects just to report memberCount.
       const claimsByBeat = new Map<string, Array<{ btc_address: string; claimed_at: string; status: string }>>();
-      for (const cr of claimRows) {
-        const claim = cr as Record<string, unknown>;
-        const slug = claim.beat_slug as string;
-        if (!claimsByBeat.has(slug)) claimsByBeat.set(slug, []);
-        claimsByBeat.get(slug)!.push({
-          btc_address: claim.btc_address as string,
-          claimed_at: claim.claimed_at as string,
-          status: claim.status as string,
-        });
+      const countByBeat = new Map<string, number>();
+      if (includeMembers) {
+        const claimRows = this.ctx.storage.sql
+          .exec(
+            `SELECT beat_slug, btc_address, claimed_at, status
+             FROM beat_claims WHERE status = 'active'
+             ORDER BY claimed_at`
+          )
+          .toArray();
+        for (const cr of claimRows) {
+          const claim = cr as Record<string, unknown>;
+          const slug = claim.beat_slug as string;
+          if (!claimsByBeat.has(slug)) claimsByBeat.set(slug, []);
+          claimsByBeat.get(slug)!.push({
+            btc_address: claim.btc_address as string,
+            claimed_at: claim.claimed_at as string,
+            status: claim.status as string,
+          });
+        }
+        for (const [slug, list] of claimsByBeat) countByBeat.set(slug, list.length);
+      } else {
+        const countRows = this.ctx.storage.sql
+          .exec(
+            `SELECT beat_slug, COUNT(*) as member_count
+             FROM beat_claims WHERE status = 'active'
+             GROUP BY beat_slug`
+          )
+          .toArray();
+        for (const cr of countRows) {
+          const r = cr as { beat_slug: string; member_count: number };
+          countByBeat.set(r.beat_slug, Number(r.member_count) || 0);
+        }
       }
 
       // Fetch active editor per beat (one per beat enforced by registration logic)
@@ -2077,7 +2098,8 @@ export class NewsDO extends DurableObject<Env> {
           daily_approved_limit: row.daily_approved_limit as number | null,
           editor_review_rate_sats: row.editor_review_rate_sats as number | null,
           status,
-          members: claimsByBeat.get(row.slug as string) ?? [],
+          ...(includeMembers ? { members: claimsByBeat.get(row.slug as string) ?? [] } : {}),
+          member_count: countByBeat.get(row.slug as string) ?? 0,
           editor: editorByBeat.get(row.slug as string) ?? null,
         } as Beat;
       });

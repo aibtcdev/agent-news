@@ -157,8 +157,12 @@ export interface Beat {
   readonly editor_review_rate_sats?: number | null;
   /** "retired" is stored in DB (migration 22); "active"/"inactive" computed from signal activity */
   readonly status?: "active" | "inactive" | "retired";
-  /** Active members from beat_claims — populated when joined */
+  /** Active members from beat_claims — only populated when the caller requests
+   *  the full roster (listBeats(env, true) / GET /beats?include=members). */
   readonly members?: BeatMember[];
+  /** Count of active members — always populated; the cheap default when the
+   *  full `members` roster is not requested. */
+  readonly member_count?: number;
   /** Active editor for this beat (one per beat, null when unassigned) */
   readonly editor: { btc_address: string; registered_at: string } | null;
 }
