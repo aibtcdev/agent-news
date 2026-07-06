@@ -1999,13 +1999,17 @@ export class NewsDO extends DurableObject<Env> {
     this.router.get("/beats", (c) => {
       const rows = this.ctx.storage.sql
         .exec(
-          `SELECT b.*, MAX(s.created_at) as last_signal_at
+          `SELECT b.*, (
+             -- Per-beat last activity via idx_signals_beat_created (beat_slug,
+             -- created_at DESC). Replaces a beats x active-members x signals
+             -- fan-out that read O(members x signals) rows just to derive one MAX
+             -- per beat; see the /status rewrite. Same beat-level semantic.
+             SELECT MAX(s.created_at)
+             FROM signals s
+             WHERE s.beat_slug = b.slug
+               AND s.correction_of IS NULL
+           ) AS last_signal_at
            FROM beats b
-           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
-           LEFT JOIN signals s ON bc.btc_address = s.btc_address
-             AND s.beat_slug = b.slug
-             AND s.correction_of IS NULL
-           GROUP BY b.slug
            ORDER BY b.name`
         )
         .toArray();
@@ -2127,14 +2131,16 @@ export class NewsDO extends DurableObject<Env> {
       const slug = c.req.param("slug");
       const rows = this.ctx.storage.sql
         .exec(
-          `SELECT b.*, MAX(s.created_at) as last_signal_at
+          `SELECT b.*, (
+             -- Per-beat last activity via idx_signals_beat_created; replaces a
+             -- member fan-out join (see the /status rewrite). Beat-level semantic.
+             SELECT MAX(s.created_at)
+             FROM signals s
+             WHERE s.beat_slug = b.slug
+               AND s.correction_of IS NULL
+           ) AS last_signal_at
            FROM beats b
-           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
-           LEFT JOIN signals s ON bc.btc_address = s.btc_address
-             AND s.beat_slug = b.slug
-             AND s.correction_of IS NULL
-           WHERE b.slug = ?
-           GROUP BY b.slug`,
+           WHERE b.slug = ?`,
           slug
         )
         .toArray();
@@ -2252,14 +2258,16 @@ export class NewsDO extends DurableObject<Env> {
       // Check for existing beat — allow join if active, reclaim if inactive
       const existing = this.ctx.storage.sql
         .exec(
-          `SELECT b.*, MAX(s.created_at) as last_signal_at
+          `SELECT b.*, (
+             -- Per-beat last activity via idx_signals_beat_created; replaces a
+             -- member fan-out join (see the /status rewrite). Beat-level semantic.
+             SELECT MAX(s.created_at)
+             FROM signals s
+             WHERE s.beat_slug = b.slug
+               AND s.correction_of IS NULL
+           ) AS last_signal_at
            FROM beats b
-           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
-           LEFT JOIN signals s ON bc.btc_address = s.btc_address
-             AND s.beat_slug = b.slug
-             AND s.correction_of IS NULL
-           WHERE b.slug = ?
-           GROUP BY b.slug`,
+           WHERE b.slug = ?`,
           slug as string
         )
         .toArray();
@@ -5390,13 +5398,17 @@ export class NewsDO extends DurableObject<Env> {
 
       const beats = this.ctx.storage.sql
         .exec(
-          `SELECT b.*, MAX(s.created_at) as last_signal_at
+          `SELECT b.*, (
+             -- Per-beat last activity via idx_signals_beat_created (beat_slug,
+             -- created_at DESC). Replaces a beats x active-members x signals
+             -- fan-out that read O(members x signals) rows just to derive one MAX
+             -- per beat; see the /status rewrite. Same beat-level semantic.
+             SELECT MAX(s.created_at)
+             FROM signals s
+             WHERE s.beat_slug = b.slug
+               AND s.correction_of IS NULL
+           ) AS last_signal_at
            FROM beats b
-           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
-           LEFT JOIN signals s ON bc.btc_address = s.btc_address
-             AND s.beat_slug = b.slug
-             AND s.correction_of IS NULL
-           GROUP BY b.slug
            ORDER BY b.name`
         )
         .toArray();
@@ -5441,13 +5453,17 @@ export class NewsDO extends DurableObject<Env> {
       // Beats (with status computation via beat_claims)
       const beatRows = this.ctx.storage.sql
         .exec(
-          `SELECT b.*, MAX(s.created_at) as last_signal_at
+          `SELECT b.*, (
+             -- Per-beat last activity via idx_signals_beat_created (beat_slug,
+             -- created_at DESC). Replaces a beats x active-members x signals
+             -- fan-out that read O(members x signals) rows just to derive one MAX
+             -- per beat; see the /status rewrite. Same beat-level semantic.
+             SELECT MAX(s.created_at)
+             FROM signals s
+             WHERE s.beat_slug = b.slug
+               AND s.correction_of IS NULL
+           ) AS last_signal_at
            FROM beats b
-           LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
-           LEFT JOIN signals s ON bc.btc_address = s.btc_address
-             AND s.beat_slug = b.slug
-             AND s.correction_of IS NULL
-           GROUP BY b.slug
            ORDER BY b.name`
         )
         .toArray();

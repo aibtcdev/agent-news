@@ -141,4 +141,89 @@ describe("/status beat-activity query efficiency", () => {
     // signal fan-out is gone.
     expect(result.newRows).toBeLessThan(result.signals / 10);
   });
+
+  // Same fan-out lived in the "all beats" list query used by /beats,
+  // /correspondents-bundle and the /init beats block. This guards that rewrite.
+  it("all-beats list reads O(beats), not O(members × signals)", async () => {
+    const id = testEnv.NEWS_DO.idFromName("news-singleton");
+    const stub = testEnv.NEWS_DO.get(id);
+
+    const result = (await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql;
+      const now = new Date().toISOString();
+      const BEATS = 4;
+      const MEMBERS = 60;
+      const PER = 8;
+
+      for (let b = 0; b < BEATS; b++) {
+        const beat = `list-beat-${b}`;
+        sql.exec(
+          "INSERT OR IGNORE INTO beats (slug, name, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+          beat,
+          `List Beat ${b}`,
+          "creator",
+          now,
+          now
+        );
+        for (let m = 0; m < MEMBERS; m++) {
+          const addr = `bc1qlist${b}member${String(m).padStart(28, "0")}`;
+          sql.exec(
+            "INSERT OR IGNORE INTO beat_claims (beat_slug, btc_address, claimed_at, status) VALUES (?, ?, ?, 'active')",
+            beat,
+            addr,
+            now
+          );
+          for (let s = 0; s < PER; s++) {
+            sql.exec(
+              `INSERT OR IGNORE INTO signals
+                 (id, beat_slug, btc_address, headline, sources, created_at, updated_at, status, correction_of)
+               VALUES (?, ?, ?, ?, '[]', ?, ?, 'approved', NULL)`,
+              `lsig-${b}-${m}-${s}`,
+              beat,
+              addr,
+              `h ${b}-${m}-${s}`,
+              new Date(Date.now() - (m * PER + s) * 60_000).toISOString(),
+              now
+            );
+          }
+        }
+      }
+      sql.exec("ANALYZE");
+
+      const oldCursor = sql.exec(
+        `SELECT b.*, MAX(s.created_at) as last_signal_at
+         FROM beats b
+         LEFT JOIN beat_claims bc ON b.slug = bc.beat_slug AND bc.status = 'active'
+         LEFT JOIN signals s ON bc.btc_address = s.btc_address
+           AND s.beat_slug = b.slug
+           AND s.correction_of IS NULL
+         GROUP BY b.slug
+         ORDER BY b.name`
+      );
+      oldCursor.toArray();
+      const oldRows = oldCursor.rowsRead;
+
+      const newCursor = sql.exec(
+        `SELECT b.*, (
+           SELECT MAX(s.created_at)
+           FROM signals s
+           WHERE s.beat_slug = b.slug
+             AND s.correction_of IS NULL
+         ) AS last_signal_at
+         FROM beats b
+         ORDER BY b.name`
+      );
+      newCursor.toArray();
+      const newRows = newCursor.rowsRead;
+
+      return { oldRows, newRows, signals: BEATS * MEMBERS * PER };
+    })) as { oldRows: number; newRows: number; signals: number };
+
+    console.log(
+      `[beats list] seeded ${result.signals} signals → OLD rowsRead=${result.oldRows}, NEW rowsRead=${result.newRows}`
+    );
+    expect(result.newRows).toBeLessThan(result.oldRows / 5);
+    // Cost must not scale with signal count.
+    expect(result.newRows).toBeLessThan(result.signals / 10);
+  });
 });
