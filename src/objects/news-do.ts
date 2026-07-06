@@ -3931,18 +3931,35 @@ export class NewsDO extends DurableObject<Env> {
       const today = getUTCDate(now);
       const todayUTCStart = getUTCDayStart(today);
 
-      // Find all beats this agent is a member of (via beat_claims)
+      // Find all beats this agent is a member of (via beat_claims), each with the
+      // beat's last-activity timestamp.
+      //
+      // `last_signal_at` is a per-beat correlated MAX rather than a member fan-out
+      // join. The previous form joined every active member of every beat to their
+      // signals (beats × ~250 members × signals) purely to compute one MAX per
+      // beat — reading thousands of rows per /status call, which (at ~25 calls/min,
+      // uncached) was the single largest driver of the DO's rows-read bill. The
+      // correlated subquery uses idx_signals_beat_created (beat_slug, created_at
+      // DESC) to read ~1 row per beat instead.
+      //
+      // Semantic note: this is "last signal in the beat" (any author) rather than
+      // "last signal by a still-active member". Signals carry beat_slug, so for
+      // beat-activity/expiry purposes these agree except in the rare case where the
+      // single most-recent signal in a beat is from a since-departed member — in
+      // which case counting it as recent activity is at least as correct. The
+      // equivalent joins in /beats and the /init beats block still use the old
+      // member-fan-out form and should get the same rewrite for consistency.
       const beatRows = this.ctx.storage.sql
         .exec(
-          `SELECT b.*, MAX(s.created_at) as last_signal_at
+          `SELECT b.*, (
+             SELECT MAX(s.created_at)
+             FROM signals s
+             WHERE s.beat_slug = b.slug
+               AND s.correction_of IS NULL
+           ) AS last_signal_at
            FROM beat_claims bc
            JOIN beats b ON bc.beat_slug = b.slug
-           LEFT JOIN beat_claims bc_all ON b.slug = bc_all.beat_slug AND bc_all.status = 'active'
-           LEFT JOIN signals s ON bc_all.btc_address = s.btc_address
-             AND s.beat_slug = b.slug
-             AND s.correction_of IS NULL
            WHERE bc.btc_address = ? AND bc.status = 'active'
-           GROUP BY b.slug
            ORDER BY bc.claimed_at`,
           address
         )
