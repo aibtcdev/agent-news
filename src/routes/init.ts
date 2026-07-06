@@ -25,7 +25,7 @@ initRouter.get("/api/init", async (c) => {
   const cached = await edgeCacheMatch(c);
   if (cached) return cached;
 
-  const bundle = await getInitBundle(c.env);
+  const bundle = await getInitBundle(c.env, (p) => c.executionCtx.waitUntil(p));
   const today = getUTCDate();
 
   // --- Brief ---
