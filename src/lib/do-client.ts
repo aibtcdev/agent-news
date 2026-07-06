@@ -241,13 +241,72 @@ export interface InitBundle {
   signalsCount1h: number;
 }
 
-/** Fetch all initial page load data in a single DO round-trip. */
-export async function getInitBundle(env: Env): Promise<InitBundle> {
+/**
+ * Global KV cache in front of the `/init` DO call.
+ *
+ * `/api/init` is edge-cached (Workers Cache API), but that cache is *per-colo*
+ * — each of Cloudflare's ~300 data centers misses independently, and every
+ * miss recomputes the `/init` bundle on the singleton DO. The bundle's
+ * `queryLeaderboard()` scans the full `signals` table several times per call,
+ * so those per-colo misses dominated the DO's rows-read usage.
+ *
+ * KV is a *global* store, so a short-TTL entry collapses all per-colo edge
+ * misses into ~1 DO recompute per TTL window worldwide. The edge cache still
+ * serves the vast majority of requests; KV only catches the edge misses that
+ * previously fell straight through to the DO.
+ *
+ * TTL is 60s — the KV minimum, and well within the tolerance of a homepage
+ * bundle that is already served with `s-maxage` in the minutes range. The key
+ * carries a version token so a shape change to `InitBundle` cannot serve a
+ * stale, incompatible payload across a deploy (bump on any shape change).
+ */
+const INIT_BUNDLE_KV_KEY = "init-bundle:v1";
+const INIT_BUNDLE_KV_TTL_SECONDS = 60;
+
+/** Fetch the `/init` bundle straight from the DO, bypassing the KV cache. */
+async function fetchInitBundleFromDO(env: Env): Promise<InitBundle> {
   const stub = getStub(env);
   const result = await doFetch<InitBundle>(stub, "/init");
   if (!result.ok) throw new Error(result.error ?? "Failed to get init bundle");
   if (result.data === undefined) throw new Error("Missing data in response");
   return result.data;
+}
+
+/**
+ * Fetch all initial page load data in a single DO round-trip, served through a
+ * global KV cache (see above). Pass `waitUntil` (e.g.
+ * `(p) => c.executionCtx.waitUntil(p)`) so the cache write on a miss does not
+ * add latency to the response; without it the write is awaited inline.
+ *
+ * All KV access is best-effort: any cache read/write failure falls through to
+ * a direct DO fetch so the endpoint never breaks on a cache blip.
+ */
+export async function getInitBundle(
+  env: Env,
+  waitUntil?: (promise: Promise<unknown>) => void
+): Promise<InitBundle> {
+  try {
+    const cached = await env.NEWS_KV.get<InitBundle>(INIT_BUNDLE_KV_KEY, "json");
+    if (cached) return cached;
+  } catch (err) {
+    console.error("[getInitBundle] KV read failed, falling through to DO:", err);
+  }
+
+  const bundle = await fetchInitBundleFromDO(env);
+
+  const writeCache = (async () => {
+    try {
+      await env.NEWS_KV.put(INIT_BUNDLE_KV_KEY, JSON.stringify(bundle), {
+        expirationTtl: INIT_BUNDLE_KV_TTL_SECONDS,
+      });
+    } catch (err) {
+      console.error("[getInitBundle] KV write failed:", err);
+    }
+  })();
+  if (waitUntil) waitUntil(writeCache);
+  else await writeCache;
+
+  return bundle;
 }
 
 /** Fetch all approved + brief_included signals in a single DO call. */
