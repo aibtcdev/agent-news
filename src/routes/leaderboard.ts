@@ -114,7 +114,7 @@ const leaderboardRouter = new Hono<AppContext>();
 leaderboardRouter.get("/api/leaderboard", async (c) => {
   const [entries, beats] = await Promise.all([
     getLeaderboard(c.env),
-    listBeats(c.env),
+    listBeats(c.env, true), // needs the full member roster for buildBeatsByAddress
   ]);
 
   // Extract claims from beat members for buildBeatsByAddress

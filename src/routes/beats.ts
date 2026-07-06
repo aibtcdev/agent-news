@@ -23,13 +23,12 @@ beatsRouter.get("/api/beats", async (c) => {
   const cached = await edgeCacheMatch(c);
   if (cached) return cached;
 
-  const beats = await listBeats(c.env);
   const includeMembers = c.req.query("include") === "members";
+  const beats = await listBeats(c.env, includeMembers);
   const statusFilter = c.req.query("status")?.toLowerCase();
 
   // Transform snake_case → camelCase to match frontend expectations
   const transformed = beats.map((b) => {
-    const members = b.members ?? [];
     return {
       slug: b.slug,
       name: b.name,
@@ -41,8 +40,8 @@ beatsRouter.get("/api/beats", async (c) => {
       dailyApprovedLimit: b.daily_approved_limit ?? null,
       editorReviewRateSats: b.editor_review_rate_sats ?? null,
       ...(includeMembers
-        ? { members: members.map((m) => ({ address: m.btc_address, claimedAt: m.claimed_at })) }
-        : { memberCount: members.length }),
+        ? { members: (b.members ?? []).map((m) => ({ address: m.btc_address, claimedAt: m.claimed_at })) }
+        : { memberCount: b.member_count ?? 0 }),
       editor: b.editor
         ? { address: b.editor.btc_address, assignedAt: b.editor.registered_at }
         : null,
