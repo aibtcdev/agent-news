@@ -13,14 +13,27 @@
  */
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
-import type { NewsDO } from "../objects/news-do";
+import type { Env } from "../lib/types";
+
+// `env` from cloudflare:test isn't typed with this worker's bindings; the app
+// Env carries NEWS_DO (present at runtime via wrangler config).
+const testEnv = env as unknown as Env;
+
+interface Measurement {
+  oldRows: number;
+  newRows: number;
+  members: number;
+  signals: number;
+  sameLastSignal: boolean;
+  beatCount: number;
+}
 
 describe("/status beat-activity query efficiency", () => {
   it("reads O(beats) rows, not O(members × signals)", async () => {
-    const id = env.NEWS_DO.idFromName("news-singleton");
-    const stub = env.NEWS_DO.get(id);
+    const id = testEnv.NEWS_DO.idFromName("news-singleton");
+    const stub = testEnv.NEWS_DO.get(id);
 
-    const result = await runInDurableObject(stub, (_instance: NewsDO, state) => {
+    const result = (await runInDurableObject(stub, (_instance, state) => {
       const sql = state.storage.sql;
       const now = new Date().toISOString();
       const beat = "measure-beat";
@@ -110,7 +123,7 @@ describe("/status beat-activity query efficiency", () => {
           (newRowsData[0] as { last_signal_at: string }).last_signal_at,
         beatCount: newRowsData.length,
       };
-    });
+    })) as Measurement;
 
     console.log(
       `[status query] members=${result.members} signals=${result.signals} → OLD rowsRead=${result.oldRows}, NEW rowsRead=${result.newRows}`
