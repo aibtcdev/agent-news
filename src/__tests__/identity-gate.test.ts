@@ -169,33 +169,43 @@ describe("checkAgentIdentity — fail closed on API errors", () => {
     expect(result.level).toBe(2);
   });
 
-  it("does not cache the result on API failure", async () => {
-    const kv = makeKV();
-    // Both attempts fail — fail-closed result must NOT be cached
+  it("negative-caches the block briefly so an outage doesn't storm the API (#826)", async () => {
+    const store = new Map<string, string>();
+    const putArgs: Array<{ key: string; options?: { expirationTtl?: number } }> = [];
+    const kv = {
+      async get(key: string) {
+        return store.get(key) ?? null;
+      },
+      async put(key: string, value: string, options?: { expirationTtl?: number }) {
+        store.set(key, value);
+        putArgs.push({ key, options });
+      },
+    } as unknown as KVNamespace;
+
+    // Both attempts fail — fail-closed result must be cached with a short TTL
     const firstSpy = vi
       .spyOn(globalThis, "fetch")
       .mockRejectedValueOnce(new Error("timeout"))
       .mockRejectedValueOnce(new Error("timeout"));
 
-    await checkAgentIdentity(kv, "bc1qnocache");
+    const blocked = await checkAgentIdentity(kv, "bc1qstorm");
+    expect(blocked.shouldBlock).toBe(true);
+    expect(firstSpy).toHaveBeenCalledTimes(2);
+
+    // The block was written with a short (60s) TTL, not the 1h happy-path TTL
+    expect(putArgs).toHaveLength(1);
+    expect(putArgs[0].options?.expirationTtl).toBe(60);
 
     // Restore the first spy before creating a new one — stacking vi.spyOn causes double-counting
     firstSpy.mockRestore();
 
-    // Second call should hit the API again (not cached) and recover
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ found: true, level: 2, levelName: "Genesis" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        })
-      );
-
-    const result = await checkAgentIdentity(kv, "bc1qnocache");
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(result.level).toBe(2);
-    expect(result.shouldBlock).toBe(false);
+    // A follow-up request within the window hits the cached block and does NOT
+    // re-storm the API — this is the storm the negative cache exists to prevent.
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const second = await checkAgentIdentity(kv, "bc1qstorm");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(second.shouldBlock).toBe(true);
+    expect(second.apiReachable).toBe(false);
   });
 });
 
