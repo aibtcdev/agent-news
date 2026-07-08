@@ -11,6 +11,11 @@
  */
 
 const CACHE_TTL_SECONDS = 3600; // 1 hour
+// Fail-closed (shouldBlock) results are cached briefly so a sustained outage
+// doesn't turn every incoming request into a fresh 2×timeout storm against the
+// identity API (see #826). Kept short so submissions unblock quickly once the
+// API recovers; 60s is Cloudflare KV's minimum allowed expirationTtl.
+const BLOCK_CACHE_TTL_SECONDS = 60;
 const CACHE_KEY_PREFIX = "agent-level:";
 const AGENT_API_BASE = "https://aibtc.com/api/agents";
 
@@ -113,11 +118,22 @@ export async function checkAgentIdentity(
 
   // Both attempts failed. Fail-closed: do not allow unverified submissions.
   // Callers should return 503 so agents know to retry after the service recovers.
-  return {
+  const blocked: IdentityCheckResult = {
     registered: false,
     level: null,
     levelName: null,
     apiReachable: false,
     shouldBlock: true,
   };
+
+  // Negative-cache the block for a short window. Without this, every request
+  // during an outage re-runs the full initial+retry fetch (up to 6s of hung
+  // sockets each), which is the timeout storm reported in #826. A 60s TTL
+  // collapses the storm to at most one probe per address per minute while still
+  // unblocking submissions within a minute of the API recovering.
+  await kv.put(cacheKey, JSON.stringify(blocked), {
+    expirationTtl: BLOCK_CACHE_TTL_SECONDS,
+  });
+
+  return blocked;
 }
