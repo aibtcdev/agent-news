@@ -3996,10 +3996,13 @@ export class NewsDO extends DurableObject<Env> {
         .toArray();
 
       const expiryMs = BEAT_EXPIRY_DAYS * 24 * 3600 * 1000;
-      const agentBeats: Array<Record<string, unknown> & { beatStatus: "active" | "inactive" }> = [];
+      const agentBeats: Array<
+        Record<string, unknown> & { beatStatus: "active" | "inactive"; retired: boolean }
+      > = [];
       for (const r of beatRows) {
         const row = r as Record<string, unknown>;
         const lastSignalAt = row.last_signal_at as string | null;
+        const retired = row.status === "retired";
         const status: "active" | "inactive" =
           lastSignalAt && now.getTime() - new Date(lastSignalAt).getTime() < expiryMs
             ? "active"
@@ -4013,12 +4016,29 @@ export class NewsDO extends DurableObject<Env> {
           created_at: row.created_at,
           updated_at: row.updated_at,
           beatStatus: status,
+          retired,
         });
       }
 
-      // Backward compat: expose first beat as `beat` / `beatStatus`
-      const beat = agentBeats.length > 0 ? agentBeats[0] : null;
+      // Backward compat: expose a single beat as `beat` / `beatStatus`.
+      //
+      // Prefer the agent's first non-retired *active* beat, then any non-retired
+      // beat, before falling back to the oldest claim. Agents who registered on a
+      // since-retired beat (e.g. `deal-flow`) but migrated to an active one were
+      // otherwise shown that retired claim here — reading beatStatus "inactive"
+      // while canFileSignal/actions correctly said they could file, the
+      // contradiction reported in #832. Selecting an active beat aligns the
+      // display field with the filing gate instead of flapping it on cooldown.
+      const beat =
+        agentBeats.find((b) => !b.retired && b.beatStatus === "active") ??
+        agentBeats.find((b) => !b.retired) ??
+        (agentBeats.length > 0 ? agentBeats[0] : null);
       const beatStatus = beat ? beat.beatStatus : null;
+
+      // An agent whose every claimed beat is retired cannot actually file —
+      // POST /api/signals rejects retired beats. Reflect that in the gate so
+      // canFileSignal doesn't read `true` for someone who has nowhere to file.
+      const hasFileableBeat = agentBeats.some((b) => !b.retired);
 
       // Last signal time for cooldown
       const lastSignalRows = this.ctx.storage.sql
@@ -4098,6 +4118,9 @@ export class NewsDO extends DurableObject<Env> {
 
       if (agentBeats.length === 0) {
         actions.push({ type: "claim-beat", description: "Claim a news beat to start filing signals" });
+      } else if (!hasFileableBeat) {
+        canFileSignal = false;
+        actions.push({ type: "claim-beat", description: "Your beat has been retired — claim an active beat to keep filing signals" });
       } else if (signalsToday >= MAX_SIGNALS_PER_DAY) {
         canFileSignal = false;
         actions.push({ type: "daily-limit", description: `Daily limit reached (${MAX_SIGNALS_PER_DAY}/${MAX_SIGNALS_PER_DAY}). Try again tomorrow.` });
