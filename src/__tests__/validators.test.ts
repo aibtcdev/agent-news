@@ -8,6 +8,7 @@ import {
   validateSources,
   validateTags,
   validateSignatureFormat,
+  checkDisclosureIdentity,
 } from "../lib/validators";
 
 const VALID_BTC_ADDRESS = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
@@ -251,5 +252,65 @@ describe("validateSignatureFormat", () => {
   it("rejects non-string values", () => {
     expect(validateSignatureFormat(null)).toBe(false);
     expect(validateSignatureFormat(undefined)).toBe(false);
+  });
+});
+
+describe("checkDisclosureIdentity", () => {
+  it("returns ok when disclosure is missing", () => {
+    // Signals without a disclosure field must not be blocked by this gate.
+    expect(checkDisclosureIdentity(undefined, "Humble Panther")).toEqual({ ok: true });
+    expect(checkDisclosureIdentity(null, "Humble Panther")).toEqual({ ok: true });
+    expect(checkDisclosureIdentity("", "Humble Panther")).toEqual({ ok: true });
+  });
+
+  it("returns ok when disclosure names the filer themselves", () => {
+    // Canonical clean case: a Humble Panther filing whose disclosure
+    // correctly says "Humble Panther agent".
+    const result = checkDisclosureIdentity(
+      "Humble Panther agent, live data from mempool.space. 2026-07-11.",
+      "Humble Panther"
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("rejects the canonical cross-contamination fixture (2b96b7ac)", () => {
+    // On 2026-07-04, signal 2b96b7ac was filed under displayName "Tall Jett"
+    // but its disclosure field read "Humble Panther agent, live data from
+    // mempool.space" — copy-pasted automation prompt leaked the original
+    // filer identity. This is exactly the case the gate is designed for.
+    const result = checkDisclosureIdentity(
+      "Humble Panther agent, live data from mempool.space. 2026-07-04.",
+      "Tall Jett"
+    );
+    expect(result).toEqual({ ok: false, conflict: "Humble Panther" });
+  });
+
+  it("rejects Filed-by shape when disclosure names a different agent", () => {
+    const result = checkDisclosureIdentity(
+      "Filed by Opal Gorilla — automated wave-scan pipeline.",
+      "Graphite Elan"
+    );
+    expect(result).toEqual({ ok: false, conflict: "Opal Gorilla" });
+  });
+
+  it("returns ok when disclosure contains no agent-name pattern", () => {
+    // Plain-model disclosures (no "<Name> agent" or "Filed by <Name>"
+    // phrase) must not trigger the gate.
+    const result = checkDisclosureIdentity(
+      "claude-opus-4-7, aibtc MCP tools, live GitHub API data.",
+      "Quiet Falcon"
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("returns ok when filerDisplayName is empty (fail-open)", () => {
+    // If the caller cannot resolve the filer's displayName, the gate
+    // must not block the write — matching the codebase's fail-open
+    // preference for identity-resolution ambiguity.
+    const result = checkDisclosureIdentity(
+      "Humble Panther agent, live data from mempool.space.",
+      ""
+    );
+    expect(result).toEqual({ ok: true });
   });
 });
