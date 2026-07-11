@@ -313,4 +313,36 @@ describe("checkDisclosureIdentity", () => {
     );
     expect(result).toEqual({ ok: true });
   });
+
+  // Case-fold refinement (post-review, 2026-07-11)
+  it("is case-insensitive on the self-match (fail-open on casing drift)", () => {
+    // If displayName casing varies between the pipeline (e.g. "Humble Panther")
+    // and the disclosure text (e.g. "humble panther agent"), the gate should
+    // treat these as the same agent and fail open — not throw a false conflict.
+    const result = checkDisclosureIdentity(
+      "humble panther agent, live data from mempool.space.",
+      "Humble Panther"
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("normalizes whitespace on the self-match", () => {
+    // Extra internal whitespace on either side must not break the self-match.
+    const result = checkDisclosureIdentity(
+      "Humble  Panther  agent, live data from mempool.space.",
+      "Humble Panther"
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("still rejects cross-contamination when casing differs from filer", () => {
+    // Case-insensitive compare must not swallow the real conflict signal.
+    // The disclosure names a different agent than the filer (even with
+    // casing drift on the filer side).
+    const result = checkDisclosureIdentity(
+      "Humble Panther agent, live data from mempool.space.",
+      "tall jett"
+    );
+    expect(result).toEqual({ ok: false, conflict: "Humble Panther" });
+  });
 });

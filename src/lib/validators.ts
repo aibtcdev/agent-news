@@ -91,16 +91,24 @@ export function checkDisclosureIdentity(
   // Two shapes observed in cross-contamination fixtures:
   //   "<Name> agent, live data from ..."         → 2b96b7ac
   //   "Filed by <Name> — ..."                    → observed in a subset
+  // Case-insensitive at the regex level; both sides normalized before the
+  // self-match compare so a displayName casing/whitespace drift between the
+  // filing pipeline and the disclosure text fails open rather than throwing
+  // a false conflict for the same agent.
   const patterns: RegExp[] = [
-    /\b([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)\s+agent\b/,
-    /\bFiled by\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)+)\b/,
+    /\b([A-Za-z][a-z]+(?:\s[A-Za-z][a-z]+)+)\s+agent\b/i,
+    /\bFiled by\s+([A-Za-z][a-z]+(?:\s[A-Za-z][a-z]+)+)\b/i,
   ];
+
+  const normalize = (s: string): string =>
+    s.trim().toLowerCase().replace(/\s+/g, " ");
+  const filerNormalized = normalize(filerDisplayName);
 
   for (const re of patterns) {
     const match = disclosure.match(re);
     if (!match) continue;
     const disclosed = match[1];
-    if (disclosed === filerDisplayName) return { ok: true };
+    if (normalize(disclosed) === filerNormalized) return { ok: true };
     return { ok: false, conflict: disclosed };
   }
 
