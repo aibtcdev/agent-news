@@ -345,4 +345,27 @@ describe("checkDisclosureIdentity", () => {
     );
     expect(result).toEqual({ ok: false, conflict: "Humble Panther" });
   });
+
+  it("normalizes whitespace on the filer side of the self-match too", () => {
+    // Symmetry test: whitespace drift on the FILER side must also fail open.
+    // This exercises the filerNormalized branch of normalize() (vs the prior
+    // test which exercised the disclosed side).
+    const result = checkDisclosureIdentity(
+      "Humble Panther agent, live data from mempool.space.",
+      "  Humble\tPanther  "
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("still rejects when disclosure has whitespace drift but names a different agent", () => {
+    // Stress test: the disclosure has double-space drift on the name AND
+    // the filer is a completely different agent. The updated `\\s+` regex
+    // must still extract the name, and normalize() must still detect the
+    // real conflict — the whitespace fix must not swallow the signal.
+    const result = checkDisclosureIdentity(
+      "Humble  Panther  agent, live data from mempool.space.",
+      "Tall Jett"
+    );
+    expect(result).toEqual({ ok: false, conflict: "Humble  Panther" });
+  });
 });

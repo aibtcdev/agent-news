@@ -96,8 +96,8 @@ export function checkDisclosureIdentity(
   // filing pipeline and the disclosure text fails open rather than throwing
   // a false conflict for the same agent.
   const patterns: RegExp[] = [
-    /\b([A-Za-z][a-z]+(?:\s[A-Za-z][a-z]+)+)\s+agent\b/i,
-    /\bFiled by\s+([A-Za-z][a-z]+(?:\s[A-Za-z][a-z]+)+)\b/i,
+    /\b([A-Za-z][a-z]+(?:\s+[A-Za-z][a-z]+)+)\s+agent\b/i,
+    /\bFiled by\s+([A-Za-z][a-z]+(?:\s+[A-Za-z][a-z]+)+)\b/i,
   ];
 
   const normalize = (s: string): string =>
