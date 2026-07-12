@@ -91,13 +91,16 @@ export function checkDisclosureIdentity(
   // Two shapes observed in cross-contamination fixtures:
   //   "<Name> agent, live data from ..."         → 2b96b7ac
   //   "Filed by <Name> — ..."                    → observed in a subset
-  // Case-insensitive at the regex level; both sides normalized before the
-  // self-match compare so a displayName casing/whitespace drift between the
-  // filing pipeline and the disclosure text fails open rather than throwing
-  // a false conflict for the same agent.
+  // Title-Case only, capped at 3-word names, no `/i` flag. Case-fold
+  // discipline lives on the self-match compare via normalize() below —
+  // that stays lenient so "humble panther" vs "Humble Panther" self-matches
+  // still succeed. The DETECTION regexes must stay strict, or the greedy
+  // quantifier backtracks across arbitrary lowercase prose ending in the
+  // literal word "agent" (e.g. "our automated trading agent pipeline") and
+  // captures the whole prose run as a false "name."
   const patterns: RegExp[] = [
-    /\b([A-Za-z][a-z]+(?:\s+[A-Za-z][a-z]+)+)\s+agent\b/i,
-    /\bFiled by\s+([A-Za-z][a-z]+(?:\s+[A-Za-z][a-z]+)+)\b/i,
+    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s+agent\b/,
+    /\bFiled by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
   ];
 
   const normalize = (s: string): string =>
