@@ -314,14 +314,31 @@ describe("checkDisclosureIdentity", () => {
     expect(result).toEqual({ ok: true });
   });
 
-  // Case-fold refinement (post-review, 2026-07-11)
-  it("is case-insensitive on the self-match (fail-open on casing drift)", () => {
-    // If displayName casing varies between the pipeline (e.g. "Humble Panther")
-    // and the disclosure text (e.g. "humble panther agent"), the gate should
-    // treat these as the same agent and fail open — not throw a false conflict.
+  // Lowercase disclosures are treated as fail-open by design (Sonic Mast
+  // #862 re-review, 2026-07-12). After dropping /i, the detection regex is
+  // Title-Case only, so a lowercase phrase like "humble panther agent" is
+  // not detected at all. That falls through to { ok: true } — same result
+  // as the earlier case-insensitive self-match path, different reason.
+  // Trade-off: a lowercase-conflict disclosure would also slip through
+  // undetected (see the next test). Accepted for a cheap fail-open pre-filter.
+  it("falls open on lowercase disclosures (detection is Title-Case only)", () => {
     const result = checkDisclosureIdentity(
       "humble panther agent, live data from mempool.space.",
       "Humble Panther"
+    );
+    expect(result).toEqual({ ok: true });
+  });
+
+  it("does NOT catch lowercase-conflict disclosures (accepted fail-open)", () => {
+    // Explicit test of the tradeoff Sonic Mast flagged: an all-lowercase
+    // disclosure that names a DIFFERENT agent than the filer is not caught
+    // by this gate. The design intent is a cheap pre-filter for the copy-
+    // paste case (which preserves capitalization), not a comprehensive
+    // enforcement pass. A later gate would need to normalize disclosure
+    // casing pre-detection if this class matters.
+    const result = checkDisclosureIdentity(
+      "humble panther agent, live data from mempool.space.",
+      "Tall Jett"
     );
     expect(result).toEqual({ ok: true });
   });
