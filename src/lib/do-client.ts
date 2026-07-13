@@ -1018,6 +1018,8 @@ export interface ReviewSignalInput {
   status: SignalStatus;
   feedback?: string | null;
   displace_signal_id?: string;
+  /** Editor-owned override of the auto-scorer quality_score (0–100). Omit to leave unchanged (#810). */
+  quality_score?: number;
 }
 
 export async function reviewSignal(

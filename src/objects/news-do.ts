@@ -6,7 +6,7 @@ import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } fr
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate, signalContentFingerprint } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES } from "./schema";
-import { scoreSignal } from "../lib/signal-scorer";
+import { scoreSignal, withScoreOverride } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -1717,7 +1717,27 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Signal>, 400);
       }
 
-      const { btc_address, status, feedback } = body;
+      const { btc_address, status, feedback, quality_score } = body;
+
+      // Optional editor-owned score override (#810). When present it replaces
+      // the auto-scorer's quality_score; when absent the score is left untouched.
+      // Source-existence remains an editorial judgement — the system never
+      // fetches URLs. Validate before any auth/state work so bad input fails fast.
+      let scoreOverride: number | undefined; // undefined = "no change"
+      if (quality_score !== undefined && quality_score !== null) {
+        if (
+          typeof quality_score !== "number" ||
+          !Number.isInteger(quality_score) ||
+          quality_score < 0 ||
+          quality_score > 100
+        ) {
+          return c.json(
+            { ok: false, error: "quality_score must be an integer between 0 and 100" } satisfies DOResult<Signal>,
+            400
+          );
+        }
+        scoreOverride = quality_score;
+      }
 
       // Validate status. brief_included is backend-owned and cannot be set manually.
       if (
@@ -1738,14 +1758,14 @@ export class NewsDO extends DurableObject<Env> {
 
       // Verify signal exists first so we know its beat_slug and author for auth check
       const signalRows = this.ctx.storage.sql
-        .exec("SELECT id, status, beat_slug, btc_address, created_at FROM signals WHERE id = ?", id)
+        .exec("SELECT id, status, beat_slug, btc_address, created_at, quality_score, score_breakdown FROM signals WHERE id = ?", id)
         .toArray();
       if (signalRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
       }
 
       // State machine: prevent editorial regressions
-      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string; btc_address: string; created_at: string };
+      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string; btc_address: string; created_at: string; quality_score: number | null; score_breakdown: string | null };
       const currentStatus = signalRow.status;
       const newStatus = status as SignalStatus; // validated above against SIGNAL_STATUSES
       const allowed = SIGNAL_VALID_TRANSITIONS[currentStatus] ?? [];
@@ -1947,15 +1967,38 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const now = nowDate.toISOString();
-      this.ctx.storage.sql.exec(
-        `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
-         WHERE id = ?`,
-        newStatus,
-        feedback ? sanitizeString(feedback, 1000) : null,
-        now,
-        now,
-        id
-      );
+      if (scoreOverride !== undefined) {
+        // Editor override: replace quality_score and record provenance in the
+        // score_breakdown JSON (previous auto-score preserved for audit). No
+        // migration — reuses the existing quality_score / score_breakdown columns.
+        const overriddenBreakdown = withScoreOverride(signalRow.score_breakdown, {
+          by: btc_address as string,
+          at: now,
+          previous_score: signalRow.quality_score,
+          reason: feedback ? sanitizeString(feedback, 1000) : null,
+        });
+        this.ctx.storage.sql.exec(
+          `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?, quality_score = ?, score_breakdown = ?
+           WHERE id = ?`,
+          newStatus,
+          feedback ? sanitizeString(feedback, 1000) : null,
+          now,
+          now,
+          scoreOverride,
+          overriddenBreakdown,
+          id
+        );
+      } else {
+        this.ctx.storage.sql.exec(
+          `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
+           WHERE id = ?`,
+          newStatus,
+          feedback ? sanitizeString(feedback, 1000) : null,
+          now,
+          now,
+          id
+        );
+      }
 
       // Soft-archive brief_signals and void unpaid earnings when removing a
       // brief_included signal from the active roster before inscription.
