@@ -6,14 +6,14 @@
  */
 
 import { Hono } from "hono";
-import type { Env, AppVariables, SignalStatus } from "../lib/types";
+import type { Env, AppVariables, SignalStatus, AppContext } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { reviewSignal, listFrontPagePage, listFrontPage } from "../lib/do-client";
 import { validateDateFormat } from "../lib/validators";
 import { validateBtcAddress } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 import { REVIEW_RATE_LIMIT, REVIEWABLE_SIGNAL_STATUSES } from "../lib/constants";
-import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
+import { edgeCacheMatchSWR, edgeCachePut, triggerSWRRefresh } from "../lib/edge-cache";
 
 const signalReviewRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -136,26 +136,20 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
 // Edge-cached for both modes — paginated mode in particular benefits because
 // the URL is stable per day, so the same page served to every infinite-scroll
 // reader after the first hit is served from edge.
-signalReviewRouter.get("/api/front-page", async (c) => {
-  const cached = await edgeCacheMatch(c);
-  if (cached) return cached;
+// Inner freshness window for the SWR cache (see /api/correspondents for the
+// same pattern). Serving stale past this window keeps the Durable Object off
+// the synchronous path once warm — so a transient DO timeout serves stale
+// instead of a hard 500 (#699).
+const FRONT_PAGE_FRESH_SECONDS = 60;
 
-  const before = c.req.query("before") ?? null;
-  const limitParam = c.req.query("limit");
-  const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200) : 50;
-
+/** Build the front-page response for the given mode (paginated vs default). */
+async function buildFrontPageResponse(
+  c: AppContext,
+  opts: { before: string | null; limit: number }
+): Promise<Response> {
   // Paginated mode: infinite scroll request
-  if (before !== null) {
-    if (!validateDateFormat(before)) {
-      return c.json({ error: "Invalid 'before' param (YYYY-MM-DD required)" }, 400);
-    }
-    // Validate it parses to a real date (rejects e.g. 2026-99-99)
-    const parsed = new Date(`${before}T12:00:00Z`);
-    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== before) {
-      return c.json({ error: "Invalid 'before' param (not a real date)" }, 400);
-    }
-
-    const result = await listFrontPagePage(c.env, before, limit);
+  if (opts.before !== null) {
+    const result = await listFrontPagePage(c.env, opts.before, opts.limit);
     const transformed = result.signals.map((s) => ({
       id: s.id,
       btcAddress: s.btc_address,
@@ -171,20 +165,19 @@ signalReviewRouter.get("/api/front-page", async (c) => {
       correction_of: s.correction_of,
     }));
 
-    c.header("Cache-Control", "public, max-age=60, s-maxage=300");
     const response = c.json({
       signals: transformed,
       date: result.date,
       hasMore: result.hasMore,
       curated: true,
     });
+    response.headers.set("Cache-Control", "public, max-age=60, s-maxage=300");
     edgeCachePut(c, response);
     return response;
   }
 
   // Default mode: single DO query for all approved + brief_included signals
   const all = await listFrontPage(c.env);
-
   const transformed = all.map((s) => ({
     id: s.id,
     btcAddress: s.btc_address,
@@ -200,14 +193,59 @@ signalReviewRouter.get("/api/front-page", async (c) => {
     correction_of: s.correction_of,
   }));
 
-  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
   const response = c.json({
     signals: transformed,
     total: transformed.length,
     curated: true,
   });
+  response.headers.set("Cache-Control", "public, max-age=60, s-maxage=300");
   edgeCachePut(c, response);
   return response;
+}
+
+signalReviewRouter.get("/api/front-page", async (c) => {
+  const before = c.req.query("before") ?? null;
+  const limitParam = c.req.query("limit");
+  const limit = limitParam ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 200) : 50;
+
+  // Validate the paginated param before touching the cache or DO — invalid
+  // dates are a 400 regardless of cache state.
+  if (before !== null) {
+    if (!validateDateFormat(before)) {
+      return c.json({ error: "Invalid 'before' param (YYYY-MM-DD required)" }, 400);
+    }
+    // Validate it parses to a real date (rejects e.g. 2026-99-99)
+    const parsed = new Date(`${before}T12:00:00Z`);
+    if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== before) {
+      return c.json({ error: "Invalid 'before' param (not a real date)" }, 400);
+    }
+  }
+
+  const hit = await edgeCacheMatchSWR(c, { freshSeconds: FRONT_PAGE_FRESH_SECONDS });
+  if (hit && !hit.stale) return hit.response;
+  if (hit?.stale) {
+    // Serve stale immediately; rebuild in the background (guarded by a KV lock).
+    triggerSWRRefresh(c, "front-page", () => buildFrontPageResponse(c, { before, limit }));
+    return hit.response;
+  }
+
+  try {
+    return await buildFrontPageResponse(c, { before, limit });
+  } catch (err) {
+    // Transient DO saturation makes listFrontPage() throw (10s doFetch guard).
+    // With no cached copy to fall back on, degrade to a retryable 503 rather
+    // than a bare 500 so probes get an honest, retry-able signal (#699).
+    const logger = c.get("logger");
+    logger.warn("front-page unavailable", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    const res = c.json(
+      { error: "The front page is temporarily unavailable. Please retry shortly.", code: "FRONT_PAGE_UNAVAILABLE" },
+      503
+    );
+    res.headers.set("Retry-After", "30");
+    return res;
+  }
 });
 
 export { signalReviewRouter };
