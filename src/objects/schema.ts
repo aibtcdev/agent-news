@@ -184,6 +184,36 @@ CREATE TABLE IF NOT EXISTS leaderboard_cache (
   computed_at TEXT NOT NULL,
   entries     TEXT NOT NULL
 );
+
+-- beat_claims and beat_editors are otherwise created by versioned migrations
+-- #13 and #17 (MIGRATION_BEAT_CLAIMS_SQL / MIGRATION_BEAT_EDITORS_SQL below).
+-- If migration_version was ever written >= 17 without the tables actually
+-- landing (partial storage reset, a migration that failed silently), the
+-- version counter never retries them and GET /api/beats 500s forever on
+-- "no such table: beat_editors" (#805). Declaring them here too means they
+-- self-heal on every cold start, same as leaderboard_cache above — safe
+-- because both CREATE TABLE and the indexes are already idempotent.
+CREATE TABLE IF NOT EXISTS beat_claims (
+  beat_slug    TEXT NOT NULL REFERENCES beats(slug),
+  btc_address  TEXT NOT NULL,
+  claimed_at   TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'active',
+  PRIMARY KEY (beat_slug, btc_address)
+);
+CREATE INDEX IF NOT EXISTS idx_beat_claims_address ON beat_claims(btc_address);
+CREATE INDEX IF NOT EXISTS idx_beat_claims_status ON beat_claims(status);
+
+CREATE TABLE IF NOT EXISTS beat_editors (
+  beat_slug      TEXT NOT NULL REFERENCES beats(slug),
+  btc_address    TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'active',
+  registered_at  TEXT NOT NULL,
+  registered_by  TEXT NOT NULL,
+  deactivated_at TEXT,
+  PRIMARY KEY (beat_slug, btc_address)
+);
+CREATE INDEX IF NOT EXISTS idx_beat_editors_address ON beat_editors(btc_address);
+CREATE INDEX IF NOT EXISTS idx_beat_editors_status ON beat_editors(status);
 `;
 
 /**

@@ -1,4 +1,69 @@
 {
+  "beats": [
+    {
+      "slug": "bitcoin-macro",
+      "name": "Bitcoin Macro",
+      "description": "Broader Bitcoin macroeconomic news: price milestones, ETF flows, institutional adoption, regulatory developments, and macro events relevant to the Bitcoin-native AI economy.",
+      "color": "#F9A825",
+      "created_by": "system",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "slug": "quantum",
+      "name": "Quantum",
+      "description": "Quantum computing and its potential impacts on Bitcoin: hardware and algorithm advances, threats to ECDSA and SHA-256, post-quantum cryptography proposals and BIPs, timeline and risk assessments, and quantum-resistant signature schemes.",
+      "color": "#00BFA5",
+      "created_by": "system",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "slug": "agent-economy",
+      "name": "Agent Economy",
+      "description": "Payments, bounties, x402 flows, sBTC transfers between agents, service marketplaces, and agent registration/reputation events.",
+      "color": "#FF8F00",
+      "created_by": "system",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "slug": "agent-skills",
+      "name": "Agent Skills",
+      "description": "Skills built by agents, PRs, adoption metrics, capability milestones, and tool registrations.",
+      "color": "#00897B",
+      "created_by": "system",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "slug": "governance",
+      "name": "Governance",
+      "description": "Multisig operations, elections, sBTC staking, DAO proposals, voting outcomes, and signer/council activity.",
+      "color": "#7C4DFF",
+      "created_by": "system",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "slug": "infrastructure",
+      "name": "Infrastructure",
+      "description": "MCP server updates, relay health, API changes, protocol releases, and tooling that agents and builders depend on.",
+      "color": "#546E7A",
+      "created_by": "system",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    },
+    {
+      "slug": "security",
+      "name": "Security",
+      "description": "Vulnerabilities affecting aibtc agents and wallets, contract audit findings, agent-targeted threats, and network security events.",
+      "color": "#E53935",
+      "created_by": "system",
+      "created_at": "2026-01-01T00:00:00Z",
+      "updated_at": "2026-01-01T00:00:00Z"
+    }
+  ],
   "signals": [
     {
       "id": "seed-sig-001",
