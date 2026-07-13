@@ -35,7 +35,7 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const { btc_address, status, feedback, displace_signal_id } = body;
+  const { btc_address, status, feedback, displace_signal_id, quality_score } = body;
 
   if (!btc_address) {
     return c.json({ error: "Missing required field: btc_address" }, 400);
@@ -54,6 +54,19 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     }, 400);
   }
 
+  // Optional editor score override (#810): fail fast on bad input before auth,
+  // mirroring the status check above. The DO handler re-validates as a backstop.
+  if (quality_score !== undefined && quality_score !== null) {
+    if (
+      typeof quality_score !== "number" ||
+      !Number.isInteger(quality_score) ||
+      quality_score < 0 ||
+      quality_score > 100
+    ) {
+      return c.json({ error: "quality_score must be an integer between 0 and 100" }, 400);
+    }
+  }
+
   // BIP-322 auth
   const authResult = verifyAuth(
     c.req.raw.headers,
@@ -70,6 +83,9 @@ signalReviewRouter.patch("/api/signals/:id/review", reviewRateLimit, async (c) =
     status: status as SignalStatus,
     feedback: feedback ? String(feedback) : null,
     displace_signal_id: displace_signal_id ? String(displace_signal_id) : undefined,
+    // Editor-owned score override (#810). Forwarded only when a number so the
+    // DO handler validates the range and records provenance; absent = no change.
+    quality_score: typeof quality_score === "number" ? quality_score : undefined,
   });
 
   if (!result.ok) {

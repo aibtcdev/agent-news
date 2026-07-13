@@ -111,6 +111,59 @@ describe("PATCH /api/signals/:id/review — validation", () => {
   });
 });
 
+describe("PATCH /api/signals/:id/review — quality_score override (#810)", () => {
+  const VALID_ADDR = "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq";
+
+  async function review(quality_score: unknown) {
+    return SELF.fetch("http://example.com/api/signals/test-id/review", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ btc_address: VALID_ADDR, status: "rejected", feedback: "fabricated sources", quality_score }),
+    });
+  }
+
+  it("returns 400 when quality_score exceeds 100", async () => {
+    const res = await review(150);
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("quality_score");
+  });
+
+  it("returns 400 when quality_score is negative", async () => {
+    const res = await review(-1);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when quality_score is not an integer", async () => {
+    const res = await review(87.5);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when quality_score is not a number", async () => {
+    const res = await review("100");
+    expect(res.status).toBe(400);
+  });
+
+  it("passes validation (reaching auth) for an in-range quality_score", async () => {
+    // 0 and 100 are the boundaries; both must clear the edge validation and
+    // fall through to BIP-322 auth (401), not fail as a 400.
+    for (const score of [0, 100]) {
+      const res = await review(score);
+      expect(res.status).toBe(401);
+    }
+  });
+
+  it("leaves the score path untouched when quality_score is omitted", async () => {
+    const res = await SELF.fetch("http://example.com/api/signals/test-id/review", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ btc_address: VALID_ADDR, status: "approved" }),
+    });
+    // No override field → not a 400; proceeds to auth.
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("GET /api/front-page", () => {
   it("returns 200 with curated signal list shape", async () => {
     const res = await SELF.fetch("http://example.com/api/front-page");

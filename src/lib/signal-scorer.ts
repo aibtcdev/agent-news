@@ -19,6 +19,17 @@ export interface SignalScoreBreakdown {
   timeliness: number;
   /** 0–10: meaningful disclosure (model/tool mentioned) */
   disclosure: number;
+  /**
+   * Present only when an editor overrode the auto-score at review time (#810).
+   * The five axes above reflect the original auto-scorer; `override.previous_score`
+   * preserves the composite it produced before the editor replaced it.
+   */
+  override?: {
+    by: string;
+    at: string;
+    previous_score: number | null;
+    reason: string | null;
+  };
 }
 
 export interface SignalScore {
@@ -187,4 +198,31 @@ export function scoreSignal(signal: SignalScorerInput): SignalScore {
       disclosure,
     },
   };
+}
+
+/**
+ * Merge an editor score-override provenance envelope into an existing
+ * score_breakdown JSON string, returning the new JSON string to persist (#810).
+ *
+ * The original auto-scorer axes are preserved untouched; the `override` field
+ * records who changed the score, when, the previous composite, and why. A
+ * malformed or absent prior breakdown degrades to an empty object so an override
+ * is never blocked by unparseable legacy data.
+ */
+export function withScoreOverride(
+  priorBreakdownJson: string | null,
+  override: NonNullable<SignalScoreBreakdown["override"]>
+): string {
+  let prior: Record<string, unknown> = {};
+  if (priorBreakdownJson) {
+    try {
+      const parsed = JSON.parse(priorBreakdownJson) as unknown;
+      if (parsed && typeof parsed === "object") {
+        prior = parsed as Record<string, unknown>;
+      }
+    } catch {
+      prior = {};
+    }
+  }
+  return JSON.stringify({ ...prior, override });
 }
