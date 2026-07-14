@@ -318,3 +318,68 @@ describe("correspondent_stats — recon detects and repairs drift", () => {
     expect(repaired?.daysActive).toBe(1);
   });
 });
+
+describe("correspondents bundle — leaderboard read decoupled from recompute (#690 cold-rebuild)", () => {
+  // Fix 1: /correspondents-bundle reads leaderboard_cache stale-or-empty instead
+  // of running a live queryLeaderboard() on every cold rebuild. The endpoint must
+  // still serve correspondents when the cache is empty (degrading to zero scores)
+  // and source its scores from the materialised cache once it is populated — the
+  // recompute only ever happens via /leaderboard or /init, never here.
+  async function fetchWithScores(): Promise<
+    Array<{ address: string; signalCount: number; score: number }>
+  > {
+    const res = await SELF.fetch("http://example.com/api/correspondents");
+    expect(res.status).toBe(200);
+    const body = await res.json<{
+      correspondents: Array<{ address: string; signalCount: number; score: number }>;
+    }>();
+    return body.correspondents;
+  }
+
+  it("serves zero scores when the leaderboard cache is empty, then agrees with the cache once populated", async () => {
+    const addr = "bc1q-corr-lb-decouple-001";
+
+    // Seeding is a POST, so the DO's post-dispatch mutation hook drops
+    // leaderboard_cache. The next correspondents read therefore exercises the
+    // empty-cache branch of getLeaderboardStaleOrEmpty().
+    await seed({
+      signals: [
+        {
+          id: "cs-lb-001-a",
+          beat_slug: "agent-social",
+          btc_address: addr,
+          headline: "decouple",
+          sources: "[]",
+          created_at: "2026-04-15T10:00:00.000Z",
+          status: "submitted",
+        },
+      ],
+    });
+
+    // Empty-cache branch: the agent is still returned (correct signalCount) and
+    // its score degrades to 0 rather than the endpoint blocking on a recompute.
+    let correspondents = await fetchWithScores();
+    let me = correspondents.find((c) => c.address === addr);
+    expect(me).toBeDefined();
+    expect(me?.signalCount).toBe(1);
+    expect(me?.score).toBe(0);
+
+    // A /leaderboard read is the only remaining path that recomputes and
+    // repopulates leaderboard_cache.
+    const lbRes = await SELF.fetch("http://example.com/api/leaderboard");
+    expect(lbRes.status).toBe(200);
+    const lbBody = await lbRes.json<{
+      leaderboard: Array<{ address: string; score: number }>;
+    }>();
+    const lbScore =
+      lbBody.leaderboard.find((e) => e.address === addr)?.score ?? 0;
+
+    // Populated-cache branch: correspondents now sources its score from the same
+    // materialised cache the leaderboard wrote — the two agree, and the read
+    // itself never triggered a recompute.
+    correspondents = await fetchWithScores();
+    me = correspondents.find((c) => c.address === addr);
+    expect(me?.signalCount).toBe(1);
+    expect(me?.score).toBe(lbScore);
+  });
+});

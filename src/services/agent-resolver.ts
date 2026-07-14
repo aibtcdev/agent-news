@@ -10,7 +10,14 @@
  */
 
 const CACHE_TTL_SECONDS = 86400; // 24 hours
-const NEGATIVE_CACHE_TTL_SECONDS = 300; // 5 minutes for unresolved names
+// Negative cache (address resolved to "no name") TTL. Held for 30 minutes so an
+// unregistered correspondent does not re-trigger a full `fetchBulkAgents()`
+// registry pull on every cache rebuild — the correspondents/init SWR windows
+// rebuild on a ~25 min cadence, so a 5 min TTL expired between every rebuild and
+// made the bulk fetch a fixed cost of each cold rebuild. A newly-registered
+// agent's name now surfaces up to 30 min later, which is cosmetic; the positive
+// cache stays at 24h.
+const NEGATIVE_CACHE_TTL_SECONDS = 1800; // 30 minutes for unresolved names
 const CACHE_KEY_PREFIX = "agent-name:";
 const AGENT_API_BASE = "https://aibtc.com/api/agents";
 const BULK_PAGE_SIZE = 100; // max allowed by aibtc.com
