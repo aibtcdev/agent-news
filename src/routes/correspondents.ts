@@ -88,12 +88,16 @@ async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
     };
   });
 
-  // Sort by score descending, then streak, then address to mirror
-  // leaderboard tie-breaking when signal_count order diverges after a reset.
+  // Sort by score descending, then streak, then signal count, then address to
+  // mirror leaderboard tie-breaking when signal_count order diverges after a
+  // reset. The signalCount tiebreak also keeps the ranking activity-ordered in
+  // the degraded case where the leaderboard cache was momentarily empty and every
+  // score is 0 (see getLeaderboardStaleOrEmpty in the DO).
   correspondents.sort(
     (a, b) =>
       b.score - a.score ||
       b.streak - a.streak ||
+      b.signalCount - a.signalCount ||
       a.address.localeCompare(b.address),
   );
 

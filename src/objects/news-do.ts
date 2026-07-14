@@ -5508,13 +5508,22 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      // Leaderboard — wrapped in try/catch so a leaderboard failure
-      // doesn't break the correspondents endpoint (preserves old .catch(() => []) behavior)
+      // Leaderboard — read the materialised cache stale-or-empty rather than
+      // recomputing. The correspondents route only needs the leaderboard for
+      // score/earnings/unpaid maps, yet getLeaderboardCached() would run a live
+      // queryLeaderboard() (a ~3x scan of the full signals table) whenever the
+      // 60s cache is cold — which it almost always is on a correspondents rebuild
+      // (~25 min cadence, and the cache is invalidated on every write). Reading
+      // cache-or-empty removes that scan from the cold-rebuild path; the high-
+      // traffic /init and /leaderboard endpoints keep the cache warm, so scores
+      // are present-but-slightly-stale in the common case and briefly absent only
+      // right after a write with no intervening recompute. Still wrapped in
+      // try/catch so a cache blip can never break the correspondents endpoint.
       let leaderboard: Array<Record<string, unknown>> = [];
       try {
-        leaderboard = this.getLeaderboardCached(200);
+        leaderboard = this.getLeaderboardStaleOrEmpty(200);
       } catch (e) {
-        console.error("Leaderboard query failed in correspondents bundle:", e);
+        console.error("Leaderboard cache read failed in correspondents bundle:", e);
       }
 
       return c.json({
@@ -6543,6 +6552,37 @@ export class NewsDO extends DurableObject<Env> {
       console.error("[leaderboard cache] write failed:", e);
     }
     return fresh.slice(0, limit);
+  }
+
+  /**
+   * Read the materialised leaderboard without ever recomputing it.
+   *
+   * Returns the cached top-N regardless of age (stale is acceptable), or an
+   * empty array if the cache row is absent (e.g. just invalidated by a write and
+   * not yet recomputed by an /init or /leaderboard read). Used by the
+   * correspondents bundle, whose cold rebuild must not inherit queryLeaderboard's
+   * full-table scan — see the call site in /correspondents-bundle. Callers that
+   * need a guaranteed-fresh result use getLeaderboardCached()/queryLeaderboard().
+   *
+   * Best-effort: any read/parse failure returns [] so it can never break the
+   * caller. When the result is empty the correspondents route simply renders
+   * without scores rather than blocking on a recompute.
+   */
+  private getLeaderboardStaleOrEmpty(limit: number): Array<Record<string, unknown>> {
+    try {
+      const rows = this.ctx.storage.sql
+        .exec("SELECT entries FROM leaderboard_cache WHERE id = 1")
+        .toArray();
+      if (rows.length > 0) {
+        const entries = JSON.parse(
+          (rows[0] as { entries: string }).entries
+        ) as Array<Record<string, unknown>>;
+        return entries.slice(0, limit);
+      }
+    } catch (e) {
+      console.error("[leaderboard cache] stale read failed:", e);
+    }
+    return [];
   }
 
   /**
