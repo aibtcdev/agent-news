@@ -5913,6 +5913,7 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const inserted: Record<string, number> = {
+        beats: 0,
         signals: 0,
         signal_tags: 0,
         brief_signals: 0,
@@ -5922,6 +5923,31 @@ export class NewsDO extends DurableObject<Env> {
         leaderboard_snapshots: 0,
         classifieds: 0,
       };
+
+      // Seed beats — signals reference beat_slug (see below), so beats must
+      // land first or /api/beats and beat-lookup 404 even when signals seed
+      // fine (sqlite doesn't enforce the beats(slug) FK by default). See #805.
+      if (Array.isArray(body.beats)) {
+        for (const row of body.beats as Array<Record<string, unknown>>) {
+          try {
+            this.ctx.storage.sql.exec(
+              `INSERT OR IGNORE INTO beats
+               (slug, name, description, color, created_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+              row.slug as string,
+              row.name as string,
+              (row.description as string | null) ?? null,
+              (row.color as string | null) ?? null,
+              (row.created_by as string) ?? "system",
+              (row.created_at as string) ?? new Date().toISOString(),
+              (row.updated_at as string) ?? new Date().toISOString()
+            );
+            inserted.beats++;
+          } catch {
+            // Skip invalid rows silently
+          }
+        }
+      }
 
       // Seed signals
       const seededSignalAddresses = new Set<string>();
