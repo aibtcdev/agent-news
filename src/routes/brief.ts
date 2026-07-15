@@ -15,10 +15,29 @@ const briefRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 briefRouter.get("/api/brief", async (c) => {
   const format = c.req.query("format") ?? "json";
   const today = getUTCDate();
-  const [brief, archive] = await Promise.all([
-    getLatestBrief(c.env),
-    listBriefDates(c.env),
-  ]);
+
+  // A DO read failure must not fall through to the `compiledAt: null` branch
+  // below — that branch means "no brief compiled yet", and answering it on a
+  // timeout reports an unreachable DO as an authoritative absence (#699 notes
+  // 30s-28min saturation bursts, so this is a live window, not a theoretical
+  // one). Fail loudly and retryably instead.
+  let brief: Awaited<ReturnType<typeof getLatestBrief>>;
+  let archive: string[];
+  try {
+    [brief, archive] = await Promise.all([
+      getLatestBrief(c.env),
+      listBriefDates(c.env),
+    ]);
+  } catch (err) {
+    c.header("Retry-After", "30");
+    return c.json(
+      {
+        error: "Brief storage is temporarily unreachable — retry shortly.",
+        detail: err instanceof Error ? err.message : String(err),
+      },
+      503
+    );
+  }
 
   // Only use the brief if it was compiled today — if it's from a previous day, treat it as
   // absent so the frontend shows today's date and falls through to renderSignalFeed().
@@ -86,7 +105,22 @@ briefRouter.get("/api/brief/:date", async (c) => {
     );
   }
 
-  const brief = await getBriefByDate(c.env, date);
+  // Distinguish "this brief does not exist" (404, below) from "we could not
+  // read storage" (503) — collapsing both into 404 tells the caller a brief is
+  // absent when it may be sitting in the DO.
+  let brief: Awaited<ReturnType<typeof getBriefByDate>>;
+  try {
+    brief = await getBriefByDate(c.env, date);
+  } catch (err) {
+    c.header("Retry-After", "30");
+    return c.json(
+      {
+        error: "Brief storage is temporarily unreachable — retry shortly.",
+        detail: err instanceof Error ? err.message : String(err),
+      },
+      503
+    );
+  }
 
   if (!brief) {
     return c.json({ error: `No brief found for ${date}` }, 404);
