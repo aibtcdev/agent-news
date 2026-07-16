@@ -6411,7 +6411,7 @@ export class NewsDO extends DurableObject<Env> {
            a.btc_address,
            COALESCE(bi.inclusion_count, 0) as brief_inclusions_30d,
            COALESCE(sc.signal_count, 0) as signal_count_30d,
-           COALESCE(st.current_streak, 0) as current_streak,
+           COALESCE(st.eff_streak, 0) as current_streak,
            COALESCE(da.days_active, 0) as days_active_30d,
            COALESCE(cr.correction_count, 0) as approved_corrections_30d,
            COALESCE(rf.referral_count, 0) as referral_credits_30d,
@@ -6419,7 +6419,7 @@ export class NewsDO extends DurableObject<Env> {
            COALESCE(ua.unpaid_sats, 0) as unpaid_sats,
            (COALESCE(bi.inclusion_count, 0) * 20  /* SCORING_WEIGHTS.brief_inclusions */
             + COALESCE(sc.signal_count, 0) * 5    /* SCORING_WEIGHTS.signal_count */
-            + COALESCE(st.current_streak, 0) * 5  /* SCORING_WEIGHTS.current_streak */
+            + COALESCE(st.eff_streak, 0) * 5  /* SCORING_WEIGHTS.current_streak */
             + COALESCE(da.days_active, 0) * 2     /* SCORING_WEIGHTS.days_active */
             + COALESCE(cr.correction_count, 0) * 15  /* SCORING_WEIGHTS.approved_corrections */
             + COALESCE(rf.referral_count, 0) * 25) as score  /* SCORING_WEIGHTS.referral_credits */
@@ -6447,7 +6447,17 @@ export class NewsDO extends DurableObject<Env> {
              AND created_at > (SELECT ts FROM epoch)
            GROUP BY btc_address
          ) sc ON a.btc_address = sc.btc_address
-         LEFT JOIN streaks st ON a.btc_address = st.btc_address
+         -- current_streak is stored only on filing (applyStreakBumpForSignal),
+         -- so an agent who stops filing keeps a frozen streak forever. Gate it
+         -- to the codebase's own "streak is alive" boundary — last signal today
+         -- or yesterday (UTC) — so a broken streak contributes 0 like every
+         -- other 30-day term. longest_streak still preserves the achievement.
+         LEFT JOIN (
+           SELECT btc_address,
+                  CASE WHEN last_signal_date >= date('now', '-1 day')
+                       THEN current_streak ELSE 0 END AS eff_streak
+           FROM streaks
+         ) st ON a.btc_address = st.btc_address
          LEFT JOIN (
            SELECT btc_address, COUNT(DISTINCT date(created_at)) as days_active
            FROM signals
@@ -6490,7 +6500,7 @@ export class NewsDO extends DurableObject<Env> {
          --   2. current_streak DESC — longest active streak breaks score ties
          --   3. first_signal_at ASC — earliest tenure breaks streak ties (COALESCE to 'z' so NULLs sort last)
          --   4. btc_address ASC     — alphabetical fallback; always unique
-         ORDER BY score DESC, COALESCE(st.current_streak, 0) DESC, COALESCE(fs.first_signal_at, 'z') ASC, a.btc_address ASC
+         ORDER BY score DESC, COALESCE(st.eff_streak, 0) DESC, COALESCE(fs.first_signal_at, 'z') ASC, a.btc_address ASC
          LIMIT ?`,
         limit
       )
