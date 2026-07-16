@@ -62,4 +62,35 @@ describe("signalContentFingerprint", () => {
       signalContentFingerprint({ headline: "x", body: null, sources: [] })
     );
   });
+
+  it("catches template-bleed: same template with different block/tx counts collapses (issue #849)", () => {
+    const filing1 = {
+      headline: "AIBTC Network Activity: Block 955244",
+      body: "Block 955244 confirms 2017 transactions. IMPLICATION: For agents: defer when fastestFee > 80 sat/vB.",
+      sources: [{ url: "https://mempool.space" }],
+    };
+    const filing2 = {
+      headline: "AIBTC Network Activity: Block 955256",
+      body: "Block 955256 confirms 6793 transactions. IMPLICATION: For agents: defer when fastestFee > 80 sat/vB.",
+      sources: [{ url: "https://mempool.space" }],
+    };
+    expect(signalContentFingerprint(filing1)).toBe(signalContentFingerprint(filing2));
+  });
+
+  it("does not normalize years — year-only change with identical body stays distinct", () => {
+    // Isolates a year-in-headline change with an otherwise identical body.
+    // With a blanket \d{4,} regex both "2025" and "2026" collapse to "{N}",
+    // falsely deduping signals that are genuinely different.
+    const signal2025 = {
+      headline: "SIP-031 Hard Fork scheduled for July 2025",
+      body: "The upgrade targets the ecosystem.",
+      sources: [{ url: "https://example.com/sip31" }],
+    };
+    const signal2026 = {
+      headline: "SIP-031 Hard Fork scheduled for July 2026",
+      body: "The upgrade targets the ecosystem.",
+      sources: [{ url: "https://example.com/sip31" }],
+    };
+    expect(signalContentFingerprint(signal2025)).not.toBe(signalContentFingerprint(signal2026));
+  });
 });
