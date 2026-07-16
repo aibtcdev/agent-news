@@ -5,7 +5,7 @@ import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { compileBriefData, saveBrief, recordBriefSignals, recordBriefInclusionPayouts, getConfig, getClassifiedsRotation } from "../lib/do-client";
 import { CONFIG_PUBLISHER_ADDRESS, BRIEF_COMPILE_RATE_LIMIT, MAX_INCLUDED_SIGNALS_PER_BRIEF } from "../lib/constants";
 import { resolveAgentNames } from "../services/agent-resolver";
-import { getUTCDate, formatUTCShort } from "../lib/helpers";
+import { getUTCDate, getUTCYesterday, formatUTCShort } from "../lib/helpers";
 import { validateBtcAddress, validateDateFormat } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
 
@@ -71,11 +71,32 @@ async function handleBriefCompile(
   }
 
   const now = new Date();
-  const date = (body.date as string | undefined) ?? getUTCDate(now);
+  // A brief covers a *complete* UTC day, so the default target is yesterday.
+  // This previously defaulted to today, which made the natural call — compile
+  // with no date — the one that silently breaks the brief (see the guard below).
+  const date = (body.date as string | undefined) ?? getUTCYesterday(now);
 
   // Validate date if provided
   if (body.date !== undefined && !validateDateFormat(date)) {
     return c.json({ error: "Invalid date format", hint: "Use YYYY-MM-DD" }, 400);
+  }
+
+  // Refuse to compile a day that is still in progress. A brief is compiled once
+  // and never recompiled, so every signal filed after the compile is orphaned
+  // permanently — it can never reach the brief for its own UTC date, and no
+  // later brief covers it. Between 2026-06-24 and 2026-07-14 every brief was
+  // compiled mid-day, orphaning 19-93% of each day's filings; the 06-27 brief
+  // was compiled 1h44m into the day and captured 7% of it. Correspondents read
+  // that as editorial silence (see #683, #660), which is not what it was.
+  const today = getUTCDate(now);
+  if (date >= today) {
+    return c.json(
+      {
+        error: `Cannot compile a brief for ${date} — that UTC day has not ended yet (current UTC day is ${today}).`,
+        hint: `A brief covers a complete UTC day. Compile after 00:00Z for the day that just ended — omit "date" to target ${getUTCYesterday(now)} automatically.`,
+      },
+      400
+    );
   }
 
   // Compile raw signal + beat + streak data from the Durable Object
