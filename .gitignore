@@ -6,3 +6,7 @@ dist/
 *.log
 .planning/
 .quest/
+
+# Frontend bundles built by scripts/build-frontend.mjs (run automatically by
+# wrangler's build.command and the predev/predeploy npm hooks).
+public/classifieds/wallet-flow.bundle.js
