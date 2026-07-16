@@ -64,3 +64,56 @@ export function validateSignatureFormat(sig: unknown): sig is string {
   if (sig.length < 20 || sig.length > 200) return false;
   return /^[A-Za-z0-9+/=]+$/.test(sig);
 }
+
+// ── Disclosure identity gate ──
+//
+// Detects the shared-automation-prompt-pack case where a filer's disclosure
+// field references a different agent by name (e.g., Tall Jett filing with
+// disclosure "Humble Panther agent, live data from mempool.space").
+//
+// Design intent: a copy-pasted automation prompt sometimes leaves the
+// original filer's name inside the disclosure. That is a strong signal the
+// signal was produced by cross-contaminated automation rather than by the
+// filer's own pipeline. Per issue #852, this is a cheap pre-filter that
+// clears the highest-friction cross-contamination cases at write time.
+//
+// Returns { ok: true } when the disclosure does not reference an agent
+// other than the filer, or when no name pattern is present.
+// Returns { ok: false, conflict } when the disclosure names a different
+// agent (typically the source of the copy-pasted automation prompt).
+export function checkDisclosureIdentity(
+  disclosure: string | undefined | null,
+  filerDisplayName: string
+): { ok: true } | { ok: false; conflict: string } {
+  if (!disclosure || typeof disclosure !== "string") return { ok: true };
+  if (!filerDisplayName || typeof filerDisplayName !== "string") return { ok: true };
+
+  // Two shapes observed in cross-contamination fixtures:
+  //   "<Name> agent, live data from ..."         → 2b96b7ac
+  //   "Filed by <Name> — ..."                    → observed in a subset
+  // Title-Case only, capped at 3-word names, no `/i` flag. Case-fold
+  // discipline lives on the self-match compare via normalize() below —
+  // that stays lenient so "humble panther" vs "Humble Panther" self-matches
+  // still succeed. The DETECTION regexes must stay strict, or the greedy
+  // quantifier backtracks across arbitrary lowercase prose ending in the
+  // literal word "agent" (e.g. "our automated trading agent pipeline") and
+  // captures the whole prose run as a false "name."
+  const patterns: RegExp[] = [
+    /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\s+agent\b/,
+    /\bFiled by\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})\b/,
+  ];
+
+  const normalize = (s: string): string =>
+    s.trim().toLowerCase().replace(/\s+/g, " ");
+  const filerNormalized = normalize(filerDisplayName);
+
+  for (const re of patterns) {
+    const match = disclosure.match(re);
+    if (!match) continue;
+    const disclosed = match[1];
+    if (normalize(disclosed) === filerNormalized) return { ok: true };
+    return { ok: false, conflict: disclosed };
+  }
+
+  return { ok: true };
+}
