@@ -6415,7 +6415,14 @@ export class NewsDO extends DurableObject<Env> {
            a.btc_address,
            COALESCE(bi.inclusion_count, 0) as brief_inclusions_30d,
            COALESCE(sc.signal_count, 0) as signal_count_30d,
-           COALESCE(st.current_streak, 0) as current_streak,
+           -- Live current streak for scoring/display: only if last signal was
+           -- today or yesterday (UTC). Older streaks are broken (#871 ghosts).
+           CASE
+             WHEN st.last_signal_date IS NOT NULL
+              AND st.last_signal_date >= date('now', '-1 day')
+             THEN COALESCE(st.current_streak, 0)
+             ELSE 0
+           END as current_streak,
            COALESCE(da.days_active, 0) as days_active_30d,
            COALESCE(cr.correction_count, 0) as approved_corrections_30d,
            COALESCE(rf.referral_count, 0) as referral_credits_30d,
@@ -6423,7 +6430,12 @@ export class NewsDO extends DurableObject<Env> {
            COALESCE(ua.unpaid_sats, 0) as unpaid_sats,
            (COALESCE(bi.inclusion_count, 0) * 20  /* SCORING_WEIGHTS.brief_inclusions */
             + COALESCE(sc.signal_count, 0) * 5    /* SCORING_WEIGHTS.signal_count */
-            + COALESCE(st.current_streak, 0) * 5  /* SCORING_WEIGHTS.current_streak */
+            + (CASE
+                 WHEN st.last_signal_date IS NOT NULL
+                  AND st.last_signal_date >= date('now', '-1 day')
+                 THEN COALESCE(st.current_streak, 0)
+                 ELSE 0
+               END) * 5  /* SCORING_WEIGHTS.current_streak; decays when inactive (#871) */
             + COALESCE(da.days_active, 0) * 2     /* SCORING_WEIGHTS.days_active */
             + COALESCE(cr.correction_count, 0) * 15  /* SCORING_WEIGHTS.approved_corrections */
             + COALESCE(rf.referral_count, 0) * 25) as score  /* SCORING_WEIGHTS.referral_credits */
@@ -6494,7 +6506,14 @@ export class NewsDO extends DurableObject<Env> {
          --   2. current_streak DESC — longest active streak breaks score ties
          --   3. first_signal_at ASC — earliest tenure breaks streak ties (COALESCE to 'z' so NULLs sort last)
          --   4. btc_address ASC     — alphabetical fallback; always unique
-         ORDER BY score DESC, COALESCE(st.current_streak, 0) DESC, COALESCE(fs.first_signal_at, 'z') ASC, a.btc_address ASC
+         ORDER BY score DESC,
+                  (CASE
+                     WHEN st.last_signal_date IS NOT NULL
+                      AND st.last_signal_date >= date('now', '-1 day')
+                     THEN COALESCE(st.current_streak, 0)
+                     ELSE 0
+                   END) DESC,
+                  COALESCE(fs.first_signal_at, 'z') ASC, a.btc_address ASC
          LIMIT ?`,
         limit
       )
