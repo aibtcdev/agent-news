@@ -9,7 +9,7 @@
  */
 
 export interface SignalScoreBreakdown {
-  /** 0–30: source count and URL diversity */
+  /** 0–20 structural: unique host count only (not verified existence; see #865) */
   sourceQuality: number;
   /** 0–25: headline word count in sweet spot + body length */
   thesisClarity: number;
@@ -52,11 +52,13 @@ export interface SignalScorerInput {
 }
 
 // ── Dimension weights (must sum to 100) ──
-const MAX_SOURCE_QUALITY = 30;
+// sourceQuality is STRUCTURAL only (unique hosts). Cap kept low so fabricated
+// URL lists cannot print a perfect 100 without other axes (#865 / option 2).
+const MAX_SOURCE_QUALITY = 20;
 const MAX_THESIS_CLARITY = 25;
-const MAX_BEAT_RELEVANCE = 20;
+const MAX_BEAT_RELEVANCE = 25;
 const MAX_TIMELINESS = 15;
-const MAX_DISCLOSURE = 10;
+const MAX_DISCLOSURE = 15;
 
 /** Keywords that indicate the disclosure mentions an AI model or tool. */
 const DISCLOSURE_TOOL_KEYWORDS = [
@@ -78,14 +80,26 @@ const DISCLOSURE_TOOL_KEYWORDS = [
 ];
 
 /**
- * Score source quality (0–30).
- * 1 source = 10 pts, 2 = 20 pts, 3+ = 30 pts.
+ * Score source structure (0–20), NOT verified existence (#865).
+ * Uses unique hostnames so three deep-paths on the same host do not max out.
+ * 0 hosts = 0, 1 unique host = 8, 2 = 14, 3+ = 20 (capped).
  */
 function scoreSourceQuality(sources: Array<{ url: string; title: string }>): number {
-  const count = sources.length;
-  if (count >= 3) return MAX_SOURCE_QUALITY;
-  if (count === 2) return 20;
-  if (count === 1) return 10;
+  const hosts = new Set<string>();
+  for (const s of sources) {
+    try {
+      const u = new URL(s.url);
+      if (u.protocol === "http:" || u.protocol === "https:") {
+        hosts.add(u.hostname.toLowerCase());
+      }
+    } catch {
+      // invalid URL contributes no host
+    }
+  }
+  const n = hosts.size;
+  if (n >= 3) return MAX_SOURCE_QUALITY;
+  if (n === 2) return 14;
+  if (n === 1) return 8;
   return 0;
 }
 
@@ -111,9 +125,9 @@ function scoreThesisClarity(headline: string, body?: string | null): number {
 }
 
 /**
- * Score beat relevance (0–20).
+ * Score beat relevance (0–25).
  * Tags are compared against the words in the beat_slug.
- * 1+ matches = 10 pts, 2+ matches = 20 pts.
+ * 1 match = 10 pts, 2+ matches = MAX_BEAT_RELEVANCE.
  */
 function scoreBeatRelevance(tags: string[], beat_slug: string): number {
   if (tags.length === 0) return 0;
@@ -159,8 +173,8 @@ function scoreTimeliness(sources: Array<{ url: string; title: string }>): number
 }
 
 /**
- * Score disclosure (0–10).
- * Non-empty disclosure mentioning a model/tool = 10 pts.
+ * Score disclosure (0–15).
+ * Non-empty disclosure mentioning a model/tool = MAX_DISCLOSURE pts.
  * Non-empty but generic = 5 pts.
  * Empty = 0 pts.
  */
