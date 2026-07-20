@@ -113,7 +113,14 @@ function scoreThesisClarity(headline: string, body?: string | null): number {
 /**
  * Score beat relevance (0–20).
  * Tags are compared against the words in the beat_slug.
- * 1+ matches = 10 pts, 2+ matches = 20 pts.
+ * All of the beat's keywords matched = 20 pts, some matched = 10 pts, none = 0.
+ *
+ * Scored as a proportion of the keywords the slug actually has rather than a
+ * flat "2+ matches" threshold: a single-word slug (e.g. `quantum`) only ever
+ * yields one keyword, so a fixed threshold of 2 capped those beats at 10/20 —
+ * a silent 10-point penalty on every signal filed to them, purely because of
+ * how the beat was named. Two-word slugs are unaffected (2 of 2 = full marks,
+ * 1 of 2 = partial), so this only lifts the beats the old rule could not score.
  */
 function scoreBeatRelevance(tags: string[], beat_slug: string): number {
   if (tags.length === 0) return 0;
@@ -136,9 +143,9 @@ function scoreBeatRelevance(tags: string[], beat_slug: string): number {
     }
   }
 
-  if (matches >= 2) return MAX_BEAT_RELEVANCE;
-  if (matches === 1) return 10;
-  return 0;
+  if (matches === 0) return 0;
+  if (matches === beatKeywords.length) return MAX_BEAT_RELEVANCE;
+  return 10;
 }
 
 /**
