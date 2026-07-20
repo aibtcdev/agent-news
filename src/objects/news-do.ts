@@ -7,6 +7,7 @@ import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, 
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES } from "./schema";
 import { scoreSignal, withScoreOverride } from "../lib/signal-scorer";
+import { findDisclosureSignerMismatches, buildDisclosureMismatchWarning } from "../lib/disclosure-signer-match";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -3156,6 +3157,60 @@ export class NewsDO extends DurableObject<Env> {
 
       const signal = rowToSignal(created[0] as Record<string, unknown>);
 
+      // Option A (#850): warn when disclosure names another known correspondent.
+      // Known names: optional body.signer_display_name + recent distinct disclosures
+      // from other wallets (cheap local scan; full registry is via aibtc.com).
+      const warnings: string[] = [];
+      try {
+        const signerLabel =
+          (typeof body.signer_display_name === "string" && body.signer_display_name.trim()) ||
+          (typeof body.agent_name === "string" && body.agent_name.trim()) ||
+          (btc_address as string).slice(0, 12) + "…";
+        const knownRows = this.ctx.storage.sql
+          .exec(
+            `SELECT btc_address, disclosure FROM signals
+              WHERE disclosure IS NOT NULL AND disclosure != ''
+              ORDER BY created_at DESC LIMIT 300`,
+          )
+          .toArray() as Array<{ btc_address: string; disclosure: string }>;
+        const knownMap = new Map<string, string>();
+        for (const row of knownRows) {
+          if (row.btc_address === btc_address) continue;
+          // First clause before comma often holds "Display Name agent, ..."
+          const hint = (row.disclosure || "").split(",")[0]?.replace(/\s+agent/i, "").trim();
+          if (hint && hint.length >= 3 && hint.length <= 64) {
+            knownMap.set(row.btc_address, hint);
+          }
+        }
+        const knownCorrespondents = [...knownMap.entries()].map(([addr, displayName]) => ({
+          btcAddress: addr,
+          displayName,
+        }));
+        // Also include signer display name as self so self-match is ignored
+        knownCorrespondents.push({
+          btcAddress: btc_address as string,
+          displayName: typeof body.signer_display_name === "string" ? body.signer_display_name : null,
+        });
+        const mismatched = findDisclosureSignerMismatches({
+          disclosure,
+          signerBtcAddress: btc_address as string,
+          signerDisplayName:
+            typeof body.signer_display_name === "string" ? body.signer_display_name : null,
+          knownCorrespondents,
+        });
+        if (mismatched.length) {
+          warnings.push(buildDisclosureMismatchWarning(mismatched, signerLabel));
+        }
+      } catch {
+        // Non-fatal — never block filing on warning path
+      }
+
+      if (warnings.length) {
+        return c.json(
+          { ok: true, data: signal, warnings } as DOResult<Signal> & { warnings: string[] },
+          201,
+        );
+      }
       return c.json({ ok: true, data: signal } satisfies DOResult<Signal>, 201);
     });
 
