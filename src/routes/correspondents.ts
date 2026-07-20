@@ -17,7 +17,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, AppContext } from "../lib/types";
 import { getCorrespondentsBundle } from "../lib/do-client";
-import { truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
+import { truncAddr, buildBeatsByAddress, resolveNamesWithTimeout, effectiveStreak } from "../lib/helpers";
 import {
   edgeCacheMatchSWR,
   edgeCachePut,
@@ -58,7 +58,9 @@ async function buildCorrespondentsResponse(c: AppContext): Promise<Response> {
 
   const correspondents = rows.map((row) => {
     const signalCount = Number(row.signal_count) || 0;
-    const streak = Number(row.current_streak) || 0;
+    // Gate the frozen streak to today/yesterday so the displayed number matches
+    // the (now gated) leaderboard score — see effectiveStreak / queryLeaderboard.
+    const streak = effectiveStreak(Number(row.current_streak) || 0, row.last_signal_date as string | null);
     const longestStreak = Number(row.longest_streak) || 0;
     const daysActive = Number(row.days_active) || 0;
     const score = scoreMap.get(row.btc_address) ?? 0;
