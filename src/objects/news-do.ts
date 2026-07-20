@@ -116,13 +116,35 @@ function appendSignalScopeFilters(
   }
 }
 
+function isReviewedListStatus(status: string | null): boolean {
+  return !!status && (REVIEWED_SIGNAL_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * Build WHERE for signal list queries.
+ *
+ * For reviewed statuses (approved/rejected/brief_included/replaced), `since`
+ * bounds **review activity** via `reviewed_at` (with created_at fallback when
+ * reviewed_at is NULL). This matches getSignalCounts and fixes #819 where
+ * beat-health / queue-velocity callers consumed reviewed_at but the list
+ * window was created_at-only.
+ *
+ * For unreviewed statuses (submitted/pending_payment/etc) or no status,
+ * `since` remains a created_at lower bound.
+ */
 function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; params: SqlParam[] } {
   const clauses: string[] = [];
   const params: SqlParam[] = [];
   appendSignalScopeFilters(clauses, params, filters);
   if (filters.since) {
-    clauses.push("s.created_at > ?");
-    params.push(filters.since);
+    if (isReviewedListStatus(filters.status)) {
+      // Review window: primary reviewed_at; fallback for legacy NULL reviewed_at rows
+      clauses.push("((s.reviewed_at IS NOT NULL AND s.reviewed_at > ?) OR (s.reviewed_at IS NULL AND s.created_at > ?))");
+      params.push(filters.since, filters.since);
+    } else {
+      clauses.push("s.created_at > ?");
+      params.push(filters.since);
+    }
   }
   if (filters.tag) {
     clauses.push("s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?)");
@@ -2702,13 +2724,18 @@ export class NewsDO extends DurableObject<Env> {
       });
       const pageLimit = limit + 1;
 
+      // When listing reviewed statuses with a since window, sort by review time
+      // so the page reflects editorial activity (see #819).
+      const orderBy = isReviewedListStatus(status)
+        ? "COALESCE(s.reviewed_at, s.created_at) DESC"
+        : "s.created_at DESC";
       const rows = this.ctx.storage.sql
         .exec(
           `SELECT s.*, b.name as beat_name, NULL as tags_csv
            FROM signals s
            LEFT JOIN beats b ON s.beat_slug = b.slug
            WHERE ${whereSql}
-           ORDER BY s.created_at DESC
+           ORDER BY ${orderBy}
            LIMIT ?
            OFFSET ?`,
           ...params,
