@@ -128,7 +128,11 @@ function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; p
     clauses.push("s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?)");
     params.push(filters.tag);
   }
-  if (filters.status) {
+  if (filters.status === "accepted") {
+    // Virtual filter: editorially accepted signals that may or may not be
+    // compiled into a brief yet (#873). Stored states stay exact-match.
+    clauses.push("s.status IN ('approved', 'brief_included')");
+  } else if (filters.status) {
     clauses.push("s.status = ?");
     params.push(filters.status);
   } else if (!filters.includePending) {

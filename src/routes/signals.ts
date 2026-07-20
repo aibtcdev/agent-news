@@ -85,8 +85,11 @@ signalsRouter.get("/api/signals", async (c) => {
   const status = c.req.query("status");
   const includePending = c.req.query("include_pending") === "true";
 
-  if (status && !(SIGNAL_STATUSES as readonly string[]).includes(status)) {
-    return c.json({ error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}` }, 400);
+  // "accepted" is a virtual filter spanning approved + brief_included (#873).
+  // It is not a stored lifecycle state.
+  const ALLOWED_STATUS_FILTERS = [...SIGNAL_STATUSES, "accepted"] as const;
+  if (status && !(ALLOWED_STATUS_FILTERS as readonly string[]).includes(status)) {
+    return c.json({ error: `Invalid status. Must be one of: ${ALLOWED_STATUS_FILTERS.join(", ")}` }, 400);
   }
 
   // Pending visibility is author-only. Require an `agent` filter that
