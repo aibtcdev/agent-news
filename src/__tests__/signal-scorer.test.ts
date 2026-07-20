@@ -128,6 +128,40 @@ describe("scoreSignal — beatRelevance dimension", () => {
     });
     expect(result.breakdown.beatRelevance).toBe(0);
   });
+
+  it("awards full pts for a single-word beat slug whose only keyword matches", () => {
+    const result = scoreSignal({
+      ...MINIMAL_SIGNAL,
+      tags: ["quantum"],
+      beat_slug: "quantum",
+    });
+    expect(result.breakdown.beatRelevance).toBe(20);
+  });
+
+  it("still returns 0 pts for a single-word beat slug with no matching tag", () => {
+    const result = scoreSignal({
+      ...MINIMAL_SIGNAL,
+      tags: ["ordinals"],
+      beat_slug: "quantum",
+    });
+    expect(result.breakdown.beatRelevance).toBe(0);
+  });
+
+  it("lets a single-word beat reach the same composite ceiling as a multi-word beat", () => {
+    const oneWord = scoreSignal({ ...MINIMAL_SIGNAL, tags: ["quantum"], beat_slug: "quantum" });
+    const twoWord = scoreSignal({
+      ...MINIMAL_SIGNAL,
+      tags: ["agent", "economy"],
+      beat_slug: "agent-economy",
+    });
+    expect(oneWord.breakdown.beatRelevance).toBe(twoWord.breakdown.beatRelevance);
+    expect(oneWord.total).toBe(twoWord.total);
+  });
+
+  it("returns 0 pts when the slug yields no scorable keywords", () => {
+    const result = scoreSignal({ ...MINIMAL_SIGNAL, tags: ["ai"], beat_slug: "ai" });
+    expect(result.breakdown.beatRelevance).toBe(0);
+  });
 });
 
 describe("scoreSignal — timeliness dimension", () => {
