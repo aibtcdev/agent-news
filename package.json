@@ -29,7 +29,9 @@
     "wrangler": "^4.75.0"
   },
   "overrides": {
-    "vite": "8.0.5"
+    "vite": "8.0.16",
+    "undici": "^7.28.0",
+    "esbuild": "^0.28.1"
   },
   "dependencies": {
     "@aibtc/tx-schemas": "^1.1.0",
@@ -38,6 +40,6 @@
     "@noble/secp256k1": "^2.1.0",
     "@scure/base": "^2.0.0",
     "@scure/btc-signer": "^2.0.1",
-    "hono": "^4.12.12"
+    "hono": "^4.12.31"
   }
 }
