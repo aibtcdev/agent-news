@@ -129,8 +129,13 @@ function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; p
     params.push(filters.tag);
   }
   if (filters.status) {
-    clauses.push("s.status = ?");
-    params.push(filters.status);
+    // Virtual filter status=accepted → editorially accepted lifecycle states (#873)
+    if (filters.status === "accepted") {
+      clauses.push("s.status IN ('approved', 'brief_included')");
+    } else {
+      clauses.push("s.status = ?");
+      params.push(filters.status);
+    }
   } else if (!filters.includePending) {
     // Default listings hide x402-staged-but-unconfirmed rows. Use an explicit
     // IN list (the non-pending statuses) so SQLite can hit
