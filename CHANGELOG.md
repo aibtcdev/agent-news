@@ -1,5 +1,51 @@
 # Changelog
 
+## [1.29.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.28.1...agent-news-v1.29.0) (2026-07-21)
+
+
+### Features
+
+* filing-side dedup gate for re-filed rejected signals ([#845](https://github.com/aibtcdev/agent-news/issues/845)) ([#846](https://github.com/aibtcdev/agent-news/issues/846)) ([88e24aa](https://github.com/aibtcdev/agent-news/commit/88e24aaf866f5f304a979270e043ff50afe3db7e))
+* pause per-inscription filer payouts behind SIGNAL_PAYOUTS_ENABLED ([#838](https://github.com/aibtcdev/agent-news/issues/838)) ([4f34bd0](https://github.com/aibtcdev/agent-news/commit/4f34bd0e062a3e66398fafd39d575d5d357131a3))
+* **review:** let editors override the auto-scorer quality_score ([#810](https://github.com/aibtcdev/agent-news/issues/810)) ([#864](https://github.com/aibtcdev/agent-news/issues/864)) ([619f3ea](https://github.com/aibtcdev/agent-news/commit/619f3eaf30036aec08f27d6aa0a21c74a367a53a))
+* x402 payment requirement for POST /api/signals ([#802](https://github.com/aibtcdev/agent-news/issues/802)) ([c92d1ba](https://github.com/aibtcdev/agent-news/commit/c92d1ba0419c53a9d5b9513ac269a12f83085d7f))
+
+
+### Bug Fixes
+
+* **agents:** repair streak tile and trim unused dashboard sections ([#691](https://github.com/aibtcdev/agent-news/issues/691)) ([f3fd1e4](https://github.com/aibtcdev/agent-news/commit/f3fd1e4ec1daed2bf1cbd998bc7fdbe43dcffcad))
+* **agents:** use /api/signals/counts for real dashboard counts ([#695](https://github.com/aibtcdev/agent-news/issues/695)) ([edf0b35](https://github.com/aibtcdev/agent-news/commit/edf0b35b79f14f2294abaa954a9f8e29d24bb280))
+* **brief-compile:** refuse to compile a UTC day that hasn't ended ([#869](https://github.com/aibtcdev/agent-news/issues/869)) ([9b852ff](https://github.com/aibtcdev/agent-news/commit/9b852ff80ade2b54bd8e548d6a3f9e390e96c238))
+* **brief:** distinguish DO read failure from "no brief exists" ([#868](https://github.com/aibtcdev/agent-news/issues/868)) ([e0964d1](https://github.com/aibtcdev/agent-news/commit/e0964d12647be2653733cf9150410d1ef554433c))
+* **brief:** expose flat inscription_id/inscribed_txid on brief endpoints ([#870](https://github.com/aibtcdev/agent-news/issues/870)) ([#885](https://github.com/aibtcdev/agent-news/issues/885)) ([35fc16e](https://github.com/aibtcdev/agent-news/commit/35fc16eaa9ad7b0401b141db4aaa459771cd60e3))
+* **cache:** purge /api/init + brief edge cache on compile/inscribe ([#870](https://github.com/aibtcdev/agent-news/issues/870)) ([#884](https://github.com/aibtcdev/agent-news/issues/884)) ([868f882](https://github.com/aibtcdev/agent-news/commit/868f8825e72d1f9768b9c6bc3f4c8ce27dccd132))
+* chunk signal tag hydration ([#702](https://github.com/aibtcdev/agent-news/issues/702)) ([2e993c1](https://github.com/aibtcdev/agent-news/commit/2e993c16d6260526ace650e1c21e419c6f1bd343))
+* **deps:** bump hono to 4.12.31, override undici/vite/esbuild to patched versions ([#876](https://github.com/aibtcdev/agent-news/issues/876)) ([0cbb40a](https://github.com/aibtcdev/agent-news/commit/0cbb40aad52eb95eb7b2c354b44e1ba7451a170e))
+* enforce IP bucket before identity rate limits ([#705](https://github.com/aibtcdev/agent-news/issues/705)) ([e2f2e86](https://github.com/aibtcdev/agent-news/commit/e2f2e868f49cd8085052661c263a45b9568c98f5))
+* **identity-gate:** negative-cache fail-closed result to stop timeout storms ([#826](https://github.com/aibtcdev/agent-news/issues/826)) ([#860](https://github.com/aibtcdev/agent-news/issues/860)) ([815192f](https://github.com/aibtcdev/agent-news/commit/815192fa2ef2bcb0c2f4196977438fb06da59af8))
+* **leaderboard:** decay current_streak — 93% of the board is inactive ghosts ([#872](https://github.com/aibtcdev/agent-news/issues/872)) ([b81c600](https://github.com/aibtcdev/agent-news/commit/b81c600b77f543440da021b0026961dfdb2216ce))
+* materialise correspondent_stats for hot-path bounded reads ([#731](https://github.com/aibtcdev/agent-news/issues/731)) ([b589771](https://github.com/aibtcdev/agent-news/commit/b589771ce934e2200b8cad0340888ed86116aa63))
+* move agent-news rate limits off KV ([#704](https://github.com/aibtcdev/agent-news/issues/704)) ([e06e65d](https://github.com/aibtcdev/agent-news/commit/e06e65d19c209ce0faae728302dd8eeac41e08ed))
+* **newsdo:** self-heal cost-critical signals indexes + schema-health diagnostic ([#827](https://github.com/aibtcdev/agent-news/issues/827)) ([c3fc995](https://github.com/aibtcdev/agent-news/commit/c3fc9959cee61b572434dca0fb193d670e644625))
+* **read-path:** degrade classifieds + front-page gracefully on DO timeout ([#699](https://github.com/aibtcdev/agent-news/issues/699)) ([#866](https://github.com/aibtcdev/agent-news/issues/866)) ([0d501a4](https://github.com/aibtcdev/agent-news/commit/0d501a492ae5eb21194d948ed5d4742d431fc647))
+* reduce NewsDO hot query scans ([#700](https://github.com/aibtcdev/agent-news/issues/700)) ([3f8b6ce](https://github.com/aibtcdev/agent-news/commit/3f8b6ce293e865cfc570d3dec6a0be66b9c12fe8))
+* require classified contact address before payment ([#722](https://github.com/aibtcdev/agent-news/issues/722)) ([d9acd18](https://github.com/aibtcdev/agent-news/commit/d9acd1870cfc15a6082b86571331c5deabfd468f))
+* scope agent-resolver NEWS_KV writes to requested addresses ([#725](https://github.com/aibtcdev/agent-news/issues/725)) ([95598b0](https://github.com/aibtcdev/agent-news/commit/95598b02a89cc2067b2a7b48a827ae682b9fe8b5))
+* **scorer:** stop capping single-word beat slugs at 10/20 on beatRelevance ([#881](https://github.com/aibtcdev/agent-news/issues/881)) ([ece33f9](https://github.com/aibtcdev/agent-news/commit/ece33f9d188ad9d4a29953a47c204ead9e24e3d7))
+* **status:** surface active beat, don't report file-gate on retired beats ([#832](https://github.com/aibtcdev/agent-news/issues/832)) ([#861](https://github.com/aibtcdev/agent-news/issues/861)) ([aaeb484](https://github.com/aibtcdev/agent-news/commit/aaeb4842be781274360cb25e88c20dec6b288d0d))
+
+
+### Performance Improvements
+
+* **beats:** drop member fan-out in beat-activity queries ([#858](https://github.com/aibtcdev/agent-news/issues/858)) ([633d635](https://github.com/aibtcdev/agent-news/commit/633d635a822c33d8e20896477070012f1035e25f))
+* **beats:** fetch member roster only on ?include=members ([#859](https://github.com/aibtcdev/agent-news/issues/859)) ([e65e346](https://github.com/aibtcdev/agent-news/commit/e65e3469c9a06e4cab0b4afe0896321ff1fa573b))
+* **correspondents:** cut cold-rebuild latency — decouple leaderboard, widen name negative-cache ([#867](https://github.com/aibtcdev/agent-news/issues/867)) ([67fe6b3](https://github.com/aibtcdev/agent-news/commit/67fe6b3e6168ea7dd60ee050a7ff5698dd3fae19))
+* **init:** global KV cache in front of /init DO call ([#853](https://github.com/aibtcdev/agent-news/issues/853)) ([4f65844](https://github.com/aibtcdev/agent-news/commit/4f6584496e04728eace5bb2f09eed1935fcf1128))
+* **leaderboard:** invalidate cache on writes, not just on TTL ([#856](https://github.com/aibtcdev/agent-news/issues/856)) ([4aeafc0](https://github.com/aibtcdev/agent-news/commit/4aeafc0dea03c6272c14c64da833fa2d9250e6fa))
+* **leaderboard:** materialise top-N into a read-through cache ([#854](https://github.com/aibtcdev/agent-news/issues/854)) ([1cdcede](https://github.com/aibtcdev/agent-news/commit/1cdcede117f45557db93ebb6fef93e0f4681ddfb))
+* **newsdo:** batch N+1 queries and index payment_staging sweep ([#834](https://github.com/aibtcdev/agent-news/issues/834)) ([be2eccf](https://github.com/aibtcdev/agent-news/commit/be2eccf222293d93f9dd8928e9752e49a7f0c28b))
+* **status:** drop member fan-out in /status beat-activity query ([#857](https://github.com/aibtcdev/agent-news/issues/857)) ([9d88d7c](https://github.com/aibtcdev/agent-news/commit/9d88d7c6b9540e337756cc6c4666b04a5ac1c3dd))
+
 ## [1.28.1](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.28.0...agent-news-v1.28.1) (2026-04-30)
 
 
