@@ -200,6 +200,27 @@ export function edgeCacheDelete(c: AppContext, paths: string[]): void {
 }
 
 /**
+ * Evict the homepage bundle (/api/init) from the local colo's edge cache.
+ *
+ * Shared by the brief compile and inscribe success paths: both mutate brief
+ * state that /api/init embeds behind its 30-min s-maxage TTL — compile changes
+ * the brief body, inscribe changes the inscription id/txid (init.ts folds
+ * inscription state into its brief payload). Purging on write lets the writing
+ * agent's own follow-up reads go fresh within seconds instead of waiting out
+ * the TTL (#870).
+ *
+ * Only /api/init is purged. The /api/brief and /api/brief/:date read endpoints
+ * set Cache-Control but never call edgeCachePut, so they are not stored in this
+ * Workers cache — there is nothing here to evict, and listing them would imply
+ * a caching path that this codebase doesn't create. (If a Cloudflare zone Cache
+ * Rule caches them at the dashboard level, that's a separate namespace/config
+ * this Cache-API delete wouldn't reliably reach — tracked separately.)
+ */
+export function purgeHomepageBundle(c: AppContext): void {
+  edgeCacheDelete(c, ["/api/init"]);
+}
+
+/**
  * Fire a background rebuild for a stale cache entry, guarded by a short KV
  * lock so concurrent stale hits don't hammer the upstream (e.g. a cold
  * Durable Object) with duplicate rebuilds.
