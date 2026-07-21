@@ -166,6 +166,61 @@ export function edgeCachePut(
 }
 
 /**
+ * Purge one or more cached paths from the local colo's edge cache.
+ *
+ * Cloudflare's Cache API is colo-scoped: this evicts entries only in the data
+ * center where the current (write) request runs, not globally. That is exactly
+ * the coverage a write-side purge wants — the agent that just POSTed a compile
+ * or inscribe sits in one colo, and clearing that colo makes its own follow-up
+ * reads (and any co-located readers) see the new state within seconds instead
+ * of waiting out the s-maxage TTL. Far-colo readers still refresh on the normal
+ * TTL, which is acceptable for the glance-info the homepage bundle carries.
+ *
+ * Cost note: the delete itself is free (a colo cache op, not a DO read). The
+ * only downstream cost is that the next read in this colo is a MISS and rebuilds
+ * once — i.e. we pay one rebuild exactly when the underlying data changed, not
+ * on a timer. Cheaper than shrinking the TTL, which would rebuild on a schedule.
+ *
+ * Paths are resolved against the current request's origin and keyed by the
+ * canonical GET URL, matching how edgeCachePut() stored them. Runs via
+ * waitUntil so the write handler pays no latency for the eviction. No-op in
+ * test (a shared caches.default would cross-contaminate) and harmless for any
+ * path that was never edge-cached (delete simply resolves false).
+ */
+export function edgeCacheDelete(c: AppContext, paths: string[]): void {
+  if (isTestEnv(c)) return;
+  const origin = new URL(c.req.url).origin;
+  c.executionCtx.waitUntil(
+    Promise.all(
+      paths.map((path) =>
+        caches.default.delete(new Request(new URL(path, origin).toString(), { method: "GET" }))
+      )
+    ).then(() => undefined)
+  );
+}
+
+/**
+ * Evict the homepage bundle (/api/init) from the local colo's edge cache.
+ *
+ * Shared by the brief compile and inscribe success paths: both mutate brief
+ * state that /api/init embeds behind its 30-min s-maxage TTL — compile changes
+ * the brief body, inscribe changes the inscription id/txid (init.ts folds
+ * inscription state into its brief payload). Purging on write lets the writing
+ * agent's own follow-up reads go fresh within seconds instead of waiting out
+ * the TTL (#870).
+ *
+ * Only /api/init is purged. The /api/brief and /api/brief/:date read endpoints
+ * set Cache-Control but never call edgeCachePut, so they are not stored in this
+ * Workers cache — there is nothing here to evict, and listing them would imply
+ * a caching path that this codebase doesn't create. (If a Cloudflare zone Cache
+ * Rule caches them at the dashboard level, that's a separate namespace/config
+ * this Cache-API delete wouldn't reliably reach — tracked separately.)
+ */
+export function purgeHomepageBundle(c: AppContext): void {
+  edgeCacheDelete(c, ["/api/init"]);
+}
+
+/**
  * Fire a background rebuild for a stale cache entry, guarded by a short KV
  * lock so concurrent stale hits don't hammer the upstream (e.g. a cold
  * Durable Object) with duplicate rebuilds.

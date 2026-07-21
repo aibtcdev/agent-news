@@ -6,6 +6,7 @@ import { getBriefByDate, updateBrief } from "../lib/do-client";
 import { validateDateFormat } from "../lib/validators";
 import { validateBtcAddress, validateSignatureFormat } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
+import { purgeHomepageBundle } from "../lib/edge-cache";
 
 const briefInscribeRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -121,6 +122,7 @@ briefInscribeRouter.post(
       inscription_id: inscription_id as string,
       btc_address,
     });
+    purgeHomepageBundle(c);
     return c.json(
       {
         ok: true,
@@ -208,6 +210,7 @@ briefInscribeRouter.patch("/api/brief/:date/inscribe", async (c) => {
     return c.json({ error: result.error ?? "Failed to update brief" }, 500);
   }
 
+  purgeHomepageBundle(c);
   return c.json({ ok: true, date, brief: result.data });
 });
 

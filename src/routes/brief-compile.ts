@@ -8,6 +8,7 @@ import { resolveAgentNames } from "../services/agent-resolver";
 import { getUTCDate, getUTCYesterday, formatUTCShort } from "../lib/helpers";
 import { validateBtcAddress, validateDateFormat } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
+import { purgeHomepageBundle } from "../lib/edge-cache";
 
 const briefCompileRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
@@ -345,6 +346,12 @@ async function handleBriefCompile(
       return c.json({ error: payoutResult.error ?? "Failed to reconcile brief inclusion payouts" }, 500);
     }
   }
+
+  // The compile just changed brief state embedded in the homepage bundle
+  // (/api/init, 30-min edge TTL). Evict it so the compiling agent's own
+  // follow-up reads — and co-located homepage readers — see the new brief
+  // within seconds instead of waiting out the TTL (#870).
+  purgeHomepageBundle(c);
 
   return c.json(
     {
