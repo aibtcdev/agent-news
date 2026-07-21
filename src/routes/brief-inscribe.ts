@@ -1,13 +1,21 @@
 import { Hono } from "hono";
-import type { Env, AppVariables } from "../lib/types";
+import type { Env, AppVariables, AppContext } from "../lib/types";
 import { createRateLimitMiddleware } from "../middleware/rate-limit";
 import { BRIEF_INSCRIBE_RATE_LIMIT } from "../lib/constants";
 import { getBriefByDate, updateBrief } from "../lib/do-client";
 import { validateDateFormat } from "../lib/validators";
 import { validateBtcAddress, validateSignatureFormat } from "../lib/validators";
 import { verifyAuth } from "../services/auth";
+import { edgeCacheDelete } from "../lib/edge-cache";
 
 const briefInscribeRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
+
+// Brief read surfaces to evict after an inscription write so the writing agent's
+// own follow-up reads see fresh inscription state within seconds instead of
+// waiting out the edge TTL (#870, and secret-mars's /api/brief/{date} sibling).
+function purgeBriefCaches(c: AppContext, date: string): void {
+  edgeCacheDelete(c, ["/api/init", "/api/brief", `/api/brief/${date}`]);
+}
 
 const inscribeRateLimit = createRateLimitMiddleware({
   key: "brief-inscribe",
@@ -121,6 +129,7 @@ briefInscribeRouter.post(
       inscription_id: inscription_id as string,
       btc_address,
     });
+    purgeBriefCaches(c, date);
     return c.json(
       {
         ok: true,
@@ -208,6 +217,7 @@ briefInscribeRouter.patch("/api/brief/:date/inscribe", async (c) => {
     return c.json({ error: result.error ?? "Failed to update brief" }, 500);
   }
 
+  purgeBriefCaches(c, date);
   return c.json({ ok: true, date, brief: result.data });
 });
 
