@@ -9,6 +9,20 @@ import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVer
 
 const briefRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+// Flat, snake_case inscription fields read straight from the DB column — the
+// same shape /api/brief/:date/inscription returns. Kept flat (not just the
+// nested camelCase `.inscription` object) so a client can poll one canonical
+// field across every brief surface, and always present (null before inscription)
+// so that poll never hits an undefined path. Callers spread this AFTER
+// `...jsonData` so the authoritative column wins over any stale inscription
+// baked into the compile-time json_data blob (#870).
+function flatInscriptionFields(brief: { inscription_id?: string | null; inscribed_txid?: string | null } | null) {
+  return {
+    inscription_id: brief?.inscription_id ?? null,
+    inscribed_txid: brief?.inscribed_txid ?? null,
+  };
+}
+
 // GET /api/brief — get today's compiled brief, or today's date with empty content if not yet compiled.
 // Always returns today's UTC date so the frontend can show today's signal feed before the
 // brief is compiled, rather than falling back to yesterday's stale brief.
@@ -59,6 +73,7 @@ briefRouter.get("/api/brief", async (c) => {
       latest: true,
       archive,
       inscription: null,
+      ...flatInscriptionFields(null),
     });
   }
 
@@ -90,6 +105,7 @@ briefRouter.get("/api/brief", async (c) => {
     price: { amount: BRIEF_PRICE_SATS, asset: "sBTC (sats)", protocol: "x402" },
     ...jsonData,
     text: todaysBrief.text,
+    ...flatInscriptionFields(todaysBrief),
   });
 });
 
@@ -279,6 +295,7 @@ briefRouter.get("/api/brief/:date", async (c) => {
     inscription,
     ...jsonData,
     text: brief.text,
+    ...flatInscriptionFields(brief),
   });
 });
 
