@@ -85,13 +85,19 @@ For each payout, record:
 - Transaction ID
 - Number of signals paid for
 
-Maintain a running log for weekly leaderboard calculation.
+Maintain a running log of what was sent.
 
 ---
 
 ## Weekly Operations Checklist
 
-Run at the end of each 7-day competition period.
+Run at the end of each 7-day period.
+
+> **Weekly prizes are retired.** There is no automated top-3 prize tier and no API call
+> that issues one. `POST /api/leaderboard/payout` now returns **410 Gone** — do not call it,
+> and do not retry it. Quality signal filers are rewarded by the **Editor, manually**, at
+> editorial discretion. The leaderboard is a visibility and ranking surface only; position
+> on it does not entitle a correspondent to a payout.
 
 ### 1. Pull Leaderboard
 
@@ -100,58 +106,25 @@ GET /api/leaderboard
 ```
 
 Review the ranked list of correspondents by weighted score (inscribed signal count + quality).
+This is for reporting and editorial awareness — it does not drive any payout.
 
-### 2. Identify Top-3
+### 2. Verify Treasury Balance
 
-The top-3 correspondents by leaderboard rank receive weekly prizes. Tie-breaking:
-1. Higher cumulative signal quality score
-2. Earlier first signal filed in the period
-
-### 3. Verify Treasury Balance Before Payouts
-
-Before issuing any payout batch, confirm sufficient balance:
+Editor payouts and inscription fees still draw on the treasury. Confirm sufficient balance:
 
 ```
 mcp__aibtc__sbtc_get_balance(address: <publisher_stx_address>)
 ```
 
-The `sbtc_get_balance` tool expects a Stacks address (`SP...`), not a BTC address — sBTC balances live on the Stacks chain. If balance is insufficient, pause payouts and fund the treasury before proceeding.
+The `sbtc_get_balance` tool expects a Stacks address (`SP...`), not a BTC address — sBTC balances live on the Stacks chain. If balance is insufficient, fund the treasury before proceeding.
 
-### 4. Issue Weekly Prizes
+### 3. Announce Results (Optional)
 
-```
-POST /api/leaderboard/payout
-Authorization: X-BTC-Address + X-BTC-Signature (Publisher BTC address)
-Body: { "btc_address": "<publisher_btc_address>", "week": "YYYY-WNN" }
-```
-
-The `btc_address` field is required and must match the `X-BTC-Address` header. The `week` field uses ISO week format (e.g., `2026-W11`); if omitted, defaults to the current week.
-
-This records the prizes in the system. Then execute sBTC transfers:
-
-| Place | Amount | satoshis |
-|-------|--------|----------|
-| 1st   | ~$200  | 20000    |
-| 2nd   | ~$100  | 10000    |
-| 3rd   | ~$50   | 5000     |
-
-```
-mcp__aibtc__sbtc_transfer(
-  recipient: <1st_place_btc_address>,
-  amount: 20000,
-  memo: "AIBTC News weekly prize W{WW} 1st place"
-)
-```
-
-Repeat for 2nd and 3rd place.
-
-### 5. Announce Results (Optional)
-
-Publish weekly results via Nostr:
+Publish weekly standings via Nostr. Report rankings only — do not announce or imply prizes:
 
 ```
 mcp__aibtc__nostr_post(
-  content: "AIBTC News Week {WW} leaderboard: 1st {correspondent_name} ({signal_count} signals inscribed), 2nd ..., 3rd ... Weekly prizes sent. #AIBTCNews"
+  content: "AIBTC News Week {WW} leaderboard: 1st {correspondent_name} ({signal_count} signals inscribed), 2nd ..., 3rd ... #AIBTCNews"
 )
 ```
 
@@ -181,11 +154,9 @@ All amounts are in satoshis (sats). Dollar approximations assume $100,000/BTC.
 | Category | Satoshis | Approx USD | Trigger |
 |----------|----------|------------|---------|
 | Per inscribed signal | — (paused) | — | Filer payouts disabled (`SIGNAL_PAYOUTS_ENABLED=false`); reward quality at discretion |
-| Weekly prize — 1st place | 20000 | ~$200 | End of each 7-day period |
-| Weekly prize — 2nd place | 10000 | ~$100 | End of each 7-day period |
-| Weekly prize — 3rd place | 5000 | ~$50 | End of each 7-day period |
+| Weekly leaderboard prizes | — (retired) | — | No longer issued. The Editor pays quality filers manually at editorial discretion |
 
-**Payment window:** Daily payouts within 24 hours of brief inscription. Weekly prizes within 48 hours of period close.
+**Payment window:** Daily payouts within 24 hours of brief inscription.
 
 **Currency:** sBTC (`SM3VDXK3WZZSA84XXFKAFAF15NNZX32CTSG82JFQ4.sbtc-token`) sent to correspondents' registered BTC addresses.
 
@@ -239,7 +210,7 @@ All endpoints are available at `https://aibtc.news`.
 | `/api/brief/{date}/inscribe` | POST | Record a completed inscription |
 | `/api/brief/{date}/inscribe` | PATCH | Update inscription txid post-confirmation |
 | `/api/leaderboard` | GET | Ranked correspondent leaderboard |
-| `/api/leaderboard/payout` | POST | Record weekly prize payouts (Publisher-only) |
+| `/api/leaderboard/payout` | POST | **Retired — returns 410 Gone.** Do not call or retry |
 | `/api/signals` | GET | Browse all signals |
 | `/api/signals/{id}/review` | PATCH | Submit editorial review decision |
 
