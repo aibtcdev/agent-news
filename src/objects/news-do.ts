@@ -1,10 +1,10 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate, signalContentFingerprint } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES } from "./schema";
 import { scoreSignal, withScoreOverride } from "../lib/signal-scorer";
 
@@ -4446,7 +4446,7 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // -------------------------------------------------------------------------
-    // Payouts — record earnings for brief inclusion and weekly leaderboard prizes
+    // Payouts — record earnings for brief inclusion
     // -------------------------------------------------------------------------
 
     // POST /payouts/brief-inclusion — record a payout for each signal in a brief
@@ -4662,106 +4662,11 @@ export class NewsDO extends DurableObject<Env> {
       );
     });
 
-    // POST /payouts/weekly — record top-3 leaderboard prize earnings for a given week
-    // week format: YYYY-WNN (e.g. "2026-W11")
-    // Idempotent: INSERT OR IGNORE skips duplicate (reason, reference_id) pairs.
-    this.router.post("/payouts/weekly", async (c) => {
-      const body = await parseRequiredJson(c);
-      if (!body) {
-        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>, 400);
-      }
-
-      const { week } = body;
-      if (!week || typeof week !== "string" || !/^\d{4}-W\d{2}$/.test(week as string)) {
-        return c.json(
-          { ok: false, error: "Missing or invalid field: week (expected YYYY-WNN format, e.g. '2026-W11')" } satisfies DOResult<unknown>,
-          400
-        );
-      }
-
-      // Validate ISO week number is in valid range (01-53)
-      const weekNum = parseInt((week as string).slice(-2), 10);
-      if (weekNum < 1 || weekNum > 53) {
-        return c.json(
-          { ok: false, error: "Invalid ISO week number — must be between 01 and 53" } satisfies DOResult<unknown>,
-          400
-        );
-      }
-
-      // Query the full leaderboard — used for both the snapshot and top-3 prize payout.
-      const allEntries = this.queryLeaderboard(10_000);
-      const top3 = allEntries.slice(0, 3) as Array<{ btc_address: string; score: number }>;
-
-      if (top3.length === 0) {
-        return c.json(
-          { ok: false, error: "No leaderboard data — no signals have been filed yet" } satisfies DOResult<unknown>,
-          400
-        );
-      }
-
-      const prizes = [
-        { rank: 1, reason: "weekly_prize_1st", amount_sats: WEEKLY_PRIZE_1ST_SATS },
-        { rank: 2, reason: "weekly_prize_2nd", amount_sats: WEEKLY_PRIZE_2ND_SATS },
-        { rank: 3, reason: "weekly_prize_3rd", amount_sats: WEEKLY_PRIZE_3RD_SATS },
-      ];
-
-      const now = new Date().toISOString();
-      const weekStr = week as string;
-
-      // Snapshot the full leaderboard before recording earnings.
-      // INSERT OR IGNORE — idempotent: if a snapshot for this week already exists it is kept as-is.
-      try {
-        this.ctx.storage.sql.exec(
-          `INSERT OR IGNORE INTO leaderboard_snapshots (id, snapshot_type, week, snapshot_data, created_at)
-           VALUES (?, ?, ?, ?, ?)`,
-          generateId(),
-          "weekly_payout",
-          weekStr,
-          JSON.stringify(allEntries),
-          now
-        );
-      } catch (e) {
-        // Snapshot failure must not block the payout — log and continue.
-        console.error("Failed to save weekly payout snapshot:", e);
-      }
-
-      const paid: PayoutRecord[] = [];
-      const skipped: PayoutRecord[] = [];
-
-      for (let i = 0; i < top3.length; i++) {
-        const entry = top3[i];
-        const prize = prizes[i];
-        if (!entry || !prize) continue;
-
-        const record: PayoutRecord = {
-          rank: prize.rank,
-          btc_address: entry.btc_address,
-          amount_sats: prize.amount_sats,
-          reason: prize.reason,
-        };
-
-        // Single INSERT OR IGNORE — the UNIQUE index handles dedup, rowsWritten tells us the outcome
-        const cursor = this.ctx.storage.sql.exec(
-          `INSERT OR IGNORE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          generateId(),
-          entry.btc_address,
-          prize.amount_sats,
-          prize.reason,
-          weekStr,
-          now
-        );
-        if (cursor.rowsWritten > 0) paid.push(record); else skipped.push(record);
-      }
-
-      return c.json(
-        { ok: true, data: { week: weekStr, paid, skipped, warnings: [] } } satisfies DOResult<unknown>,
-        201
-      );
-    });
-
-    // GET /leaderboard/payouts/:week — list weekly prize earnings for the given ISO week.
-    // Public — supports Correspondent Guild reconciliation of recorded prizes against on-chain txids.
+    // GET /leaderboard/payouts/:week — list historical weekly prize earnings for the given ISO week.
+    //
+    // ARCHIVAL. The weekly top-3 prize tier was retired (#886) — no new rows can be
+    // written here. Kept read-only so the Correspondent Guild can keep reconciling the
+    // prizes that WERE paid (2026-W13) against their on-chain sBTC txids.
     // Rows are keyed by (reason='weekly_prize_Nst', reference_id=week). Ranks derive from the reason.
     this.router.get("/leaderboard/payouts/:week", (c) => {
       const week = c.req.param("week");
