@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, DOErrorStatus, WeeklyPayoutResult, PaymentStageMaterialized, PaymentStagePayload, PaymentTrackedState, PaymentTerminalReason, BeatEditor } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, DOErrorStatus, PaymentStageMaterialized, PaymentStagePayload, PaymentTrackedState, PaymentTerminalReason, BeatEditor } from "./types";
 import { CLASSIFIED_BRIEF_SLOTS } from "./constants";
 
 /** Singleton DO stub ID — single instance manages all news data */
@@ -1195,7 +1195,7 @@ export async function creditReferral(
 }
 
 // ---------------------------------------------------------------------------
-// Payouts — brief inclusion and weekly leaderboard prizes
+// Payouts — brief inclusion, plus read-only access to retired weekly prize history
 // ---------------------------------------------------------------------------
 
 export interface BriefInclusionPayoutResult {
@@ -1217,19 +1217,6 @@ export async function recordBriefInclusionPayouts(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ brief_date: briefDate, signal_ids: signalIds }),
-  });
-}
-
-/** Record top-3 weekly leaderboard prize earnings for the given ISO week. Idempotent. */
-export async function recordWeeklyPayouts(
-  env: Env,
-  week: string
-): Promise<DOResult<WeeklyPayoutResult>> {
-  const stub = getStub(env);
-  return doFetch<WeeklyPayoutResult>(stub, "/payouts/weekly", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ week }),
   });
 }
 
