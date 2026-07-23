@@ -21,7 +21,14 @@ const NEGATIVE_CACHE_TTL_SECONDS = 1800; // 30 minutes for unresolved names
 const CACHE_KEY_PREFIX = "agent-name:";
 const AGENT_API_BASE = "https://aibtc.com/api/agents";
 const BULK_PAGE_SIZE = 100; // max allowed by aibtc.com
-const BULK_MAX_PAGES = 10; // safety cap: 1000 agents max
+// Runaway guard only — NOT a coverage limit. The page loop stops on
+// `pagination.hasMore`, and additionally sizes itself from `pagination.total` on
+// the first page, so this ceiling is never the thing that ends a healthy fetch.
+// It exists so a registry that always reports hasMore cannot spin forever.
+// Keep it comfortably above the real registry size (issue #320: a 10-page cap
+// silently truncated the fetch at 1000 once the registry reached 1049 agents,
+// making every agent past that index permanently unresolvable).
+const BULK_HARD_PAGE_CEILING = 200; // 20,000 agents
 
 export interface AgentInfo {
   name: string | null;
@@ -102,8 +109,11 @@ async function fetchBulkAgents(): Promise<BulkFetchResult> {
   const allAgents = new Map<string, AgentInfo>();
   let offset = 0;
   let complete = false;
+  // Derived from `pagination.total` on the first page; until then, allow the
+  // hard ceiling so the first request can happen at all.
+  let maxPages = BULK_HARD_PAGE_CEILING;
 
-  for (let page = 0; page < BULK_MAX_PAGES; page++) {
+  for (let page = 0; page < maxPages; page++) {
     try {
       const res = await fetch(
         `${AGENT_API_BASE}?limit=${BULK_PAGE_SIZE}&offset=${offset}`,
@@ -117,8 +127,20 @@ async function fetchBulkAgents(): Promise<BulkFetchResult> {
 
       const data = (await res.json()) as {
         agents: Array<Record<string, unknown>>;
-        pagination?: { hasMore?: boolean };
+        pagination?: { hasMore?: boolean; total?: number };
       };
+
+      // Size the loop to the registry the first time we learn how big it is,
+      // so growth past any fixed cap can never silently truncate the fetch.
+      if (page === 0) {
+        const total = data.pagination?.total;
+        if (typeof total === "number" && total > 0) {
+          maxPages = Math.min(
+            Math.ceil(total / BULK_PAGE_SIZE),
+            BULK_HARD_PAGE_CEILING,
+          );
+        }
+      }
 
       for (const agent of data.agents) {
         const btcAddr = agent.btcAddress as string | undefined;
