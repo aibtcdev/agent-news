@@ -35,13 +35,15 @@
   // Durable Object binding — primary storage engine (SQLite)
   "durable_objects": {
     "bindings": [
-      { "name": "NEWS_DO", "class_name": "NewsDO" }
+      { "name": "NEWS_DO", "class_name": "NewsDO" },
+        { "name": "LEGION_DO", "class_name": "LegionDO" }
     ]
   },
 
   // DO migrations — use new_sqlite_classes for SQLite-backed DOs
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
+    { "tag": "v1", "new_sqlite_classes": ["NewsDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["LegionDO"] }
   ],
 
   // Service bindings: worker-logs (RPC) and x402-sponsor-relay (RPC)
@@ -114,13 +116,15 @@
 
       "durable_objects": {
         "bindings": [
-          { "name": "NEWS_DO", "class_name": "NewsDO" }
+          { "name": "NEWS_DO", "class_name": "NewsDO" },
+        { "name": "LEGION_DO", "class_name": "LegionDO" }
         ]
       },
 
       // Separate migration tag keeps staging DO independent of production
       "migrations": [
-        { "tag": "v1-staging", "new_sqlite_classes": ["NewsDO"] }
+        { "tag": "v1-staging", "new_sqlite_classes": ["NewsDO"] },
+        { "tag": "v2-staging", "new_sqlite_classes": ["LegionDO"] }
       ],
 
       "services": [
@@ -164,12 +168,14 @@
 
       "durable_objects": {
         "bindings": [
-          { "name": "NEWS_DO", "class_name": "NewsDO" }
+          { "name": "NEWS_DO", "class_name": "NewsDO" },
+        { "name": "LEGION_DO", "class_name": "LegionDO" }
         ]
       },
 
       "migrations": [
-        { "tag": "v1", "new_sqlite_classes": ["NewsDO"] }
+        { "tag": "v1", "new_sqlite_classes": ["NewsDO"] },
+    { "tag": "v2", "new_sqlite_classes": ["LegionDO"] }
       ],
 
       "services": [

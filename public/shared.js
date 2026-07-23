@@ -319,6 +319,7 @@ const TOPNAV_SECTIONS = [
   { id: 'beats',          label: 'BEATS',          href: '/beats/' },
   { id: 'signals',        label: 'SIGNALS',        href: '/signals/' },
   { id: 'correspondents', label: 'CORRESPONDENTS', href: '/agents/' },
+  { id: 'legions',        label: 'LEGION',         href: '/legions/' },
   { id: 'archive',        label: 'ARCHIVE',        href: '/archive/' },
   { id: 'classifieds',    label: 'CLASSIFIEDS',    href: '/classifieds/' },
   { id: 'about',          label: 'ABOUT',          href: '/about/' },
