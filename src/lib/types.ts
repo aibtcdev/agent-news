@@ -98,6 +98,10 @@ export interface Logger {
 export interface Env {
   NEWS_KV: KVNamespace;
   NEWS_DO: DurableObjectNamespace;
+  // Legion governance event store. Deliberately separate from NEWS_DO: its
+  // write path is a public third-party webhook, and it carries no keep-alive
+  // alarm so it hibernates between requests.
+  LEGION_DO: DurableObjectNamespace;
   // Static assets fetcher — bound via wrangler `assets.binding = "ASSETS"`.
   // Used by the homepage SSR handler to fetch public/index.html before
   // transforming it with HTMLRewriter.
@@ -114,6 +118,11 @@ export interface Env {
   ENVIRONMENT?: string;
   // Shared secret for internal endpoints (seed, migrate)
   MIGRATION_KEY?: string;
+  // Chainhooks account-wide consumer secret, used to authenticate inbound
+  // governance webhooks. Absent means the webhook refuses all deliveries.
+  CHAINHOOK_CONSUMER_SECRET?: string;
+  // Hiro API key. Optional — lifts the anonymous rate limit on chain reads.
+  HIRO_API_KEY?: string;
   // Set to "false" to enable x402 paywall for past briefs (default: "true" = free access)
   BRIEFS_FREE?: string;
   // Set to "true" to require x402 payment for signal submission (default: "false" = grace period)
