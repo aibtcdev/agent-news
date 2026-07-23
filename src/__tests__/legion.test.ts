@@ -13,7 +13,8 @@ import {
   nextBoundaryHeight,
   predictOutcome,
 } from "../services/legion-chain";
-import { BRIEF_STATUS } from "../lib/legion-constants";
+import { extractEvents } from "../routes/legion";
+import { BRIEF_STATUS, LEGION_GOV_CONTRACT } from "../lib/legion-constants";
 
 /**
  * Fixtures are real bytes captured from the deployed v2 contracts
@@ -226,5 +227,117 @@ describe("predictOutcome", () => {
     expect(p.approvalPct).toBe(65);
     expect(p.thresholdMet).toBe(false);
     expect(p.outcome).toBe("VOTED_DOWN");
+  });
+});
+
+describe("chainhook payload parsing", () => {
+  /**
+   * A real Chainhooks 2.0 delivery, shaped per the SDK's own TypeBox schemas.
+   * The first parser was written against classic Chainhook and matched none of
+   * this — and because a mismatch yields zero events rather than an error, the
+   * service saw healthy 200s while nothing was ever indexed. These assertions
+   * exist so that failure mode cannot recur silently.
+   */
+  const delivery = {
+    chainhook: { uuid: "f0f6a9bc", name: "legion-gov-events" },
+    event: {
+      chain: "stacks",
+      network: "testnet",
+      rollback: [],
+      apply: [
+        {
+          block_identifier: { index: 4_049_436 },
+          timestamp: 1_784_823_000,
+          metadata: { burn_block_timestamp: 1_784_823_100 },
+          transactions: [
+            {
+              transaction_identifier: { hash: "0x5309576f865f" },
+              metadata: { status: "success" },
+              operations: [
+                { type: "stx_transfer", operation_identifier: { index: 0 } },
+                {
+                  type: "contract_log",
+                  operation_identifier: { index: 1 },
+                  metadata: {
+                    contract_identifier: LEGION_GOV_CONTRACT,
+                    topic: "print",
+                    value: {
+                      event: "contribute",
+                      who: "STGX5YP51NKM69ZMP6DVB6GAJAANCG5WB3718KD9",
+                      amount: 10_000_000,
+                    },
+                  },
+                },
+              ],
+            },
+            {
+              // An aborted tx must never be indexed as if it happened.
+              transaction_identifier: { hash: "0xdeadbeef" },
+              metadata: { status: "abort_by_post_condition" },
+              operations: [
+                {
+                  type: "contract_log",
+                  operation_identifier: { index: 0 },
+                  metadata: {
+                    contract_identifier: LEGION_GOV_CONTRACT,
+                    topic: "print",
+                    value: { event: "conclude", briefDate: "2026-07-23" },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+
+  it("extracts print events from the nested event.apply path", () => {
+    const rows = extractEvents(delivery.event.apply, LEGION_GOV_CONTRACT);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      txid: "0x5309576f865f",
+      event: "contribute",
+      block_height: 4_049_436,
+      event_index: 1,
+    });
+  });
+
+  it("skips operations from other contracts", () => {
+    const rows = extractEvents(delivery.event.apply, "SP000000000000000000002Q6VF78.other");
+    expect(rows).toHaveLength(0);
+  });
+
+  it("decodes a value delivered as hex rather than a decoded object", () => {
+    // Falls back to the local codec, so indexing does not depend on the
+    // service honouring decode_clarity_values.
+    const hex =
+      "0x0c00000002" +
+      "05" + "6576656e74" + "0d0000000a636f6e747269627574" + "65" +
+      "06" + "616d6f756e74" + "01" + "00000000000000000000000000989680";
+    const rows = extractEvents(
+      [
+        {
+          block_identifier: { index: 1 },
+          transactions: [
+            {
+              transaction_identifier: { hash: "0xabc" },
+              metadata: { status: "success" },
+              operations: [
+                {
+                  type: "contract_log",
+                  operation_identifier: { index: 0 },
+                  metadata: { contract_identifier: LEGION_GOV_CONTRACT, value: hex },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+      LEGION_GOV_CONTRACT
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].event).toBe("contribute");
+    expect(rows[0].data.amount).toBe(10_000_000);
   });
 });

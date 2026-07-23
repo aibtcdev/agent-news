@@ -34,6 +34,7 @@ import {
   nextBoundaryHeight,
   predictOutcome,
 } from "../services/legion-chain";
+import { decodeClarityHex, toJSON } from "../lib/clarity";
 import type { LegionEventRow } from "../objects/legion-do";
 
 const legionRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -87,73 +88,122 @@ function isAuthorised(request: Request, secret: string): boolean {
 
 // ── Payload normalisation ──
 
+/**
+ * Chainhooks 2.0 delivery payload.
+ *
+ * Shape taken from `@stacks/chainhooks-client`'s own TypeBox schemas, not from
+ * the docs. It differs from classic Chainhook in several ways that all fail
+ * silently — a parser written against the old shape finds zero events and
+ * returns 200, so deliveries look healthy while nothing is indexed:
+ *
+ *   apply/rollback are under `event`, not top-level
+ *   per-tx events are `operations`, not `metadata.receipt.events`
+ *   the print type is `contract_log`, not `SmartContractEvent`
+ *   fields hang off `metadata`, not `data`
+ *   failure is `metadata.status !== "success"`, not `metadata.success === false`
+ */
 interface ChainhookOccurrence {
-  apply?: ChainhookBlock[];
-  rollback?: ChainhookBlock[];
+  chainhook?: { uuid?: string; name?: string };
+  event?: {
+    apply?: ChainhookBlock[];
+    rollback?: ChainhookBlock[];
+  };
 }
 
 interface ChainhookBlock {
   block_identifier?: { index?: number };
   timestamp?: number;
-  metadata?: { block_time?: number };
+  metadata?: { burn_block_timestamp?: number };
   transactions?: ChainhookTransaction[];
 }
 
 interface ChainhookTransaction {
   transaction_identifier?: { hash?: string };
+  operations?: ChainhookOperation[];
+  metadata?: { status?: string };
+}
+
+interface ChainhookOperation {
+  type?: string;
+  operation_identifier?: { index?: number };
   metadata?: {
-    success?: boolean;
-    receipt?: { events?: ChainhookEvent[] };
+    contract_identifier?: string;
+    topic?: string;
+    /** Decoded object, or {hex, repr}, or a bare hex string. All three occur. */
+    value?: unknown;
   };
 }
 
-interface ChainhookEvent {
-  type?: string;
-  position?: { index?: number };
-  data?: {
-    contract_identifier?: string;
-    topic?: string;
-    value?: unknown;
-    raw_value?: string;
-  };
+/**
+ * Normalise a print event's `value` into a plain object.
+ *
+ * `decode_clarity_values` is requested at registration, but the payload can
+ * still carry `{hex, repr}` or a bare hex string depending on the path a
+ * delivery takes. Rather than depend on that flag, fall back to decoding the
+ * hex locally — the codec is already here and tested against real chain bytes,
+ * so this works whether or not the service decoded it for us.
+ */
+function normaliseEventValue(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    // Already decoded — a print tuple always carries an `event` discriminator.
+    if (typeof obj.event === "string") return obj;
+    if (typeof obj.hex === "string") return decodeHexTuple(obj.hex);
+    return null;
+  }
+
+  if (typeof value === "string" && value.startsWith("0x")) {
+    return decodeHexTuple(value);
+  }
+  return null;
+}
+
+function decodeHexTuple(hex: string): Record<string, unknown> | null {
+  try {
+    const decoded = toJSON(decodeClarityHex(hex));
+    return decoded && typeof decoded === "object"
+      ? (decoded as Record<string, unknown>)
+      : null;
+  } catch {
+    // A tuple we cannot decode is not worth failing the whole delivery over —
+    // the other events in the batch are still good.
+    return null;
+  }
 }
 
 /**
  * Flatten a chainhook payload into rows.
  *
- * Only `print` events from the governance contract are kept, and only from
- * successful transactions — v1's history already contained a `settle` that hit
- * `abort_by_post_condition`, and indexing a failed call would show a
- * conclusion on the page that never happened.
+ * Only `contract_log` operations from the governance contract are kept, and
+ * only from successful transactions — an aborted `conclude` must never render
+ * as a conclusion that happened.
  */
-function extractEvents(blocks: ChainhookBlock[], contractId: string): LegionEventRow[] {
+export function extractEvents(blocks: ChainhookBlock[], contractId: string): LegionEventRow[] {
   const out: LegionEventRow[] = [];
 
   for (const block of blocks) {
     const height = block.block_identifier?.index;
     if (typeof height !== "number") continue;
-    const blockTime = block.metadata?.block_time ?? block.timestamp ?? null;
+    const blockTime = block.metadata?.burn_block_timestamp ?? block.timestamp ?? null;
 
     for (const tx of block.transactions ?? []) {
-      if (tx.metadata?.success === false) continue;
+      if (tx.metadata?.status && tx.metadata.status !== "success") continue;
       const txid = tx.transaction_identifier?.hash;
       if (!txid) continue;
 
-      const events = tx.metadata?.receipt?.events ?? [];
-      events.forEach((ev, i) => {
-        if (ev.type !== "SmartContractEvent" && ev.type !== "print") return;
-        if (ev.data?.contract_identifier !== contractId) return;
+      (tx.operations ?? []).forEach((op, i) => {
+        if (op.type !== "contract_log") return;
+        if (op.metadata?.contract_identifier !== contractId) return;
 
-        // With decode_clarity_values enabled the tuple arrives as JSON.
-        const value = ev.data?.value;
-        if (!value || typeof value !== "object") return;
-        const data = value as Record<string, unknown>;
-        const name = typeof data.event === "string" ? data.event : null;
-        if (!name) return;
+        const data = normaliseEventValue(op.metadata?.value);
+        const name = data && typeof data.event === "string" ? data.event : null;
+        if (!data || !name) return;
 
         out.push({
           txid,
-          event_index: ev.position?.index ?? i,
+          event_index: op.operation_identifier?.index ?? i,
           contract_id: contractId,
           block_height: height,
           block_time: blockTime,
@@ -208,8 +258,8 @@ legionRouter.post("/api/legion/chainhook", async (c) => {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
 
-  const applied = extractEvents(payload.apply ?? [], LEGION_GOV_CONTRACT);
-  const rolled = rollbackTxids(payload.rollback ?? []);
+  const applied = extractEvents(payload.event?.apply ?? [], LEGION_GOV_CONTRACT);
+  const rolled = rollbackTxids(payload.event?.rollback ?? []);
 
   const stub = getLegionStub(c.env);
   let inserted = 0;
@@ -242,6 +292,15 @@ legionRouter.post("/api/legion/chainhook", async (c) => {
   // nothing should not evict a warm cache entry.
   if (inserted > 0 || removed > 0) {
     edgeCacheDelete(c, ["/api/legion/state"]);
+  }
+
+  if (applied.length === 0 && rolled.length === 0) {
+    // Silent no-op deliveries are how a payload-shape mismatch hides: the
+    // service records a healthy 200 while nothing is ever indexed.
+    logger?.warn?.("[legion] chainhook delivery parsed to zero events", {
+      blocks: payload.event?.apply?.length ?? 0,
+      uuid: payload.chainhook?.uuid ?? "unknown",
+    });
   }
 
   logger?.info?.("[legion] chainhook processed", {
