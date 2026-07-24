@@ -9,10 +9,12 @@
  *   The webhook carries everything that *happened* — contributions, proposals,
  *   votes, vetoes, conclusions. Each is a transaction, so each emits an event.
  *
- *   The state endpoint additionally reads `get-phase`, because a week crosses
- *   from voting into its veto window, and from there into concludable, purely
- *   because blocks passed. No transaction, no event, nothing to push. Reading
- *   that per request is why there is no cron in this design.
+ *   The state endpoint adds only the chain tip, then derives the phase locally
+ *   (voting -> veto -> concludable -> lapsed) — those transitions fire because
+ *   blocks passed, with no transaction to push. Everything else it needs is
+ *   already in the indexed events or the cached params, so a page load is three
+ *   Hiro reads at most, and the edge cache (purged on webhook) caps even that
+ *   to once a minute.
  */
 
 import { Hono } from "hono";
@@ -26,10 +28,9 @@ import {
 import {
   getTipHeight,
   getBrief,
-  getBriefMeta,
-  getPhase,
   getParams,
   getPoolStats,
+  deriveLegionPhase,
   blocksRemaining,
   nextBoundaryHeight,
   predictOutcome,
@@ -262,7 +263,6 @@ legionRouter.post("/api/legion/chainhook", async (c) => {
   const rolled = rollbackTxids(payload.event?.rollback ?? []);
 
   const stub = getLegionStub(c.env);
-  let inserted = 0;
   let removed = 0;
 
   try {
@@ -274,11 +274,10 @@ legionRouter.post("/api/legion/chainhook", async (c) => {
       removed = ((await res.json()) as { removed: number }).removed;
     }
     if (applied.length > 0) {
-      const res = await stub.fetch("https://legion/record", {
+      await stub.fetch("https://legion/record", {
         method: "POST",
         body: JSON.stringify({ events: applied }),
       });
-      inserted = ((await res.json()) as { inserted: number }).inserted;
     }
   } catch (err) {
     // Return 500 so Chainhooks retries rather than dropping the delivery.
@@ -288,13 +287,12 @@ legionRouter.post("/api/legion/chainhook", async (c) => {
     return c.json({ error: "Failed to persist events" }, 500);
   }
 
-  // Only purge when something actually changed. A redelivery that inserts
-  // nothing should not evict a warm cache entry.
-  if (inserted > 0 || removed > 0) {
+  // Purge on any non-empty delivery. Distinguishing a genuine change from a
+  // redelivery would cost a read per event (see recordEvents) to save a rebuild
+  // that the edge cache makes cheap anyway — the wrong trade.
+  if (applied.length > 0 || removed > 0) {
     edgeCacheDelete(c, ["/api/legion/state"]);
-  }
-
-  if (applied.length === 0 && rolled.length === 0) {
+  } else {
     // Silent no-op deliveries are how a payload-shape mismatch hides: the
     // service records a healthy 200 while nothing is ever indexed.
     logger?.warn?.("[legion] chainhook delivery parsed to zero events", {
@@ -305,17 +303,24 @@ legionRouter.post("/api/legion/chainhook", async (c) => {
 
   logger?.info?.("[legion] chainhook processed", {
     applied: applied.length,
-    inserted,
     removed,
   });
 
-  return c.json({ ok: true, inserted, removed, received: applied.length });
+  return c.json({ ok: true, removed, received: applied.length });
 });
 
 // ── GET /api/legion/state ──
 
 legionRouter.get("/api/legion/state", async (c) => {
-  const cached = await edgeCacheMatch(c);
+  // Canonical cache key, so a query-string probe (?x=random) or any variant
+  // resolves to the same cached entry instead of bypassing the cache and
+  // forcing a fresh DO + Hiro rebuild — the pattern PR #706 fixed for
+  // /api/correspondents. The default (no week) key is the naked path, which is
+  // also what the webhook purges; an explicit ?week= gets its own entry.
+  const week = c.req.query("week");
+  const cacheKeyPath = week ? `/api/legion/state~${week}` : "/api/legion/state";
+
+  const cached = await edgeCacheMatch(c, { cacheKeyPath });
   if (cached) return cached;
 
   const logger = c.get("logger");
@@ -342,14 +347,34 @@ legionRouter.get("/api/legion/state", async (c) => {
     // than whichever week today happens to fall in.
     const briefDate = c.req.query("week") ?? indexed.latest_brief_date;
 
-    const [tipHeight, params, pool, brief, meta, phase] = await Promise.all([
+    // Three reads, down from nine. `getParams` is cached in-isolate after its
+    // first call, so the steady state is really tip + brief. Phase is derived
+    // locally (see below); the title rides in on the propose event, so
+    // get-phase and get-brief-meta are gone.
+    const [tipHeight, params, pool, brief] = await Promise.all([
       getTipHeight(opts),
       getParams(opts),
       getPoolStats(opts),
       briefDate ? getBrief(briefDate, opts) : Promise.resolve(null),
-      briefDate ? getBriefMeta(briefDate, opts) : Promise.resolve(null),
-      briefDate ? getPhase(briefDate, opts) : Promise.resolve("none" as const),
     ]);
+
+    // Phase is arithmetic on values we already have, not a contract call:
+    // brief.status/voteEnd against the tip and the window sizes. Mirrors the
+    // contract's get-phase branch-for-branch.
+    const phase = deriveLegionPhase(
+      brief,
+      tipHeight,
+      params.vetoWindow,
+      params.concludeWindow
+    );
+
+    // Title/description arrive in the propose-brief event, already indexed —
+    // so pull them from the feed rather than paying a get-brief-meta read.
+    const proposeEvent = indexed.events.find(
+      (e) => e.event === "propose-brief" && e.brief_date === briefDate
+    );
+    const title = (proposeEvent?.data?.title as string) ?? "";
+    const description = (proposeEvent?.data?.description as string) ?? "";
 
     // Predicted only while the outcome is still undecided. Once the contract
     // has written a terminal status, `reason` is the truth and a prediction
@@ -374,8 +399,8 @@ legionRouter.get("/api/legion/state", async (c) => {
       brief: brief
         ? {
             brief_date: brief.briefDate,
-            title: meta?.title ?? "",
-            description: meta?.description ?? "",
+            title,
+            description,
             status: brief.status,
             reason: brief.reason,
             created_at_height: brief.createdAt,
@@ -408,13 +433,15 @@ legionRouter.get("/api/legion/state", async (c) => {
       indexed_through: indexed.watermark,
     };
 
-    // Short TTL, and the webhook purges on write — so a new event shows up
-    // immediately rather than waiting out the TTL. The TTL only bounds how
-    // stale the *height-derived* phase can get, which nothing can purge
-    // because no event fires when a window elapses.
-    c.header("Cache-Control", "public, max-age=5, s-maxage=10");
+    // The edge cache IS the cache layer — free, unlike caching in the DO.
+    // s-maxage=60 means a page load rebuilds (and reads Hiro) at most once a
+    // minute no matter how many visitors; the webhook purges this key on every
+    // new event, so a vote or contribution still shows immediately. The 60s
+    // only bounds how stale the height-derived phase/countdown can get, and the
+    // browser ticks the countdown locally in between.
+    c.header("Cache-Control", "public, max-age=15, s-maxage=60");
     const response = c.json(payload);
-    edgeCachePut(c, response);
+    edgeCachePut(c, response, { cacheKeyPath });
     return response;
   } catch (err) {
     logger?.error?.("[legion] failed to build state", { err: String(err) });

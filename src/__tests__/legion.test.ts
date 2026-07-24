@@ -12,6 +12,7 @@ import {
   blocksRemaining,
   nextBoundaryHeight,
   predictOutcome,
+  deriveLegionPhase,
 } from "../services/legion-chain";
 import { extractEvents } from "../routes/legion";
 import { BRIEF_STATUS, LEGION_GOV_CONTRACT } from "../lib/legion-constants";
@@ -114,6 +115,40 @@ describe("clarity decoder", () => {
   it("refuses to narrow an integer beyond the safe range", () => {
     const hex = `0x01${"10000000000000000000000000000000".padStart(32, "0")}`;
     expect(() => asNumber(decodeClarityHex(hex))).toThrow(ClarityDecodeError);
+  });
+});
+
+describe("deriveLegionPhase", () => {
+  // Now that phase is derived locally instead of read from get-phase, this
+  // must mirror the contract's branch-for-branch. Boundaries are the exact
+  // heights the contract compares against: voteEnd, voteEnd+veto, +conclude.
+  const open = { status: BRIEF_STATUS.OPEN, voteEnd: 4_049_166 };
+  const V = 12;
+  const C = 48;
+
+  it("returns none when there is no brief", () => {
+    expect(deriveLegionPhase(null, 9_999_999, V, C)).toBe("none");
+  });
+
+  it("is voting strictly before voteEnd", () => {
+    expect(deriveLegionPhase(open, open.voteEnd - 1, V, C)).toBe("voting");
+  });
+
+  it("enters veto exactly at voteEnd", () => {
+    expect(deriveLegionPhase(open, open.voteEnd, V, C)).toBe("veto");
+  });
+
+  it("enters concludable exactly at voteEnd + vetoWindow", () => {
+    expect(deriveLegionPhase(open, open.voteEnd + V, V, C)).toBe("concludable");
+  });
+
+  it("lapses exactly at voteEnd + vetoWindow + concludeWindow", () => {
+    expect(deriveLegionPhase(open, open.voteEnd + V + C, V, C)).toBe("lapsed");
+  });
+
+  it("honours a terminal status regardless of height", () => {
+    expect(deriveLegionPhase({ status: BRIEF_STATUS.PASSED, voteEnd: 0 }, 9e9, V, C)).toBe("passed");
+    expect(deriveLegionPhase({ status: BRIEF_STATUS.FAILED, voteEnd: 0 }, 9e9, V, C)).toBe("failed");
   });
 });
 

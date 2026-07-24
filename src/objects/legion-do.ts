@@ -77,27 +77,24 @@ export class LegionDO implements DurableObject {
    *
    * Idempotent by (txid, event_index) so a chainhook redelivery — which the
    * service will do on any non-2xx, and which also happens on replay — cannot
-   * duplicate a row. Returns how many rows were actually new so the caller can
-   * skip a cache purge when a redelivery changed nothing.
+   * duplicate a row. Returns how many rows were in the batch.
+   *
+   * Deliberately does NOT read to distinguish inserts from updates. An earlier
+   * version ran a COUNT(*) per event to skip a cache purge on a pure
+   * redelivery — a per-event read on the write path to optimise a rare case,
+   * exactly the kind of unnecessary rows_read the cost runbook warns against.
+   * ON CONFLICT DO UPDATE gives idempotency without it; a redelivery just costs
+   * one cache rebuild, which is edge-cached anyway.
    */
-  recordEvents(events: LegionEventRow[]): { inserted: number; total: number } {
-    if (events.length === 0) return { inserted: 0, total: 0 };
+  recordEvents(events: LegionEventRow[]): { total: number } {
+    if (events.length === 0) return { total: 0 };
 
-    let inserted = 0;
     const now = Date.now();
 
     // One transaction: a partial apply would leave the feed showing a vote
     // whose proposal is missing, which reads as data loss rather than lag.
     this.ctx.storage.transactionSync(() => {
       for (const e of events) {
-        const before = this.sql
-          .exec<{ n: number }>(
-            "SELECT COUNT(*) AS n FROM legion_events WHERE txid = ? AND event_index = ?",
-            e.txid,
-            e.event_index
-          )
-          .one().n;
-
         this.sql.exec(
           `INSERT INTO legion_events
              (txid, event_index, contract_id, block_height, block_time,
@@ -118,12 +115,10 @@ export class LegionDO implements DurableObject {
           JSON.stringify(e.data),
           now
         );
-
-        if (before === 0) inserted++;
       }
     });
 
-    return { inserted, total: events.length };
+    return { total: events.length };
   }
 
   /**
@@ -223,6 +218,7 @@ export class LegionDO implements DurableObject {
       .toArray()[0];
     return row?.h ?? null;
   }
+
 
   /** Router for worker→DO calls. Kept minimal; the worker owns HTTP concerns. */
   async fetch(request: Request): Promise<Response> {

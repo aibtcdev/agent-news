@@ -185,36 +185,32 @@ export async function getBriefMeta(
 }
 
 /**
- * Lifecycle phase, straight from the contract.
+ * Lifecycle phase, derived locally from the tip.
  *
- * v2 exposes `get-phase`, so this is read rather than derived. Deriving it
- * locally would mean re-implementing window arithmetic that the contract
- * already owns, and any drift between the two would show users a phase the
- * contract disagrees with.
+ * The contract exposes `get-phase`, but calling it would be a Hiro read on
+ * every page load for something that is pure arithmetic on values we already
+ * hold: the brief's `status` and `voteEnd` (both in the brief record) against
+ * the current tip and the window sizes (from params). This mirrors the
+ * contract's `get-phase` branch-for-branch, so it cannot drift — the same
+ * inputs produce the same answer, without the round trip.
  */
-export async function getPhase(
-  briefDate: string,
-  opts: ChainReadOptions = {}
-): Promise<LegionPhase> {
-  const raw = await callReadOnly(
-    LEGION_GOV_CONTRACT,
-    "get-phase",
-    [encodeStringAscii(briefDate)],
-    opts
-  );
-  const phase = raw.type === "string" ? raw.value : "none";
-  return (VALID_PHASES.has(phase) ? phase : "none") as LegionPhase;
-}
+export function deriveLegionPhase(
+  brief: Pick<BriefRecord, "status" | "voteEnd"> | null,
+  tipHeight: number,
+  vetoWindow: number,
+  concludeWindow: number
+): LegionPhase {
+  if (!brief) return "none";
+  if (brief.status === 1) return "passed"; // BRIEF_STATUS.PASSED
+  if (brief.status === 2) return "failed"; // BRIEF_STATUS.FAILED
 
-const VALID_PHASES = new Set([
-  "none",
-  "voting",
-  "veto",
-  "concludable",
-  "lapsed",
-  "passed",
-  "failed",
-]);
+  const vetoEnd = brief.voteEnd + vetoWindow;
+  const concludeEnd = vetoEnd + concludeWindow;
+  if (tipHeight < brief.voteEnd) return "voting";
+  if (tipHeight < vetoEnd) return "veto";
+  if (tipHeight < concludeEnd) return "concludable";
+  return "lapsed";
+}
 
 export interface LegionParams {
   votingQuorum: number;
@@ -238,10 +234,19 @@ export interface LegionParams {
  * drift from the deployed code. Everything downstream takes these as input
  * rather than importing constants.
  */
+/**
+ * Governance parameters are immutable for a given contract, so the first read
+ * in a Worker isolate is cached in memory for the isolate's life. This is a
+ * free cache — no storage, no billing — and it means the common page load pays
+ * zero Hiro calls for parameters. Keyed by contract so a redeploy re-reads.
+ */
+let cachedParams: { contract: string; params: LegionParams } | null = null;
+
 export async function getParams(opts: ChainReadOptions = {}): Promise<LegionParams> {
+  if (cachedParams?.contract === LEGION_GOV_CONTRACT) return cachedParams.params;
   const raw = await callReadOnly(LEGION_GOV_CONTRACT, "get-params", [], opts);
   const num = (k: string) => asNumber(tupleField(raw, k));
-  return {
+  const params: LegionParams = {
     votingQuorum: num("votingQuorum"),
     votingThreshold: num("votingThreshold"),
     vetoQuorum: num("vetoQuorum"),
@@ -255,6 +260,8 @@ export async function getParams(opts: ChainReadOptions = {}): Promise<LegionPara
     concludeWindow: num("concludeWindow"),
     proposeInterval: num("proposeInterval"),
   };
+  cachedParams = { contract: LEGION_GOV_CONTRACT, params };
+  return params;
 }
 
 /** Pool-level scalars, fetched together since the page shows them as a unit. */
