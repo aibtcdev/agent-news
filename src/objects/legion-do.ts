@@ -103,6 +103,8 @@ export class LegionDO implements DurableObject {
            ON CONFLICT(txid, event_index) DO UPDATE SET
              block_height = excluded.block_height,
              block_time   = excluded.block_time,
+             brief_date   = excluded.brief_date,
+             actor        = excluded.actor,
              payload      = excluded.payload`,
           e.txid,
           e.event_index,
