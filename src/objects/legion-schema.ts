@@ -37,29 +37,4 @@ CREATE INDEX IF NOT EXISTS idx_legion_events_brief
 -- Global feed and the "what have we indexed through" watermark.
 CREATE INDEX IF NOT EXISTS idx_legion_events_height
   ON legion_events(contract_id, block_height DESC);
-
--- Singleton snapshot of read-only chain state, refreshed by the cron poller.
--- Holds the height-derived facts that emit no event and so can never arrive
--- over the chainhook: current tip, and the vote/veto window boundaries the
--- phase calculation compares against.
-CREATE TABLE IF NOT EXISTS legion_chain_state (
-  id               INTEGER PRIMARY KEY CHECK (id = 1),
-  tip_height       INTEGER NOT NULL,
-  brief_date       TEXT,
-  status           INTEGER,
-  vote_end         INTEGER,
-  yes_weight       INTEGER,
-  no_weight        INTEGER,
-  veto_weight      INTEGER,
-  voter_count      INTEGER,
-  entry_count      INTEGER,
-  total_signals    INTEGER,
-  total_weight     INTEGER,
-  treasury_balance INTEGER,
-  quote_draw       INTEGER,
-  next_propose_height INTEGER,
-  title            TEXT,
-  refreshed_at     INTEGER NOT NULL,
-  refresh_error    TEXT
-);
 `;
