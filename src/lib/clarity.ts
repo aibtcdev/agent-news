@@ -7,15 +7,17 @@
  * than pull in the full Stacks SDK for four call sites we decode the wire
  * format directly. It is small and stable.
  *
- * Scope note: principals are deliberately left as raw hex. Rendering one as a
- * `ST…` address requires c32check encoding, and the only principal the UI
- * needs (a brief's proposer) already arrives as a decoded string on the
- * chainhook event payload. Decoding it twice, in two formats, would mean
- * hand-rolling an address encoder to serve a field we already have — so the
- * read path carries the hex and the event path supplies the address.
+ * Principals are decoded to their `ST…` / `SP…` c32check address, not raw hex.
+ * An earlier version left them as hex on the assumption the UI only ever saw
+ * the already-decoded string from the chainhook; but the webhook can deliver a
+ * value as hex, and this decoder is the fallback that handles it — so the
+ * addresses in the activity feed come through here. The hash160-to-address
+ * step uses the official `c32check` library rather than a hand-rolled encoder.
  *
  * Reference: SIP-005 Clarity value serialisation.
  */
+
+import { c32address } from "c32check";
 
 export type ClarityValue =
   | { type: "uint"; value: bigint }
@@ -29,7 +31,18 @@ export type ClarityValue =
   | { type: "string"; value: string }
   | { type: "list"; values: ClarityValue[] }
   | { type: "tuple"; data: Record<string, ClarityValue> }
-  | { type: "principal"; hex: string };
+  | { type: "principal"; address: string };
+
+/**
+ * A wire principal is 1 version byte + 20-byte hash160. Hand those to the
+ * official c32check encoder to get the ST…/SP… address.
+ */
+function principalAddress(bytes: Uint8Array): string {
+  const version = bytes[0];
+  let hash160 = "";
+  for (let i = 1; i < bytes.length; i++) hash160 += bytes[i].toString(16).padStart(2, "0");
+  return c32address(version, hash160);
+}
 
 const TYPE_INT = 0x00;
 const TYPE_UINT = 0x01;
@@ -143,12 +156,12 @@ function readValue(r: Reader): ClarityValue {
     case TYPE_FALSE:
       return { type: "bool", value: false };
     case TYPE_PRINCIPAL_STANDARD:
-      // 1 version byte + 20-byte hash160.
-      return { type: "principal", hex: r.hex(21) };
+      // 1 version byte + 20-byte hash160 → ST…/SP… c32check address.
+      return { type: "principal", address: principalAddress(r.take(21)) };
     case TYPE_PRINCIPAL_CONTRACT: {
-      const base = r.hex(21);
+      const address = principalAddress(r.take(21));
       const nameLen = r.u8();
-      return { type: "principal", hex: `${base}.${r.ascii(nameLen)}` };
+      return { type: "principal", address: `${address}.${r.ascii(nameLen)}` };
     }
     case TYPE_OK:
       return { type: "ok", value: readValue(r) };
@@ -258,8 +271,9 @@ export function toJSON(value: ClarityValue): unknown {
     case "err":
       return { err: toJSON(value.value) };
     case "buffer":
-    case "principal":
       return value.hex;
+    case "principal":
+      return value.address;
     case "string":
       return value.value;
     case "list":

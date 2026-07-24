@@ -92,6 +92,19 @@ describe("clarity decoder", () => {
     expect(asNumber(unwrapOptional(v))).toBe(BRIEF_STATUS.PASSED);
   });
 
+  it("decodes a standard principal to its c32check address", () => {
+    // 0x05 (standard) + version 0x1a + 20-byte hash160 of the live deployer.
+    const hex = "0x051a21d2fac50d674327f4b19bb59a0a92955640bc58";
+    expect(toJSON(decodeClarityHex(hex))).toBe("STGX5YP51NKM69ZMP6DVB6GAJAANCG5WB3718KD9");
+  });
+
+  it("decodes a contract principal to address.name", () => {
+    const hex = "0x061a21d2fac50d674327f4b19bb59a0a92955640bc58086e6577732d676f76";
+    expect(toJSON(decodeClarityHex(hex))).toBe(
+      "STGX5YP51NKM69ZMP6DVB6GAJAANCG5WB3718KD9.news-gov"
+    );
+  });
+
   it("decodes a nested tuple with mixed field types", () => {
     // (tuple (event "vote") (support true) (weight u9000000))
     const hex =
