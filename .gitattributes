@@ -1,0 +1,6 @@
+# TypeScript sources are always text, even when a string literal holds a
+# control character (e.g. the NUL field separator in signalContentFingerprint).
+# Without this, git classifies such a file as binary and renders its diffs as
+# "Bin N -> M bytes", making the change unreviewable.
+*.ts diff
+*.ts text
