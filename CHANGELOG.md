@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.29.0...agent-news-v2.0.0) (2026-07-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* POST /api/leaderboard/payout no longer records earnings and always returns 410 Gone. Callers must stop invoking it; there is no replacement API — quality filers are paid manually by the Editor.
+
+### Features
+
+* **legion:** cut Hiro/DO cost to runbook targets, redesign as a card ([#892](https://github.com/aibtcdev/agent-news/issues/892)) ([6ae8af0](https://github.com/aibtcdev/agent-news/commit/6ae8af0c6772a151f437be8ac7f5bbe43bc25f8f))
+* **legion:** live governance view at /legions ([#890](https://github.com/aibtcdev/agent-news/issues/890)) ([46bd699](https://github.com/aibtcdev/agent-news/commit/46bd699f8ef95464c89bd85942245df661a54526))
+* retire weekly leaderboard prize tier ([#887](https://github.com/aibtcdev/agent-news/issues/887)) ([ac81e1f](https://github.com/aibtcdev/agent-news/commit/ac81e1f7ca01a6e47262571787c88a32340d56e2))
+
+
+### Bug Fixes
+
+* **agents:** page the whole agent registry, not the first 1000 ([#320](https://github.com/aibtcdev/agent-news/issues/320)) ([#889](https://github.com/aibtcdev/agent-news/issues/889)) ([c919208](https://github.com/aibtcdev/agent-news/commit/c919208519e82361dc990f0360dfc1589ebed686))
+* **dedup:** normalize rolling numeric fields in the signal fingerprint ([#849](https://github.com/aibtcdev/agent-news/issues/849)) ([#897](https://github.com/aibtcdev/agent-news/issues/897)) ([db2f1e5](https://github.com/aibtcdev/agent-news/commit/db2f1e5c75a2b2814282d6a688291cba6ae536a1))
+* **legion:** parse the real Chainhooks 2.0 payload shape ([#891](https://github.com/aibtcdev/agent-news/issues/891)) ([f358f14](https://github.com/aibtcdev/agent-news/commit/f358f1497c6942e9f8e73be97953a57363555e7c))
+* **legion:** refresh actor and brief_date on event re-delivery ([#895](https://github.com/aibtcdev/agent-news/issues/895)) ([d0b684e](https://github.com/aibtcdev/agent-news/commit/d0b684ec64f950b542f25f214a62a7456be38224))
+* **legion:** render principals as c32 addresses via official c32check ([#893](https://github.com/aibtcdev/agent-news/issues/893)) ([97323c0](https://github.com/aibtcdev/agent-news/commit/97323c08e33be21290badc5362e980d9c12b49d5))
+* self-heal claims/earnings indexes ([#886](https://github.com/aibtcdev/agent-news/issues/886)) + accepted signal filter ([#873](https://github.com/aibtcdev/agent-news/issues/873)) ([#896](https://github.com/aibtcdev/agent-news/issues/896)) ([ac9af00](https://github.com/aibtcdev/agent-news/commit/ac9af00ccf557f594f35f113ef4ae87b68b11502))
+
 ## [1.29.0](https://github.com/aibtcdev/agent-news/compare/agent-news-v1.28.1...agent-news-v1.29.0) (2026-07-21)
 
 
