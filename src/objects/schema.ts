@@ -154,8 +154,13 @@ CREATE INDEX IF NOT EXISTS idx_signals_correction_of    ON signals(correction_of
 -- base-schema index on it would throw a no-such-column error and brick DO
 -- construction before any migration could repair it. Its index stays in
 -- migration #24, where the column is guaranteed to exist.
--- TODO: extend this self-heal + EXPECTED set to claims/earnings indexes once
--- /schema-health confirms their version-gated indexes are also at risk.
+--
+-- The claims/earnings hot-path indexes get the same self-heal guarantee, but
+-- they cannot live here for exactly the quality_score reason above:
+-- beat_claims is created by migration #8 and earnings.voided_at is added by
+-- migration #9, so a base-schema index on either would throw on a fresh DB.
+-- They are re-applied after the migration block instead — see
+-- SELF_HEAL_POST_MIGRATION_INDEXES_SQL below.
 CREATE INDEX IF NOT EXISTS idx_signals_status_reviewed          ON signals(status, reviewed_at);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_created       ON signals(correction_of, created_at);
 CREATE INDEX IF NOT EXISTS idx_signals_correction_btc_created   ON signals(correction_of, btc_address, created_at DESC);
@@ -210,6 +215,41 @@ export const EXPECTED_SIGNALS_INDEXES: readonly string[] = [
   // NB: idx_signals_quality_score is intentionally excluded — it stays in
   // versioned migration #24 because base SCHEMA_SQL runs before that column's
   // ALTER (see the SCHEMA_SQL comment above).
+];
+
+/**
+ * Hot-path indexes on tables/columns that only exist *after* the versioned
+ * migrations have run, re-applied on every cold start so they self-heal the
+ * same way the signals composites in SCHEMA_SQL do (#886).
+ *
+ * Why these are not in SCHEMA_SQL: that block executes before any migration,
+ * and neither target exists yet on a fresh DB —
+ *   - `beat_claims` is created by migration #8 (MIGRATION_BEAT_CLAIMS_SQL)
+ *   - `earnings.voided_at` is added by migration #9 (MIGRATION_RETRACTION_SQL)
+ * so indexing either from SCHEMA_SQL would throw "no such table" / "no such
+ * column" and brick DO construction before a migration could repair it. That
+ * is the same trap documented for idx_signals_quality_score.
+ *
+ * Running them after the migration block gives the self-heal property without
+ * the bricking risk: a version-gated migration that failed once is never
+ * retried (the version counter advances regardless), which is how the April
+ * billing incident silently dropped the signals composites and turned hot
+ * reads into full-table scans.
+ */
+export const SELF_HEAL_POST_MIGRATION_INDEXES_SQL: readonly string[] = [
+  // Beat-membership gate — read on every signal filing and roster check.
+  "CREATE INDEX IF NOT EXISTS idx_beat_claims_status_beat_address ON beat_claims(status, beat_slug, btc_address)",
+  // Unpaid-earnings rollup behind the leaderboard / correspondents bundle.
+  "CREATE INDEX IF NOT EXISTS idx_earnings_unpaid_leaderboard ON earnings(voided_at, payout_txid, btc_address)",
+];
+
+/**
+ * Index names created by SELF_HEAL_POST_MIGRATION_INDEXES_SQL, diffed against
+ * live sqlite_master by GET /api/config/schema-health. Keep in sync.
+ */
+export const EXPECTED_POST_MIGRATION_INDEXES: readonly string[] = [
+  "idx_beat_claims_status_beat_address",
+  "idx_earnings_unpaid_leaderboard",
 ];
 
 /**
