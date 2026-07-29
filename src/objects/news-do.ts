@@ -5,7 +5,7 @@ import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, Classi
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate, signalContentFingerprint } from "../lib/helpers";
 import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES } from "./schema";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES, SELF_HEAL_POST_MIGRATION_INDEXES_SQL, EXPECTED_POST_MIGRATION_INDEXES } from "./schema";
 import { scoreSignal, withScoreOverride } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
@@ -1390,6 +1390,25 @@ export class NewsDO extends DurableObject<Env> {
         "INSERT INTO config (key, value) VALUES ('migration_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
         String(versionToWrite)
       );
+    }
+
+    // Self-heal the claims/earnings hot-path indexes on every cold start — NOT
+    // gated on appliedVersion, which is the whole point: a version-gated
+    // migration that fails once is never retried (the counter advances anyway),
+    // so its index can go permanently missing while the code believes the
+    // schema is complete. That is what turned leaderboard/correspondents reads
+    // into full-table scans during the April billing incident (#886).
+    //
+    // These run here rather than in SCHEMA_SQL because beat_claims (migration 8)
+    // and earnings.voided_at (migration 9) do not exist until the block above
+    // has run. Each statement is individually guarded so a genuinely absent
+    // table can never brick DO construction.
+    for (const stmt of SELF_HEAL_POST_MIGRATION_INDEXES_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch (e) {
+        console.error("Post-migration index self-heal failed:", stmt, e);
+      }
     }
 
     // Schedule a keep-alive alarm if none exists. The alarm fires every 50 seconds,
@@ -3924,6 +3943,12 @@ export class NewsDO extends DurableObject<Env> {
       const missingSignalsIndexes = EXPECTED_SIGNALS_INDEXES.filter(
         (name) => !liveSet.has(name)
       );
+      // Claims/earnings indexes self-healed after the migration block (#886).
+      // Reported separately from the signals set so a drift report still says
+      // which layer drifted — base schema or post-migration pass.
+      const missingPostMigrationIndexes = EXPECTED_POST_MIGRATION_INDEXES.filter(
+        (name) => !liveSet.has(name)
+      );
 
       // `signals_row_count` is opt-in: COUNT(*) full-scans the signals table,
       // and this endpoint is public + unthrottled. Default off so routine /
@@ -3940,8 +3965,11 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({
         ok: true,
         data: {
-          healthy: missingSignalsIndexes.length === 0,
+          healthy:
+            missingSignalsIndexes.length === 0 &&
+            missingPostMigrationIndexes.length === 0,
           missing_signals_indexes: missingSignalsIndexes,
+          missing_post_migration_indexes: missingPostMigrationIndexes,
           signals_row_count: signalsRowCount,
           live_index_count: liveIndexes.length,
           live_indexes: liveIndexes,
