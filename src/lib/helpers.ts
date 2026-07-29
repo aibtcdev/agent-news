@@ -86,7 +86,12 @@ function normalizeRollingFields(input: string): string {
   return (
     input
       .replace(/\bblock\s+\d{5,7}\b/gi, "block {N}")
-      .replace(/\b\d{4,7}\s*txs?\b/gi, "{TX_COUNT} txs")
+      // Matches the word the templates actually use. The earlier form keyed
+      // off a "tx"/"txs" abbreviation that never appears in filing text, so it
+      // fired on nothing and the catch-all silently covered for it -- which
+      // left any sub-1000 count unnormalised. The word itself disambiguates
+      // from PR/BIP numbers, so no digit-count floor is needed here.
+      .replace(/\b\d+\s*(?:transactions?|txs?)\b/gi, "{TX_COUNT} transactions")
       .replace(/\$[\d,]*\d(?:\.\d+)?/g, "{PRICE}")
       .replace(/\b\d+(?:\.\d+)?\s*sat\/vB\b/gi, "{FEE_RATE}")
       .replace(/\b\d+(?:\.\d+)?\s*[KMG]vB\b/g, "{VSIZE}")

@@ -175,3 +175,57 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
     expect(signalContentFingerprint(pr(565))).not.toBe(signalContentFingerprint(pr(566)));
   });
 });
+
+/**
+ * Regression coverage for the review finding on #849: the original tx-count
+ * rule keyed off a "tx"/"txs" abbreviation that filing templates never use
+ * (they write "Transactions"), so it matched nothing and the 4+ digit
+ * catch-all silently did its job. That safety net vanishes below 1000, which
+ * left sub-1000 counts denormalised — the exact bug class #849 reports, in a
+ * narrower range the original fixtures never exercised.
+ */
+describe("signalContentFingerprint — transaction counts across the value range", () => {
+  const confirms = (block: number, txs: number) => ({
+    headline: `Agent On-Chain Activity: Block ${block} Confirms ${txs} Transactions`,
+    body: `CLAIM: Block ${block} processed ${txs} transactions.`,
+    sources: [{ url: "https://mempool.space" }],
+  });
+
+  it("collides sub-1000 transaction counts (below the catch-all floor)", () => {
+    expect(signalContentFingerprint(confirms(956719, 273))).toBe(
+      signalContentFingerprint(confirms(956723, 42))
+    );
+  });
+
+  it("collides across the 1000 boundary", () => {
+    // A 3-digit and a 4+ digit count must reach the same placeholder, or the
+    // fingerprint would depend on which rule happened to fire.
+    expect(signalContentFingerprint(confirms(956719, 999))).toBe(
+      signalContentFingerprint(confirms(956723, 3273))
+    );
+  });
+
+  it("normalizes the abbreviated spelling identically to the long form", () => {
+    const long = {
+      headline: "Block 956719 Confirms 3273 Transactions",
+      body: null,
+      sources: [{ url: "https://mempool.space" }],
+    };
+    const abbrev = {
+      headline: "Block 956723 Confirms 4241 txs",
+      body: null,
+      sources: [{ url: "https://mempool.space" }],
+    };
+    expect(signalContentFingerprint(long)).toBe(signalContentFingerprint(abbrev));
+  });
+
+  it("still keeps short PR numbers distinct — the word is what disambiguates", () => {
+    // Dropping the digit floor must not start collapsing bare identifiers.
+    const pr = (n: number) => ({
+      headline: `Spark SDK ships PR #${n}`,
+      body: "Upstream merged the keeper changes.",
+      sources: [{ url: `https://github.com/example/spark/pull/${n}` }],
+    });
+    expect(signalContentFingerprint(pr(565))).not.toBe(signalContentFingerprint(pr(566)));
+  });
+});
