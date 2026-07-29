@@ -4,7 +4,7 @@ import type { Context } from "hono";
 import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate, signalContentFingerprint } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS, ACCEPTED_STATUS_FILTER, ACCEPTED_SIGNAL_STATUSES } from "../lib/constants";
 import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES, SELF_HEAL_POST_MIGRATION_INDEXES_SQL, EXPECTED_POST_MIGRATION_INDEXES } from "./schema";
 import { scoreSignal, withScoreOverride } from "../lib/signal-scorer";
 
@@ -128,7 +128,15 @@ function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; p
     clauses.push("s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?)");
     params.push(filters.tag);
   }
-  if (filters.status) {
+  if (filters.status === ACCEPTED_STATUS_FILTER) {
+    // Virtual filter — expands to the two terminal accepted states so the set
+    // stays stable when a brief compile flips approved → brief_included (#873).
+    // Explicit IN list (not an inequality) so SQLite can still use
+    // idx_signals_status_created rather than falling back to a scan.
+    const placeholders = ACCEPTED_SIGNAL_STATUSES.map(() => "?").join(", ");
+    clauses.push(`s.status IN (${placeholders})`);
+    params.push(...ACCEPTED_SIGNAL_STATUSES);
+  } else if (filters.status) {
     clauses.push("s.status = ?");
     params.push(filters.status);
   } else if (!filters.includePending) {

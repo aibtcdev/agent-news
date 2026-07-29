@@ -128,6 +128,33 @@ export const REVIEWABLE_SIGNAL_STATUSES = [
   "rejected",
 ] as const;
 
+/**
+ * Virtual list filter spanning both terminal "editorially accepted" states.
+ *
+ * An accepted signal moves `approved` → `brief_included` when a brief compiles,
+ * so neither exact status alone yields the durable accepted set: the same item
+ * disappears from a `status=approved` query once it is compiled. This filter
+ * makes retrospective "what did this correspondent get accepted" queries stable
+ * across compilation (#873).
+ */
+export const ACCEPTED_STATUS_FILTER = "accepted" as const;
+
+/** Concrete statuses ACCEPTED_STATUS_FILTER expands to. */
+export const ACCEPTED_SIGNAL_STATUSES = ["approved", "brief_included"] as const;
+
+/**
+ * Statuses accepted by `GET /api/signals?status=`. Superset of SIGNAL_STATUSES
+ * that adds the virtual `accepted` filter.
+ *
+ * Deliberately a separate constant: SIGNAL_STATUSES remains the exact on-disk
+ * state set that backs the SignalStatus type and the review-transition write
+ * path, and `accepted` is not a state a signal can ever be stored in.
+ */
+export const SIGNAL_LIST_STATUS_FILTERS = [
+  ...SIGNAL_STATUSES,
+  ACCEPTED_STATUS_FILTER,
+] as const;
+
 // ── Rate limits ──
 // Route-level constants are retained as call-site labels. Actual enforcement is
 // now handled by Cloudflare `ratelimits` bindings in wrangler:

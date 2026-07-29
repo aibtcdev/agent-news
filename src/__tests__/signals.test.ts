@@ -295,3 +295,88 @@ describe("POST /api/signals — validation errors", () => {
     expect(body.error).toContain("not found");
   });
 });
+
+const ACCEPTED_TAG = "accepted-virtual-filter-873";
+
+/**
+ * #873 — an accepted signal moves approved → brief_included when a brief
+ * compiles, so neither exact status alone yields the durable accepted set.
+ * The virtual `status=accepted` filter spans both without disturbing the
+ * existing exact-lifecycle filters.
+ */
+describe("GET /api/signals?status=accepted — virtual accepted filter", () => {
+  const fetchIds = async (query: string): Promise<string[]> => {
+    const res = await SELF.fetch(`http://example.com/api/signals?${query}`);
+    expect(res.status).toBe(200);
+    const body = await res.json<{ signals: Array<{ id: string }> }>();
+    return body.signals.map((s) => s.id).sort();
+  };
+
+  it("spans approved + brief_included while leaving exact filters unchanged", async () => {
+    await seed({
+      signals: [
+        {
+          id: "accepted-873-approved",
+          beat_slug: "agent-social",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Accepted filter — approved",
+          sources: "[]",
+          created_at: "2026-07-17T12:03:00.000Z",
+          status: "approved",
+          reviewed_at: "2026-07-17T12:04:00.000Z",
+        },
+        {
+          id: "accepted-873-compiled",
+          beat_slug: "agent-social",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Accepted filter — brief_included",
+          sources: "[]",
+          created_at: "2026-07-17T12:02:00.000Z",
+          status: "brief_included",
+          reviewed_at: "2026-07-17T12:04:00.000Z",
+        },
+        {
+          id: "accepted-873-rejected",
+          beat_slug: "agent-social",
+          btc_address: "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq",
+          headline: "Accepted filter — rejected",
+          sources: "[]",
+          created_at: "2026-07-17T12:01:00.000Z",
+          status: "rejected",
+          reviewed_at: "2026-07-17T12:04:00.000Z",
+        },
+      ],
+      signal_tags: [
+        { signal_id: "accepted-873-approved", tag: ACCEPTED_TAG },
+        { signal_id: "accepted-873-compiled", tag: ACCEPTED_TAG },
+        { signal_id: "accepted-873-rejected", tag: ACCEPTED_TAG },
+      ],
+    });
+
+    // 1. `accepted` returns both accepted states and excludes the rejected one.
+    expect(await fetchIds(`tag=${ACCEPTED_TAG}&status=accepted`)).toEqual([
+      "accepted-873-approved",
+      "accepted-873-compiled",
+    ]);
+
+    // 2 + 3. Exact lifecycle filters keep exact-state behaviour.
+    expect(await fetchIds(`tag=${ACCEPTED_TAG}&status=approved`)).toEqual([
+      "accepted-873-approved",
+    ]);
+    expect(await fetchIds(`tag=${ACCEPTED_TAG}&status=brief_included`)).toEqual([
+      "accepted-873-compiled",
+    ]);
+    expect(await fetchIds(`tag=${ACCEPTED_TAG}&status=rejected`)).toEqual([
+      "accepted-873-rejected",
+    ]);
+  });
+
+  it("rejects an unknown status but advertises `accepted` as valid", async () => {
+    const res = await SELF.fetch(
+      "http://example.com/api/signals?status=not-a-status"
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json<{ error: string }>();
+    expect(body.error).toContain("accepted");
+  });
+});
