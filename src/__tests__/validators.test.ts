@@ -256,11 +256,21 @@ describe("validateSignatureFormat", () => {
 });
 
 describe("checkDisclosureIdentity", () => {
+  const KNOWN: ReadonlySet<string> = new Set([
+    "Humble Panther",
+    "Tall Jett",
+    "Quiet Falcon",
+    "Opal Gorilla",
+    "Graphite Elan",
+    "Sonic Mast",
+    "Secret Mars",
+  ]);
+
   it("returns ok when disclosure is missing", () => {
     // Signals without a disclosure field must not be blocked by this gate.
-    expect(checkDisclosureIdentity(undefined, "Humble Panther")).toEqual({ ok: true });
-    expect(checkDisclosureIdentity(null, "Humble Panther")).toEqual({ ok: true });
-    expect(checkDisclosureIdentity("", "Humble Panther")).toEqual({ ok: true });
+    expect(checkDisclosureIdentity(undefined, "Humble Panther", KNOWN)).toEqual({ ok: true });
+    expect(checkDisclosureIdentity(null, "Humble Panther", KNOWN)).toEqual({ ok: true });
+    expect(checkDisclosureIdentity("", "Humble Panther", KNOWN)).toEqual({ ok: true });
   });
 
   it("returns ok when disclosure names the filer themselves", () => {
@@ -268,7 +278,8 @@ describe("checkDisclosureIdentity", () => {
     // correctly says "Humble Panther agent".
     const result = checkDisclosureIdentity(
       "Humble Panther agent, live data from mempool.space. 2026-07-11.",
-      "Humble Panther"
+      "Humble Panther",
+      KNOWN
     );
     expect(result).toEqual({ ok: true });
   });
@@ -280,7 +291,8 @@ describe("checkDisclosureIdentity", () => {
     // filer identity. This is exactly the case the gate is designed for.
     const result = checkDisclosureIdentity(
       "Humble Panther agent, live data from mempool.space. 2026-07-04.",
-      "Tall Jett"
+      "Tall Jett",
+      KNOWN
     );
     expect(result).toEqual({ ok: false, conflict: "Humble Panther" });
   });
@@ -288,7 +300,8 @@ describe("checkDisclosureIdentity", () => {
   it("rejects Filed-by shape when disclosure names a different agent", () => {
     const result = checkDisclosureIdentity(
       "Filed by Opal Gorilla — automated wave-scan pipeline.",
-      "Graphite Elan"
+      "Graphite Elan",
+      KNOWN
     );
     expect(result).toEqual({ ok: false, conflict: "Opal Gorilla" });
   });
@@ -298,7 +311,8 @@ describe("checkDisclosureIdentity", () => {
     // phrase) must not trigger the gate.
     const result = checkDisclosureIdentity(
       "claude-opus-4-7, aibtc MCP tools, live GitHub API data.",
-      "Quiet Falcon"
+      "Quiet Falcon",
+      KNOWN
     );
     expect(result).toEqual({ ok: true });
   });
@@ -309,7 +323,8 @@ describe("checkDisclosureIdentity", () => {
     // preference for identity-resolution ambiguity.
     const result = checkDisclosureIdentity(
       "Humble Panther agent, live data from mempool.space.",
-      ""
+      "",
+      KNOWN
     );
     expect(result).toEqual({ ok: true });
   });
@@ -324,7 +339,8 @@ describe("checkDisclosureIdentity", () => {
   it("falls open on lowercase disclosures (detection is Title-Case only)", () => {
     const result = checkDisclosureIdentity(
       "humble panther agent, live data from mempool.space.",
-      "Humble Panther"
+      "Humble Panther",
+      KNOWN
     );
     expect(result).toEqual({ ok: true });
   });
@@ -338,7 +354,8 @@ describe("checkDisclosureIdentity", () => {
     // casing pre-detection if this class matters.
     const result = checkDisclosureIdentity(
       "humble panther agent, live data from mempool.space.",
-      "Tall Jett"
+      "Tall Jett",
+      KNOWN
     );
     expect(result).toEqual({ ok: true });
   });
@@ -347,7 +364,8 @@ describe("checkDisclosureIdentity", () => {
     // Extra internal whitespace on either side must not break the self-match.
     const result = checkDisclosureIdentity(
       "Humble  Panther  agent, live data from mempool.space.",
-      "Humble Panther"
+      "Humble Panther",
+      KNOWN
     );
     expect(result).toEqual({ ok: true });
   });
@@ -358,7 +376,8 @@ describe("checkDisclosureIdentity", () => {
     // casing drift on the filer side).
     const result = checkDisclosureIdentity(
       "Humble Panther agent, live data from mempool.space.",
-      "tall jett"
+      "tall jett",
+      KNOWN
     );
     expect(result).toEqual({ ok: false, conflict: "Humble Panther" });
   });
@@ -369,7 +388,8 @@ describe("checkDisclosureIdentity", () => {
     // test which exercised the disclosed side).
     const result = checkDisclosureIdentity(
       "Humble Panther agent, live data from mempool.space.",
-      "  Humble\tPanther  "
+      "  Humble\tPanther  ",
+      KNOWN
     );
     expect(result).toEqual({ ok: true });
   });
@@ -381,9 +401,10 @@ describe("checkDisclosureIdentity", () => {
     // real conflict — the whitespace fix must not swallow the signal.
     const result = checkDisclosureIdentity(
       "Humble  Panther  agent, live data from mempool.space.",
-      "Tall Jett"
+      "Tall Jett",
+      KNOWN
     );
-    expect(result).toEqual({ ok: false, conflict: "Humble  Panther" });
+    expect(result).toEqual({ ok: false, conflict: "Humble Panther" });
   });
 
   // False-positive gap surfaced in Sonic Mast's #862 review (2026-07-12):
@@ -395,19 +416,22 @@ describe("checkDisclosureIdentity", () => {
     expect(
       checkDisclosureIdentity(
         "This signal was generated by our automated trading agent pipeline.",
-        "Sonic Mast"
+        "Sonic Mast",
+        KNOWN
       )
     ).toEqual({ ok: true });
     expect(
       checkDisclosureIdentity(
         "Data verified via background monitoring agent at 07:00Z.",
-        "Sonic Mast"
+        "Sonic Mast",
+        KNOWN
       )
     ).toEqual({ ok: true });
     expect(
       checkDisclosureIdentity(
         "Filed via our automated content-generation agent.",
-        "Sonic Mast"
+        "Sonic Mast",
+        KNOWN
       )
     ).toEqual({ ok: true });
   });
@@ -419,8 +443,40 @@ describe("checkDisclosureIdentity", () => {
     // phrases and prevents a single sentence-start word from tripping the gate.
     const result = checkDisclosureIdentity(
       "Yesterday agent was quiet.",
-      "Sonic Mast"
+      "Sonic Mast",
+      KNOWN
     );
     expect(result).toEqual({ ok: true });
+  });
+
+  it("returns ok when the filer is named after a leading sentence word", () => {
+    // "Via Secret Mars agent" captures "Via Secret Mars"; the filer's own
+    // name inside the capture must still count as a self-match.
+    expect(
+      checkDisclosureIdentity("Via Secret Mars agent, live data.", "Secret Mars", KNOWN)
+    ).toEqual({ ok: true });
+    expect(
+      checkDisclosureIdentity("Using Humble Panther agent, mempool data.", "Humble Panther", KNOWN)
+    ).toEqual({ ok: true });
+  });
+
+  it("returns ok when a trailing Title-Case word follows the filer's name", () => {
+    expect(
+      checkDisclosureIdentity("Filed by Secret Mars Agent", "Secret Mars", KNOWN)
+    ).toEqual({ ok: true });
+  });
+
+  it("rejects a known agent named after a leading sentence word", () => {
+    expect(
+      checkDisclosureIdentity("Via Humble Panther agent, live data.", "Tall Jett", KNOWN)
+    ).toEqual({ ok: false, conflict: "Humble Panther" });
+  });
+
+  it("returns ok when the named phrase is not a known agent", () => {
+    // Tool and product names share the "<Name> agent" shape. Only names in
+    // knownDisplayNames count as a conflict.
+    expect(
+      checkDisclosureIdentity("Built with Claude Code agent, live API data.", "Sonic Mast", KNOWN)
+    ).toEqual({ ok: true });
   });
 });

@@ -79,11 +79,14 @@ export function validateSignatureFormat(sig: unknown): sig is string {
 //
 // Returns { ok: true } when the disclosure does not reference an agent
 // other than the filer, or when no name pattern is present.
-// Returns { ok: false, conflict } when the disclosure names a different
-// agent (typically the source of the copy-pasted automation prompt).
+// Returns { ok: false, conflict } only when the disclosure names a
+// different agent that appears in knownDisplayNames. Without that check, any
+// Title-Case tool or product name ("Claude Code agent") would be read as a
+// conflicting agent and the filing would be rejected.
 export function checkDisclosureIdentity(
   disclosure: string | undefined | null,
-  filerDisplayName: string
+  filerDisplayName: string,
+  knownDisplayNames: ReadonlySet<string>
 ): { ok: true } | { ok: false; conflict: string } {
   if (!disclosure || typeof disclosure !== "string") return { ok: true };
   if (!filerDisplayName || typeof filerDisplayName !== "string") return { ok: true };
@@ -106,13 +109,24 @@ export function checkDisclosureIdentity(
   const normalize = (s: string): string =>
     s.trim().toLowerCase().replace(/\s+/g, " ");
   const filerNormalized = normalize(filerDisplayName);
+  const known = new Set(Array.from(knownDisplayNames, normalize));
 
   for (const re of patterns) {
     const match = disclosure.match(re);
     if (!match) continue;
-    const disclosed = match[1];
-    if (normalize(disclosed) === filerNormalized) return { ok: true };
-    return { ok: false, conflict: disclosed };
+    // The capture can carry a leading sentence word ("Via Secret Mars agent")
+    // or a trailing "Agent" ("Filed by Secret Mars Agent"), so test every
+    // 2- and 3-word window rather than the capture as a whole.
+    const words = match[1].trim().split(/\s+/);
+    const candidates: string[] = [];
+    for (let size = 2; size <= 3; size++) {
+      for (let i = 0; i + size <= words.length; i++) {
+        candidates.push(words.slice(i, i + size).join(" "));
+      }
+    }
+    if (candidates.some((c) => normalize(c) === filerNormalized)) return { ok: true };
+    const conflict = candidates.find((c) => known.has(normalize(c)));
+    if (conflict) return { ok: false, conflict };
   }
 
   return { ok: true };
