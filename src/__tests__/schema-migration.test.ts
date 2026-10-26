@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { SELF } from "cloudflare:test";
-import { EXPECTED_SIGNALS_INDEXES } from "../objects/schema";
+import {
+  EXPECTED_SIGNALS_INDEXES,
+  EXPECTED_POST_MIGRATION_INDEXES,
+  SELF_HEAL_POST_MIGRATION_INDEXES_SQL,
+} from "../objects/schema";
 
 interface SchemaHealthBody {
   healthy: boolean;
   missing_signals_indexes: string[];
+  missing_post_migration_indexes: string[];
   signals_row_count: number | null;
   live_index_count: number;
   live_indexes: string[];
@@ -118,5 +123,57 @@ describe("GET /api/config/schema-health", () => {
       )
     ).json<SchemaHealthBody>();
     expect(typeof withCount.signals_row_count).toBe("number");
+  });
+});
+
+/**
+ * #886 — the claims/earnings hot-path indexes cannot live in SCHEMA_SQL
+ * (beat_claims is created by migration 8, earnings.voided_at added by
+ * migration 9, and SCHEMA_SQL runs before both). They are re-applied after the
+ * migration block on every cold start so a silently-failed migration cannot
+ * leave them permanently missing — the failure mode behind the April
+ * full-table-scan billing incident.
+ */
+describe("post-migration index self-heal (#886)", () => {
+  it("creates every expected claims/earnings index on a fresh DB", async () => {
+    const res = await SELF.fetch("http://example.com/api/config/schema-health");
+    expect(res.status).toBe(200);
+    const body = await res.json<SchemaHealthBody>();
+    expect(body.missing_post_migration_indexes).toEqual([]);
+    for (const idx of EXPECTED_POST_MIGRATION_INDEXES) {
+      expect(body.live_indexes).toContain(idx);
+    }
+  });
+
+  it("folds the post-migration set into the overall healthy flag", async () => {
+    const body = await (
+      await SELF.fetch("http://example.com/api/config/schema-health")
+    ).json<SchemaHealthBody>();
+    expect(body.healthy).toBe(
+      body.missing_signals_indexes.length === 0 &&
+        body.missing_post_migration_indexes.length === 0
+    );
+    expect(body.healthy).toBe(true);
+  });
+
+  it("keeps the EXPECTED list in sync with the SQL that creates the indexes", async () => {
+    // Two hand-maintained lists: the CREATE statements and the names
+    // /schema-health diffs against. If they drift, a dropped index stops being
+    // reported and the self-heal becomes invisible — so pin them together.
+    const createdNames = SELF_HEAL_POST_MIGRATION_INDEXES_SQL.map((stmt) => {
+      const match = /CREATE INDEX IF NOT EXISTS (\S+)/.exec(stmt);
+      expect(match, `not an idempotent CREATE INDEX: ${stmt}`).not.toBeNull();
+      return match![1];
+    });
+    expect([...createdNames].sort()).toEqual(
+      [...EXPECTED_POST_MIGRATION_INDEXES].sort()
+    );
+  });
+
+  it("uses only idempotent statements — the pass re-runs on every cold start", async () => {
+    // Not version-gated, so every statement must tolerate being re-applied.
+    for (const stmt of SELF_HEAL_POST_MIGRATION_INDEXES_SQL) {
+      expect(stmt).toContain("IF NOT EXISTS");
+    }
   });
 });

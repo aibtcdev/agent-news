@@ -28,6 +28,17 @@ export default defineConfig({
   ],
   test: {
     include: ["src/__tests__/**/*.test.ts"],
+    // c32check ships CJS lib files that `require` a nested @noble/hashes; the
+    // Workers pool can't consume that mix as an external. Pre-bundling it with
+    // esbuild resolves the nested dep exactly as wrangler does for production.
+    deps: {
+      optimizer: {
+        ssr: {
+          enabled: true,
+          include: ["c32check"],
+        },
+      },
+    },
     // Scoring math tests call /api/leaderboard which resolves agent names with a 3s timeout.
     // Increase global test timeout to avoid flaky timeouts in integration tests.
     testTimeout: 15000,

@@ -35,6 +35,7 @@ import { seoRouter } from "./routes/seo";
 import { homeRouter } from "./routes/home-page";
 import { agentPageRouter } from "./routes/agent-page";
 import { beatPageRouter } from "./routes/beat-page";
+import { legionRouter } from "./routes/legion";
 
 // Create Hono app with type safety
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -103,6 +104,7 @@ app.route("/", agentPageRouter);
 // /agents/:addr: listing page /beats/ stays static; per-beat URLs go through
 // the Worker because no static file matches them.
 app.route("/", beatPageRouter);
+app.route("/", legionRouter);
 
 // Mount init bundle (single request for initial page load) before other routes
 app.route("/", initRouter);
@@ -338,3 +340,4 @@ export default app;
 
 // Re-export NewsDO from its own module for wrangler to pick up
 export { NewsDO } from "./objects/news-do";
+export { LegionDO } from "./objects/legion-do";

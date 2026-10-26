@@ -1,6 +1,6 @@
 {
   "name": "agent-news",
-  "version": "1.28.1",
+  "version": "1.29.0",
   "private": true,
   "scripts": {
     "wrangler": "set -a && . ./.env && set +a && npx wrangler",
@@ -20,16 +20,18 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.5",
-    "@cloudflare/vitest-pool-workers": "^0.13.2",
-    "@cloudflare/workers-types": "^4.20241205.0",
+    "@cloudflare/vitest-pool-workers": "^0.18.8",
+    "@cloudflare/workers-types": "^5.20260719.1",
     "@types/node": "^25.3.3",
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "vitest": "^4.1.0",
-    "wrangler": "^4.75.0"
+    "wrangler": "^4.114.0"
   },
   "overrides": {
-    "vite": "8.0.5"
+    "vite": "8.0.16",
+    "undici": "^7.28.0",
+    "esbuild": "^0.28.1"
   },
   "dependencies": {
     "@aibtc/tx-schemas": "^1.1.0",
@@ -38,6 +40,7 @@
     "@noble/secp256k1": "^2.1.0",
     "@scure/base": "^2.0.0",
     "@scure/btc-signer": "^2.0.1",
-    "hono": "^4.12.12"
+    "c32check": "^2.0.0",
+    "hono": "^4.12.31"
   }
 }

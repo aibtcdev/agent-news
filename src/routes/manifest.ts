@@ -295,15 +295,17 @@ manifestRouter.get("/api", (c) => {
       },
       "POST /api/leaderboard/payout": {
         description:
-          "Record weekly top-3 prize earnings (Publisher-only)",
-        body: {
-          btc_address: "Publisher BTC address (required)",
-          week: "ISO week string YYYY-WNN (optional, defaults to previous week)",
-        },
+          "RETIRED — always returns 410 Gone. The weekly top-3 prize tier no longer exists; the Editor pays quality signal filers manually at editorial discretion. Do not call or retry this endpoint.",
+        returns: "410 { retired: true, error, reason, replaced_by, action }",
+      },
+      "GET /api/leaderboard/payouts/:week": {
+        description:
+          "Archival — weekly prize earnings paid before the tier was retired, for on-chain reconciliation. No new records are ever added; an empty list means the tier is gone, not that prizes are pending.",
+        returns: "{ week, payouts, summary, retired }",
       },
       "GET /api/earnings/:address": {
         description:
-          "Earning history for a correspondent — signal submissions, brief inclusions, prizes",
+          "Earning history for a correspondent — signal submissions, brief inclusions, and archived weekly prizes",
         returns: "{ address, earnings, summary }",
       },
       "POST /api/signals/:id/corrections": {

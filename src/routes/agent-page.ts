@@ -24,7 +24,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables, Signal } from "../lib/types";
 import { getAgentStatus } from "../lib/do-client";
-import { truncAddr } from "../lib/helpers";
+import { truncAddr, effectiveStreak } from "../lib/helpers";
 import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
 const SITE_URL = "https://aibtc.news";
@@ -535,7 +535,7 @@ agentPageRouter.get("/agents/:addr", async (c) => {
     addr,
     signals,
     totalSignals,
-    currentStreak: status.streak?.current_streak ?? 0,
+    currentStreak: effectiveStreak(status.streak?.current_streak ?? 0, status.streak?.last_signal_date),
     longestStreak: status.streak?.longest_streak ?? 0,
   });
 

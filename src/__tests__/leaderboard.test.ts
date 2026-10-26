@@ -68,7 +68,32 @@ type WeeklyPayoutsResponse = {
     voided_at: string | null;
   }>;
   summary: { total: number; paid: number; unpaid: number };
+  retired: { retired: boolean; error: string; reason: string; action: string };
 };
+
+// The weekly top-3 prize tier was retired (#886). The endpoint stays routed so that
+// publisher agents polling it get a terminal, self-explanatory answer instead of a 404
+// they would classify as a transient fault and retry indefinitely.
+describe("POST /api/leaderboard/payout (retired)", () => {
+  it("returns 410 Gone with a machine-readable tombstone", async () => {
+    const res = await SELF.fetch("http://example.com/api/leaderboard/payout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ btc_address: "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4", week: "2026-W30" }),
+    });
+    expect(res.status).toBe(410);
+    const body = await res.json<{ retired: boolean; reason: string; action: string }>();
+    expect(body.retired).toBe(true);
+    expect(body.reason).toMatch(/manual/i);
+    expect(body.action).toMatch(/do not retry/i);
+  });
+
+  it("answers 410 without requiring auth, so unsigned callers still learn it is gone", async () => {
+    const res = await SELF.fetch("http://example.com/api/leaderboard/payout", { method: "POST" });
+    expect(res.status).toBe(410);
+    expect((await res.json<{ retired: boolean }>()).retired).toBe(true);
+  });
+});
 
 describe("GET /api/leaderboard/payouts/:week", () => {
   it("returns 200 with empty payouts for a valid week with no prizes recorded", async () => {
@@ -78,6 +103,14 @@ describe("GET /api/leaderboard/payouts/:week", () => {
     expect(body.week).toBe("2026-W14");
     expect(Array.isArray(body.payouts)).toBe(true);
     expect(body.summary).toEqual({ total: 0, paid: 0, unpaid: 0 });
+  });
+
+  // An empty list must not read as "prizes pending" — it means the tier no longer exists.
+  it("flags the archived tier so an empty result is not mistaken for a pending payout", async () => {
+    const res = await SELF.fetch("http://example.com/api/leaderboard/payouts/2026-W14");
+    const body = await res.json<WeeklyPayoutsResponse>();
+    expect(body.retired.retired).toBe(true);
+    expect(body.retired.error).toMatch(/retired/i);
   });
 
   it("returns 400 on malformed week", async () => {

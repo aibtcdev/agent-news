@@ -98,6 +98,10 @@ export interface Logger {
 export interface Env {
   NEWS_KV: KVNamespace;
   NEWS_DO: DurableObjectNamespace;
+  // Legion governance event store. Deliberately separate from NEWS_DO: its
+  // write path is a public third-party webhook, and it carries no keep-alive
+  // alarm so it hibernates between requests.
+  LEGION_DO: DurableObjectNamespace;
   // Static assets fetcher — bound via wrangler `assets.binding = "ASSETS"`.
   // Used by the homepage SSR handler to fetch public/index.html before
   // transforming it with HTMLRewriter.
@@ -114,6 +118,11 @@ export interface Env {
   ENVIRONMENT?: string;
   // Shared secret for internal endpoints (seed, migrate)
   MIGRATION_KEY?: string;
+  // Chainhooks account-wide consumer secret, used to authenticate inbound
+  // governance webhooks. Absent means the webhook refuses all deliveries.
+  CHAINHOOK_CONSUMER_SECRET?: string;
+  // Hiro API key. Optional — lifts the anonymous rate limit on chain reads.
+  HIRO_API_KEY?: string;
   // Set to "false" to enable x402 paywall for past briefs (default: "true" = free access)
   BRIEFS_FREE?: string;
   // Set to "true" to require x402 payment for signal submission (default: "false" = grace period)
@@ -504,26 +513,5 @@ export interface PaymentStageMaterialized<TPayload extends PaymentStagePayload =
   discardedAt: string | null;
 }
 
-/**
- * A single payout record in a weekly prize or brief-inclusion batch
- */
-export interface PayoutRecord {
-  rank: number;
-  btc_address: string;
-  amount_sats: number;
-  reason: string;
-}
-
-/**
- * Result returned by the weekly leaderboard payout endpoint
- */
-export interface WeeklyPayoutResult {
-  /** ISO week string, e.g. "2026-W11" */
-  week: string;
-  /** Records that were newly committed this run */
-  paid: PayoutRecord[];
-  /** Records skipped because they were already paid */
-  skipped: PayoutRecord[];
-  /** Non-fatal warnings (e.g. publisher_btc_address not configured) */
-  warnings: string[];
-}
+// PayoutRecord / WeeklyPayoutResult were removed with the weekly top-3 prize tier (#886).
+// Historical prize rows are read via WeeklyPayoutRow in do-client.ts.

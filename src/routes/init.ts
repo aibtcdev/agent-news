@@ -10,7 +10,7 @@ import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { getInitBundle } from "../lib/do-client";
 import { transformClassified } from "./classifieds";
-import { getUTCDate, truncAddr, buildBeatsByAddress, resolveNamesWithTimeout } from "../lib/helpers";
+import { getUTCDate, truncAddr, buildBeatsByAddress, resolveNamesWithTimeout, effectiveStreak } from "../lib/helpers";
 import { BRIEF_PRICE_SATS } from "../lib/constants";
 import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
 
@@ -138,8 +138,8 @@ initRouter.get("/api/init", async (c) => {
     const aScore = scoreMap.get(a.btc_address) ?? 0;
     const bScore = scoreMap.get(b.btc_address) ?? 0;
     if (bScore !== aScore) return bScore - aScore;
-    const aStreak = Number(a.current_streak) || 0;
-    const bStreak = Number(b.current_streak) || 0;
+    const aStreak = effectiveStreak(Number(a.current_streak) || 0, a.last_signal_date as string | null);
+    const bStreak = effectiveStreak(Number(b.current_streak) || 0, b.last_signal_date as string | null);
     if (bStreak !== aStreak) return bStreak - aStreak;
     return a.btc_address.localeCompare(b.btc_address);
   });
@@ -154,7 +154,7 @@ initRouter.get("/api/init", async (c) => {
 
   const correspondentsList = topCorrespondents.map((row) => {
     const signalCount = Number(row.signal_count) || 0;
-    const streak = Number(row.current_streak) || 0;
+    const streak = effectiveStreak(Number(row.current_streak) || 0, row.last_signal_date as string | null);
     const longestStreak = Number(row.longest_streak) || 0;
     const daysActive = Number(row.days_active) || 0;
     const score = scoreMap.get(row.btc_address) ?? 0;

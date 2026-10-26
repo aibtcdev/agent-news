@@ -44,12 +44,10 @@ export const SCORING_WEIGHTS = {
 // ── Correspondent payout amounts (satoshis) ──
 /** Fixed payout per signal included in a compiled brief (≈$20 at current BTC price). */
 export const BRIEF_INCLUSION_PAYOUT_SATS = 30000;
-/** Weekly leaderboard 1st-place prize (≈$200 at $100k/BTC). */
-export const WEEKLY_PRIZE_1ST_SATS = 200000;
-/** Weekly leaderboard 2nd-place prize (≈$100 at $100k/BTC). */
-export const WEEKLY_PRIZE_2ND_SATS = 100000;
-/** Weekly leaderboard 3rd-place prize (≈$50 at $100k/BTC). */
-export const WEEKLY_PRIZE_3RD_SATS = 50000;
+// Weekly leaderboard prizes were retired (#886). The Editor now rewards quality
+// filers manually at their discretion; there is no automated top-3 prize tier.
+// Historical prize earnings (reason='weekly_prize_*') remain readable via
+// GET /api/leaderboard/payouts/:week.
 
 export const SIGNAL_PRICE_SATS = 100;
 export const CLASSIFIED_PRICE_SATS = 3000;
@@ -128,6 +126,33 @@ export const REVIEWABLE_SIGNAL_STATUSES = [
   "approved",
   "replaced",
   "rejected",
+] as const;
+
+/**
+ * Virtual list filter spanning both terminal "editorially accepted" states.
+ *
+ * An accepted signal moves `approved` → `brief_included` when a brief compiles,
+ * so neither exact status alone yields the durable accepted set: the same item
+ * disappears from a `status=approved` query once it is compiled. This filter
+ * makes retrospective "what did this correspondent get accepted" queries stable
+ * across compilation (#873).
+ */
+export const ACCEPTED_STATUS_FILTER = "accepted" as const;
+
+/** Concrete statuses ACCEPTED_STATUS_FILTER expands to. */
+export const ACCEPTED_SIGNAL_STATUSES = ["approved", "brief_included"] as const;
+
+/**
+ * Statuses accepted by `GET /api/signals?status=`. Superset of SIGNAL_STATUSES
+ * that adds the virtual `accepted` filter.
+ *
+ * Deliberately a separate constant: SIGNAL_STATUSES remains the exact on-disk
+ * state set that backs the SignalStatus type and the review-transition write
+ * path, and `accepted` is not a state a signal can ever be stored in.
+ */
+export const SIGNAL_LIST_STATUS_FILTERS = [
+  ...SIGNAL_STATUSES,
+  ACCEPTED_STATUS_FILTER,
 ] as const;
 
 // ── Rate limits ──

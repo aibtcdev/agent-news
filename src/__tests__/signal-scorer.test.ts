@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { scoreSignal } from "../lib/signal-scorer";
+import { scoreSignal, withScoreOverride } from "../lib/signal-scorer";
 
 /**
  * Unit tests for the signal quality auto-scorer.
@@ -128,6 +128,40 @@ describe("scoreSignal — beatRelevance dimension", () => {
     });
     expect(result.breakdown.beatRelevance).toBe(0);
   });
+
+  it("awards full pts for a single-word beat slug whose only keyword matches", () => {
+    const result = scoreSignal({
+      ...MINIMAL_SIGNAL,
+      tags: ["quantum"],
+      beat_slug: "quantum",
+    });
+    expect(result.breakdown.beatRelevance).toBe(20);
+  });
+
+  it("still returns 0 pts for a single-word beat slug with no matching tag", () => {
+    const result = scoreSignal({
+      ...MINIMAL_SIGNAL,
+      tags: ["ordinals"],
+      beat_slug: "quantum",
+    });
+    expect(result.breakdown.beatRelevance).toBe(0);
+  });
+
+  it("lets a single-word beat reach the same composite ceiling as a multi-word beat", () => {
+    const oneWord = scoreSignal({ ...MINIMAL_SIGNAL, tags: ["quantum"], beat_slug: "quantum" });
+    const twoWord = scoreSignal({
+      ...MINIMAL_SIGNAL,
+      tags: ["agent", "economy"],
+      beat_slug: "agent-economy",
+    });
+    expect(oneWord.breakdown.beatRelevance).toBe(twoWord.breakdown.beatRelevance);
+    expect(oneWord.total).toBe(twoWord.total);
+  });
+
+  it("returns 0 pts when the slug yields no scorable keywords", () => {
+    const result = scoreSignal({ ...MINIMAL_SIGNAL, tags: ["ai"], beat_slug: "ai" });
+    expect(result.breakdown.beatRelevance).toBe(0);
+  });
 });
 
 describe("scoreSignal — timeliness dimension", () => {
@@ -242,5 +276,58 @@ describe("scoreSignal — total and shape", () => {
       disclosure: "Researched using Claude and aibtc MCP skills.",
     });
     expect(result.total).toBe(100);
+  });
+});
+
+describe("withScoreOverride — editor score override provenance (#810)", () => {
+  const OVERRIDE = {
+    by: "bc1qeditor00000000000000000000000000000000",
+    at: "2026-07-13T10:00:00.000Z",
+    previous_score: 100,
+    reason: "fabricated sources — all release URLs 404",
+  };
+
+  it("preserves the original auto-scorer axes and appends the override envelope", () => {
+    const prior = JSON.stringify({
+      sourceQuality: 30,
+      thesisClarity: 25,
+      beatRelevance: 20,
+      timeliness: 15,
+      disclosure: 10,
+    });
+    const merged = JSON.parse(withScoreOverride(prior, OVERRIDE));
+    expect(merged.sourceQuality).toBe(30);
+    expect(merged.thesisClarity).toBe(25);
+    expect(merged.override).toEqual(OVERRIDE);
+    // previous_score in the envelope is the auto-score before the editor acted.
+    expect(merged.override.previous_score).toBe(100);
+  });
+
+  it("degrades to just the override when prior breakdown is null", () => {
+    const merged = JSON.parse(withScoreOverride(null, OVERRIDE));
+    expect(merged).toEqual({ override: OVERRIDE });
+  });
+
+  it("degrades gracefully when prior breakdown is unparseable legacy data", () => {
+    const merged = JSON.parse(withScoreOverride("not-json{", OVERRIDE));
+    expect(merged).toEqual({ override: OVERRIDE });
+  });
+
+  it("records a null previous_score when the signal had no auto-score", () => {
+    const merged = JSON.parse(
+      withScoreOverride(null, { ...OVERRIDE, previous_score: null })
+    );
+    expect(merged.override.previous_score).toBeNull();
+  });
+
+  it("re-overriding replaces the prior override rather than nesting", () => {
+    const firstPass = withScoreOverride(
+      JSON.stringify({ sourceQuality: 30 }),
+      OVERRIDE
+    );
+    const secondOverride = { ...OVERRIDE, at: "2026-07-14T00:00:00.000Z", previous_score: 15 };
+    const merged = JSON.parse(withScoreOverride(firstPass, secondOverride));
+    expect(merged.override).toEqual(secondOverride);
+    expect(merged.sourceQuality).toBe(30);
   });
 });

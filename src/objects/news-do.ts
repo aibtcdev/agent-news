@@ -1,12 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 import { Hono } from "hono";
 import type { Context } from "hono";
-import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, PayoutRecord, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
+import type { Env, Beat, Signal, SignalStatus, Streak, Brief, Classified, ClassifiedStatus, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, ApprovalCapInfo, IncludedSignalMetadata, CompiledSignalRow, PaymentStageKind, PaymentStageLifecycle, PaymentStageMaterialized, PaymentStagePayload, PaymentStageRecord, PaymentTerminalReason, PaymentTrackedState } from "../lib/types";
 import { validateSlug, validateHexColor, sanitizeString, validateDateFormat } from "../lib/validators";
 import { generateId, getUTCDate, getUTCYesterday, getUTCDayStart, getUTCDayEnd, getNextDate, signalContentFingerprint } from "../lib/helpers";
-import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, WEEKLY_PRIZE_1ST_SATS, WEEKLY_PRIZE_2ND_SATS, WEEKLY_PRIZE_3RD_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS } from "../lib/constants";
-import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES } from "./schema";
-import { scoreSignal } from "../lib/signal-scorer";
+import { CLASSIFIED_DURATION_DAYS, CLASSIFIED_BRIEF_SLOTS, CLASSIFIED_BRIEF_MAX_CHARS, CLASSIFIED_STATUSES, SIGNAL_COOLDOWN_HOURS, SIGNAL_DEDUP_REJECT_WINDOW_HOURS, BEAT_EXPIRY_DAYS, MAX_SIGNALS_PER_DAY, MAX_INCLUDED_SIGNALS_PER_BRIEF, MAX_APPROVED_SIGNALS_PER_DAY, SIGNAL_STATUSES, REVIEWABLE_SIGNAL_STATUSES, CONFIG_PUBLISHER_ADDRESS, BRIEF_INCLUSION_PAYOUT_SATS, SCORING_WEIGHTS, PAYMENT_STAGE_TTL_MS, PENDING_PAYMENT_STATUS, ACCEPTED_STATUS_FILTER, ACCEPTED_SIGNAL_STATUSES } from "../lib/constants";
+import { SCHEMA_SQL, MIGRATION_PHASE0_SQL, MIGRATION_PAYMENTS_SQL, MIGRATION_BEAT_RESTRUCTURE_SQL, MIGRATION_SBTC_TRACKING_SQL, MIGRATION_CLASSIFIEDS_CLEANUP_SQL, MIGRATION_CLASSIFIEDS_REVIEW_SQL, MIGRATION_SNAPSHOTS_SQL, MIGRATION_BEAT_CLAIMS_SQL, MIGRATION_RETRACTION_SQL, MIGRATION_BEAT_NETWORK_FOCUS_SQL, MIGRATION_BITCOIN_MACRO_SQL, MIGRATION_QUANTUM_BEAT_SQL, MIGRATION_PAYMENT_STAGING_SQL, MIGRATION_APPROVAL_CAP_INDEX_SQL, MIGRATION_BEAT_EDITORS_SQL, MIGRATION_EDITORIAL_REVIEWS_SQL, MIGRATION_EDITOR_REVIEW_RATE_SQL, MIGRATION_CURATION_CLEANUP_SQL, MIGRATION_LEADERBOARD_INDEXES_SQL, MIGRATION_BEAT_CONSOLIDATION_SQL, MIGRATION_SIGNAL_SCORING_SQL, MIGRATION_APR7_EARNINGS_SQL, MIGRATION_CLASSIFIEDS_TXID_UNIQUE_SQL, MIGRATION_SIGNAL_HOT_PATH_INDEXES_SQL, MIGRATION_CORRESPONDENTS_BUNDLE_INDEXES_SQL, MIGRATION_CORRESPONDENT_STATS_SQL, MIGRATION_SIGNAL_PAYMENT_SQL, EXPECTED_SIGNALS_INDEXES, SELF_HEAL_POST_MIGRATION_INDEXES_SQL, EXPECTED_POST_MIGRATION_INDEXES } from "./schema";
+import { scoreSignal, withScoreOverride } from "../lib/signal-scorer";
 
 // ── State machine transition maps ──
 // Hoisted to module level so they are created once and are testable.
@@ -128,7 +128,15 @@ function buildSignalListWhere(filters: SignalListFilters): { whereSql: string; p
     clauses.push("s.id IN (SELECT signal_id FROM signal_tags WHERE tag = ?)");
     params.push(filters.tag);
   }
-  if (filters.status) {
+  if (filters.status === ACCEPTED_STATUS_FILTER) {
+    // Virtual filter — expands to the two terminal accepted states so the set
+    // stays stable when a brief compile flips approved → brief_included (#873).
+    // Explicit IN list (not an inequality) so SQLite can still use
+    // idx_signals_status_created rather than falling back to a scan.
+    const placeholders = ACCEPTED_SIGNAL_STATUSES.map(() => "?").join(", ");
+    clauses.push(`s.status IN (${placeholders})`);
+    params.push(...ACCEPTED_SIGNAL_STATUSES);
+  } else if (filters.status) {
     clauses.push("s.status = ?");
     params.push(filters.status);
   } else if (!filters.includePending) {
@@ -1392,6 +1400,25 @@ export class NewsDO extends DurableObject<Env> {
       );
     }
 
+    // Self-heal the claims/earnings hot-path indexes on every cold start — NOT
+    // gated on appliedVersion, which is the whole point: a version-gated
+    // migration that fails once is never retried (the counter advances anyway),
+    // so its index can go permanently missing while the code believes the
+    // schema is complete. That is what turned leaderboard/correspondents reads
+    // into full-table scans during the April billing incident (#886).
+    //
+    // These run here rather than in SCHEMA_SQL because beat_claims (migration 8)
+    // and earnings.voided_at (migration 9) do not exist until the block above
+    // has run. Each statement is individually guarded so a genuinely absent
+    // table can never brick DO construction.
+    for (const stmt of SELF_HEAL_POST_MIGRATION_INDEXES_SQL) {
+      try {
+        this.ctx.storage.sql.exec(stmt);
+      } catch (e) {
+        console.error("Post-migration index self-heal failed:", stmt, e);
+      }
+    }
+
     // Schedule a keep-alive alarm if none exists. The alarm fires every 50 seconds,
     // preventing the DO from being evicted after 70-140 seconds of inactivity.
     // This eliminates cold start overhead for the singleton DO that serves all traffic.
@@ -1717,7 +1744,27 @@ export class NewsDO extends DurableObject<Env> {
         return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<Signal>, 400);
       }
 
-      const { btc_address, status, feedback } = body;
+      const { btc_address, status, feedback, quality_score } = body;
+
+      // Optional editor-owned score override (#810). When present it replaces
+      // the auto-scorer's quality_score; when absent the score is left untouched.
+      // Source-existence remains an editorial judgement — the system never
+      // fetches URLs. Validate before any auth/state work so bad input fails fast.
+      let scoreOverride: number | undefined; // undefined = "no change"
+      if (quality_score !== undefined && quality_score !== null) {
+        if (
+          typeof quality_score !== "number" ||
+          !Number.isInteger(quality_score) ||
+          quality_score < 0 ||
+          quality_score > 100
+        ) {
+          return c.json(
+            { ok: false, error: "quality_score must be an integer between 0 and 100" } satisfies DOResult<Signal>,
+            400
+          );
+        }
+        scoreOverride = quality_score;
+      }
 
       // Validate status. brief_included is backend-owned and cannot be set manually.
       if (
@@ -1738,14 +1785,14 @@ export class NewsDO extends DurableObject<Env> {
 
       // Verify signal exists first so we know its beat_slug and author for auth check
       const signalRows = this.ctx.storage.sql
-        .exec("SELECT id, status, beat_slug, btc_address, created_at FROM signals WHERE id = ?", id)
+        .exec("SELECT id, status, beat_slug, btc_address, created_at, quality_score, score_breakdown FROM signals WHERE id = ?", id)
         .toArray();
       if (signalRows.length === 0) {
         return c.json({ ok: false, error: `Signal "${id}" not found` } satisfies DOResult<Signal>, 404);
       }
 
       // State machine: prevent editorial regressions
-      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string; btc_address: string; created_at: string };
+      const signalRow = signalRows[0] as { id: string; status: SignalStatus; beat_slug: string; btc_address: string; created_at: string; quality_score: number | null; score_breakdown: string | null };
       const currentStatus = signalRow.status;
       const newStatus = status as SignalStatus; // validated above against SIGNAL_STATUSES
       const allowed = SIGNAL_VALID_TRANSITIONS[currentStatus] ?? [];
@@ -1947,15 +1994,38 @@ export class NewsDO extends DurableObject<Env> {
       }
 
       const now = nowDate.toISOString();
-      this.ctx.storage.sql.exec(
-        `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
-         WHERE id = ?`,
-        newStatus,
-        feedback ? sanitizeString(feedback, 1000) : null,
-        now,
-        now,
-        id
-      );
+      if (scoreOverride !== undefined) {
+        // Editor override: replace quality_score and record provenance in the
+        // score_breakdown JSON (previous auto-score preserved for audit). No
+        // migration — reuses the existing quality_score / score_breakdown columns.
+        const overriddenBreakdown = withScoreOverride(signalRow.score_breakdown, {
+          by: btc_address as string,
+          at: now,
+          previous_score: signalRow.quality_score,
+          reason: feedback ? sanitizeString(feedback, 1000) : null,
+        });
+        this.ctx.storage.sql.exec(
+          `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?, quality_score = ?, score_breakdown = ?
+           WHERE id = ?`,
+          newStatus,
+          feedback ? sanitizeString(feedback, 1000) : null,
+          now,
+          now,
+          scoreOverride,
+          overriddenBreakdown,
+          id
+        );
+      } else {
+        this.ctx.storage.sql.exec(
+          `UPDATE signals SET status = ?, publisher_feedback = ?, reviewed_at = ?, updated_at = ?
+           WHERE id = ?`,
+          newStatus,
+          feedback ? sanitizeString(feedback, 1000) : null,
+          now,
+          now,
+          id
+        );
+      }
 
       // Soft-archive brief_signals and void unpaid earnings when removing a
       // brief_included signal from the active roster before inscription.
@@ -3881,6 +3951,12 @@ export class NewsDO extends DurableObject<Env> {
       const missingSignalsIndexes = EXPECTED_SIGNALS_INDEXES.filter(
         (name) => !liveSet.has(name)
       );
+      // Claims/earnings indexes self-healed after the migration block (#886).
+      // Reported separately from the signals set so a drift report still says
+      // which layer drifted — base schema or post-migration pass.
+      const missingPostMigrationIndexes = EXPECTED_POST_MIGRATION_INDEXES.filter(
+        (name) => !liveSet.has(name)
+      );
 
       // `signals_row_count` is opt-in: COUNT(*) full-scans the signals table,
       // and this endpoint is public + unthrottled. Default off so routine /
@@ -3897,8 +3973,11 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({
         ok: true,
         data: {
-          healthy: missingSignalsIndexes.length === 0,
+          healthy:
+            missingSignalsIndexes.length === 0 &&
+            missingPostMigrationIndexes.length === 0,
           missing_signals_indexes: missingSignalsIndexes,
+          missing_post_migration_indexes: missingPostMigrationIndexes,
           signals_row_count: signalsRowCount,
           live_index_count: liveIndexes.length,
           live_indexes: liveIndexes,
@@ -4403,7 +4482,7 @@ export class NewsDO extends DurableObject<Env> {
     });
 
     // -------------------------------------------------------------------------
-    // Payouts — record earnings for brief inclusion and weekly leaderboard prizes
+    // Payouts — record earnings for brief inclusion
     // -------------------------------------------------------------------------
 
     // POST /payouts/brief-inclusion — record a payout for each signal in a brief
@@ -4619,106 +4698,11 @@ export class NewsDO extends DurableObject<Env> {
       );
     });
 
-    // POST /payouts/weekly — record top-3 leaderboard prize earnings for a given week
-    // week format: YYYY-WNN (e.g. "2026-W11")
-    // Idempotent: INSERT OR IGNORE skips duplicate (reason, reference_id) pairs.
-    this.router.post("/payouts/weekly", async (c) => {
-      const body = await parseRequiredJson(c);
-      if (!body) {
-        return c.json({ ok: false, error: "Invalid JSON body" } satisfies DOResult<unknown>, 400);
-      }
-
-      const { week } = body;
-      if (!week || typeof week !== "string" || !/^\d{4}-W\d{2}$/.test(week as string)) {
-        return c.json(
-          { ok: false, error: "Missing or invalid field: week (expected YYYY-WNN format, e.g. '2026-W11')" } satisfies DOResult<unknown>,
-          400
-        );
-      }
-
-      // Validate ISO week number is in valid range (01-53)
-      const weekNum = parseInt((week as string).slice(-2), 10);
-      if (weekNum < 1 || weekNum > 53) {
-        return c.json(
-          { ok: false, error: "Invalid ISO week number — must be between 01 and 53" } satisfies DOResult<unknown>,
-          400
-        );
-      }
-
-      // Query the full leaderboard — used for both the snapshot and top-3 prize payout.
-      const allEntries = this.queryLeaderboard(10_000);
-      const top3 = allEntries.slice(0, 3) as Array<{ btc_address: string; score: number }>;
-
-      if (top3.length === 0) {
-        return c.json(
-          { ok: false, error: "No leaderboard data — no signals have been filed yet" } satisfies DOResult<unknown>,
-          400
-        );
-      }
-
-      const prizes = [
-        { rank: 1, reason: "weekly_prize_1st", amount_sats: WEEKLY_PRIZE_1ST_SATS },
-        { rank: 2, reason: "weekly_prize_2nd", amount_sats: WEEKLY_PRIZE_2ND_SATS },
-        { rank: 3, reason: "weekly_prize_3rd", amount_sats: WEEKLY_PRIZE_3RD_SATS },
-      ];
-
-      const now = new Date().toISOString();
-      const weekStr = week as string;
-
-      // Snapshot the full leaderboard before recording earnings.
-      // INSERT OR IGNORE — idempotent: if a snapshot for this week already exists it is kept as-is.
-      try {
-        this.ctx.storage.sql.exec(
-          `INSERT OR IGNORE INTO leaderboard_snapshots (id, snapshot_type, week, snapshot_data, created_at)
-           VALUES (?, ?, ?, ?, ?)`,
-          generateId(),
-          "weekly_payout",
-          weekStr,
-          JSON.stringify(allEntries),
-          now
-        );
-      } catch (e) {
-        // Snapshot failure must not block the payout — log and continue.
-        console.error("Failed to save weekly payout snapshot:", e);
-      }
-
-      const paid: PayoutRecord[] = [];
-      const skipped: PayoutRecord[] = [];
-
-      for (let i = 0; i < top3.length; i++) {
-        const entry = top3[i];
-        const prize = prizes[i];
-        if (!entry || !prize) continue;
-
-        const record: PayoutRecord = {
-          rank: prize.rank,
-          btc_address: entry.btc_address,
-          amount_sats: prize.amount_sats,
-          reason: prize.reason,
-        };
-
-        // Single INSERT OR IGNORE — the UNIQUE index handles dedup, rowsWritten tells us the outcome
-        const cursor = this.ctx.storage.sql.exec(
-          `INSERT OR IGNORE INTO earnings (id, btc_address, amount_sats, reason, reference_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          generateId(),
-          entry.btc_address,
-          prize.amount_sats,
-          prize.reason,
-          weekStr,
-          now
-        );
-        if (cursor.rowsWritten > 0) paid.push(record); else skipped.push(record);
-      }
-
-      return c.json(
-        { ok: true, data: { week: weekStr, paid, skipped, warnings: [] } } satisfies DOResult<unknown>,
-        201
-      );
-    });
-
-    // GET /leaderboard/payouts/:week — list weekly prize earnings for the given ISO week.
-    // Public — supports Correspondent Guild reconciliation of recorded prizes against on-chain txids.
+    // GET /leaderboard/payouts/:week — list historical weekly prize earnings for the given ISO week.
+    //
+    // ARCHIVAL. The weekly top-3 prize tier was retired (#886) — no new rows can be
+    // written here. Kept read-only so the Correspondent Guild can keep reconciling the
+    // prizes that WERE paid (2026-W13) against their on-chain sBTC txids.
     // Rows are keyed by (reason='weekly_prize_Nst', reference_id=week). Ranks derive from the reason.
     this.router.get("/leaderboard/payouts/:week", (c) => {
       const week = c.req.param("week");
@@ -5465,13 +5449,22 @@ export class NewsDO extends DurableObject<Env> {
         )
         .toArray();
 
-      // Leaderboard — wrapped in try/catch so a leaderboard failure
-      // doesn't break the correspondents endpoint (preserves old .catch(() => []) behavior)
+      // Leaderboard — read the materialised cache stale-or-empty rather than
+      // recomputing. The correspondents route only needs the leaderboard for
+      // score/earnings/unpaid maps, yet getLeaderboardCached() would run a live
+      // queryLeaderboard() (a ~3x scan of the full signals table) whenever the
+      // 60s cache is cold — which it almost always is on a correspondents rebuild
+      // (~25 min cadence, and the cache is invalidated on every write). Reading
+      // cache-or-empty removes that scan from the cold-rebuild path; the high-
+      // traffic /init and /leaderboard endpoints keep the cache warm, so scores
+      // are present-but-slightly-stale in the common case and briefly absent only
+      // right after a write with no intervening recompute. Still wrapped in
+      // try/catch so a cache blip can never break the correspondents endpoint.
       let leaderboard: Array<Record<string, unknown>> = [];
       try {
-        leaderboard = this.getLeaderboardCached(200);
+        leaderboard = this.getLeaderboardStaleOrEmpty(200);
       } catch (e) {
-        console.error("Leaderboard query failed in correspondents bundle:", e);
+        console.error("Leaderboard cache read failed in correspondents bundle:", e);
       }
 
       return c.json({
@@ -6359,7 +6352,7 @@ export class NewsDO extends DurableObject<Env> {
            a.btc_address,
            COALESCE(bi.inclusion_count, 0) as brief_inclusions_30d,
            COALESCE(sc.signal_count, 0) as signal_count_30d,
-           COALESCE(st.current_streak, 0) as current_streak,
+           COALESCE(st.eff_streak, 0) as current_streak,
            COALESCE(da.days_active, 0) as days_active_30d,
            COALESCE(cr.correction_count, 0) as approved_corrections_30d,
            COALESCE(rf.referral_count, 0) as referral_credits_30d,
@@ -6367,7 +6360,7 @@ export class NewsDO extends DurableObject<Env> {
            COALESCE(ua.unpaid_sats, 0) as unpaid_sats,
            (COALESCE(bi.inclusion_count, 0) * 20  /* SCORING_WEIGHTS.brief_inclusions */
             + COALESCE(sc.signal_count, 0) * 5    /* SCORING_WEIGHTS.signal_count */
-            + COALESCE(st.current_streak, 0) * 5  /* SCORING_WEIGHTS.current_streak */
+            + COALESCE(st.eff_streak, 0) * 5  /* SCORING_WEIGHTS.current_streak */
             + COALESCE(da.days_active, 0) * 2     /* SCORING_WEIGHTS.days_active */
             + COALESCE(cr.correction_count, 0) * 15  /* SCORING_WEIGHTS.approved_corrections */
             + COALESCE(rf.referral_count, 0) * 25) as score  /* SCORING_WEIGHTS.referral_credits */
@@ -6395,7 +6388,17 @@ export class NewsDO extends DurableObject<Env> {
              AND created_at > (SELECT ts FROM epoch)
            GROUP BY btc_address
          ) sc ON a.btc_address = sc.btc_address
-         LEFT JOIN streaks st ON a.btc_address = st.btc_address
+         -- current_streak is stored only on filing (applyStreakBumpForSignal),
+         -- so an agent who stops filing keeps a frozen streak forever. Gate it
+         -- to the codebase's own "streak is alive" boundary — last signal today
+         -- or yesterday (UTC) — so a broken streak contributes 0 like every
+         -- other 30-day term. longest_streak still preserves the achievement.
+         LEFT JOIN (
+           SELECT btc_address,
+                  CASE WHEN last_signal_date >= date('now', '-1 day')
+                       THEN current_streak ELSE 0 END AS eff_streak
+           FROM streaks
+         ) st ON a.btc_address = st.btc_address
          LEFT JOIN (
            SELECT btc_address, COUNT(DISTINCT date(created_at)) as days_active
            FROM signals
@@ -6438,7 +6441,7 @@ export class NewsDO extends DurableObject<Env> {
          --   2. current_streak DESC — longest active streak breaks score ties
          --   3. first_signal_at ASC — earliest tenure breaks streak ties (COALESCE to 'z' so NULLs sort last)
          --   4. btc_address ASC     — alphabetical fallback; always unique
-         ORDER BY score DESC, COALESCE(st.current_streak, 0) DESC, COALESCE(fs.first_signal_at, 'z') ASC, a.btc_address ASC
+         ORDER BY score DESC, COALESCE(st.eff_streak, 0) DESC, COALESCE(fs.first_signal_at, 'z') ASC, a.btc_address ASC
          LIMIT ?`,
         limit
       )
@@ -6500,6 +6503,37 @@ export class NewsDO extends DurableObject<Env> {
       console.error("[leaderboard cache] write failed:", e);
     }
     return fresh.slice(0, limit);
+  }
+
+  /**
+   * Read the materialised leaderboard without ever recomputing it.
+   *
+   * Returns the cached top-N regardless of age (stale is acceptable), or an
+   * empty array if the cache row is absent (e.g. just invalidated by a write and
+   * not yet recomputed by an /init or /leaderboard read). Used by the
+   * correspondents bundle, whose cold rebuild must not inherit queryLeaderboard's
+   * full-table scan — see the call site in /correspondents-bundle. Callers that
+   * need a guaranteed-fresh result use getLeaderboardCached()/queryLeaderboard().
+   *
+   * Best-effort: any read/parse failure returns [] so it can never break the
+   * caller. When the result is empty the correspondents route simply renders
+   * without scores rather than blocking on a recompute.
+   */
+  private getLeaderboardStaleOrEmpty(limit: number): Array<Record<string, unknown>> {
+    try {
+      const rows = this.ctx.storage.sql
+        .exec("SELECT entries FROM leaderboard_cache WHERE id = 1")
+        .toArray();
+      if (rows.length > 0) {
+        const entries = JSON.parse(
+          (rows[0] as { entries: string }).entries
+        ) as Array<Record<string, unknown>>;
+        return entries.slice(0, limit);
+      }
+    } catch (e) {
+      console.error("[leaderboard cache] stale read failed:", e);
+    }
+    return [];
   }
 
   /**

@@ -27,6 +27,17 @@ function recentTs(offsetDays = 5): string {
   return new Date(Date.now() - offsetDays * 24 * 60 * 60 * 1000).toISOString();
 }
 
+/**
+ * UTC date (YYYY-MM-DD) of a streak that is still alive — filed today. A
+ * `current_streak` only counts when its last signal was today or yesterday
+ * (see effectiveStreak / the queryLeaderboard streak gate); seeding a live
+ * streak with a 5-day-old date would now correctly score 0, so streak-weight,
+ * tiebreak and combined-sum tests use this instead.
+ */
+function liveStreakDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 /** 35 days ago — outside the 30-day rolling window. */
 function oldTs(): string {
   return new Date(Date.now() - 35 * 24 * 60 * 60 * 1000).toISOString();
@@ -152,6 +163,8 @@ function findEntry(
 const ADDR_BRIEF   = "bc1qbrief00000000000000000000000000000000000"; // brief_inclusions group
 const ADDR_SIG     = "bc1qsignal0000000000000000000000000000000000"; // signal_count group
 const ADDR_STREAK  = "bc1qstreak0000000000000000000000000000000000"; // streak group
+const ADDR_STREAK_STALE = "bc1qstreakstale00000000000000000000000000000"; // frozen streak, stale last_signal_date
+const ADDR_STREAK_FRESH = "bc1qstreakfresh00000000000000000000000000000"; // streak with yesterday's signal
 const ADDR_DAYS    = "bc1qdays000000000000000000000000000000000000"; // days_active group
 const ADDR_CORR    = "bc1qcorr000000000000000000000000000000000000"; // corrections group
 const ADDR_CORR_SIG = "bc1qcorrsig00000000000000000000000000000000"; // signal owner for corrections
@@ -264,7 +277,7 @@ describe("current_streak: weight x" + SCORING_WEIGHTS.current_streak, () => {
           btc_address: ADDR_STREAK,
           current_streak: 4,
           longest_streak: 7,
-          last_signal_date: ts.slice(0, 10),
+          last_signal_date: liveStreakDate(),
           total_signals: 10,
         },
       ],
@@ -280,6 +293,72 @@ describe("current_streak: weight x" + SCORING_WEIGHTS.current_streak, () => {
       4 * SCORING_WEIGHTS.current_streak +
       1 * SCORING_WEIGHTS.days_active;
     expect(entry!.score).toBe(expectedScore);
+  });
+
+  it("does not count a frozen streak whose last signal is older than yesterday", async () => {
+    // current_streak is written only on filing, so an agent that stops filing
+    // keeps its streak forever. On a board labelled "30-day score" that streak
+    // must decay: a last_signal_date older than yesterday contributes 0. Seed a
+    // large streak with a stale date and a signal old enough to add no other
+    // points, so the score isolates the streak term.
+    const stale = oldTs(); // 35 days ago — outside every window
+    await seed({
+      signals: [
+        { id: "stale-streak-sig-1", beat_slug: "agent-economy", btc_address: ADDR_STREAK_STALE, headline: "Old signal", created_at: stale },
+      ],
+      streaks: [
+        {
+          btc_address: ADDR_STREAK_STALE,
+          current_streak: 40,
+          longest_streak: 40,
+          last_signal_date: stale.slice(0, 10),
+          total_signals: 40,
+        },
+      ],
+    });
+
+    const leaderboard = await getLeaderboard();
+    const entry = findEntry(leaderboard, ADDR_STREAK_STALE);
+    // A 40-day frozen streak would be 200 pts if it counted; it must not.
+    // The 35-day-old signal is outside the 30-day signal/days windows too,
+    // so the honest score is 0 and the agent falls off the ranked board.
+    if (entry) {
+      expect(entry.breakdown.currentStreak).toBe(0);
+      expect(entry.score).toBe(0);
+    } else {
+      // Falling off the leaderboard entirely is the correct outcome — a
+      // zero-score agent need not appear at all. Either way, not ranked by a
+      // ghost streak.
+      expect(entry).toBeUndefined();
+    }
+  });
+
+  it("still counts a streak whose last signal was yesterday", async () => {
+    // Boundary: yesterday is still "alive" — the streak-bump logic continues a
+    // streak filed yesterday, so the score must too.
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const recent = recentTs(1);
+    await seed({
+      signals: [
+        { id: "fresh-streak-sig-1", beat_slug: "agent-economy", btc_address: ADDR_STREAK_FRESH, headline: "Recent signal", created_at: recent },
+      ],
+      streaks: [
+        {
+          btc_address: ADDR_STREAK_FRESH,
+          current_streak: 6,
+          longest_streak: 6,
+          last_signal_date: yesterday,
+          total_signals: 6,
+        },
+      ],
+    });
+
+    const leaderboard = await getLeaderboard();
+    const entry = findEntry(leaderboard, ADDR_STREAK_FRESH);
+    expect(entry).toBeDefined();
+    expect(entry!.breakdown.currentStreak).toBe(6);
   });
 });
 
@@ -498,8 +577,8 @@ describe("edge case: two scouts with identical raw values produce identical scor
         { id: "twin-ref-b-001", scout_address: ADDR_TWIN_B, recruit_address: ADDR_TWIN_RB, credited_at: ts, created_at: ts },
       ],
       streaks: [
-        { btc_address: ADDR_TWIN_A, current_streak: 3, longest_streak: 3, last_signal_date: ts.slice(0, 10), total_signals: 1 },
-        { btc_address: ADDR_TWIN_B, current_streak: 3, longest_streak: 3, last_signal_date: ts.slice(0, 10), total_signals: 1 },
+        { btc_address: ADDR_TWIN_A, current_streak: 3, longest_streak: 3, last_signal_date: liveStreakDate(), total_signals: 1 },
+        { btc_address: ADDR_TWIN_B, current_streak: 3, longest_streak: 3, last_signal_date: liveStreakDate(), total_signals: 1 },
       ],
     });
 
@@ -532,8 +611,8 @@ describe("tiebreak: same score, higher current_streak ranks first", () => {
         { id: "tb-stk-corrsig-001", beat_slug: "agent-economy", btc_address: ADDR_TB_CORR_SIG, headline: "Correctable signal", created_at: ts },
       ],
       streaks: [
-        { btc_address: ADDR_TB_STK_WINNER, current_streak: 5, longest_streak: 5, last_signal_date: ts.slice(0, 10), total_signals: 1 },
-        { btc_address: ADDR_TB_STK_LOSER,  current_streak: 2, longest_streak: 2, last_signal_date: ts.slice(0, 10), total_signals: 1 },
+        { btc_address: ADDR_TB_STK_WINNER, current_streak: 5, longest_streak: 5, last_signal_date: liveStreakDate(), total_signals: 1 },
+        { btc_address: ADDR_TB_STK_LOSER,  current_streak: 2, longest_streak: 2, last_signal_date: liveStreakDate(), total_signals: 1 },
       ],
       corrections: [
         { id: "tb-stk-corr-001", signal_id: "tb-stk-corrsig-001", btc_address: ADDR_TB_STK_LOSER, status: "approved", created_at: ts },
@@ -674,7 +753,7 @@ describe("combined: all scoring components sum to the correct total", () => {
         { id: "all-ref-002", scout_address: ADDR_ALL, recruit_address: ADDR_ALL_REC + "2", credited_at: ts2, created_at: ts2 },
       ],
       streaks: [
-        { btc_address: ADDR_ALL, current_streak: 6, longest_streak: 10, last_signal_date: ts.slice(0, 10), total_signals: 4 },
+        { btc_address: ADDR_ALL, current_streak: 6, longest_streak: 10, last_signal_date: liveStreakDate(), total_signals: 4 },
       ],
     });
 

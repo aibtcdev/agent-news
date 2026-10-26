@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
 import { checkRateLimit, createRateLimitMiddleware } from "../middleware/rate-limit";
-import { SIGNAL_RATE_LIMIT, SIGNAL_READ_RATE_LIMIT, SIGNAL_STATUSES, SIGNAL_PRICE_SATS, CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
+import { SIGNAL_RATE_LIMIT, SIGNAL_READ_RATE_LIMIT, SIGNAL_LIST_STATUS_FILTERS, SIGNAL_PRICE_SATS, CONFIG_PUBLISHER_ADDRESS } from "../lib/constants";
 import {
   validateBtcAddress,
   validateSlug,
@@ -85,8 +85,13 @@ signalsRouter.get("/api/signals", async (c) => {
   const status = c.req.query("status");
   const includePending = c.req.query("include_pending") === "true";
 
-  if (status && !(SIGNAL_STATUSES as readonly string[]).includes(status)) {
-    return c.json({ error: `Invalid status. Must be one of: ${SIGNAL_STATUSES.join(", ")}` }, 400);
+  // Validated against the list-filter set, which adds the virtual `accepted`
+  // filter (approved + brief_included) on top of the concrete statuses (#873).
+  if (status && !(SIGNAL_LIST_STATUS_FILTERS as readonly string[]).includes(status)) {
+    return c.json(
+      { error: `Invalid status. Must be one of: ${SIGNAL_LIST_STATUS_FILTERS.join(", ")}` },
+      400
+    );
   }
 
   // Pending visibility is author-only. Require an `agent` filter that

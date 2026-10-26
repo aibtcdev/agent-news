@@ -1,4 +1,4 @@
-import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, DOErrorStatus, WeeklyPayoutResult, PaymentStageMaterialized, PaymentStagePayload, PaymentTrackedState, PaymentTerminalReason, BeatEditor } from "./types";
+import type { Env, Beat, Signal, SignalStatus, Source, Brief, Classified, ClassifiedStatus, Streak, Earning, Correction, ReferralCredit, BriefSignal, CompiledBriefData, DOResult, DOErrorStatus, PaymentStageMaterialized, PaymentStagePayload, PaymentTrackedState, PaymentTerminalReason, BeatEditor } from "./types";
 import { CLASSIFIED_BRIEF_SLOTS } from "./constants";
 
 /** Singleton DO stub ID — single instance manages all news data */
@@ -496,16 +496,32 @@ export async function listBriefDates(env: Env): Promise<string[]> {
   return result.data;
 }
 
+/**
+ * Fetch the most recent compiled brief.
+ *
+ * Returns null ONLY when the DO reports 404 — its genuine "no brief exists"
+ * signal. Any other failure (notably the 503 doFetch raises on DO_TIMEOUT)
+ * throws, because returning null there is indistinguishable from "not compiled
+ * yet" and callers render that as an authoritative absence: `/api/brief` would
+ * answer `{compiledAt: null}` with HTTP 200 while the brief sat in storage.
+ * Callers that prefer absence over an error opt in explicitly — see
+ * `home-page.ts` (allSettled) and `signal-provenance.ts` (.catch).
+ */
 export async function getLatestBrief(env: Env): Promise<Brief | null> {
   const stub = getStub(env);
   const result = await doFetch<Brief>(stub, "/briefs/latest");
-  return result.ok ? (result.data ?? null) : null;
+  if (result.ok) return result.data ?? null;
+  if (result.status === 404) return null;
+  throw new Error(result.error ?? "Failed to fetch latest brief");
 }
 
+/** Fetch a brief by date. Same null-vs-throw contract as `getLatestBrief`. */
 export async function getBriefByDate(env: Env, date: string): Promise<Brief | null> {
   const stub = getStub(env);
   const result = await doFetch<Brief>(stub, `/briefs/${encodeURIComponent(date)}`);
-  return result.ok ? (result.data ?? null) : null;
+  if (result.ok) return result.data ?? null;
+  if (result.status === 404) return null;
+  throw new Error(result.error ?? `Failed to fetch brief for ${date}`);
 }
 
 export async function compileBriefData(
@@ -1018,6 +1034,8 @@ export interface ReviewSignalInput {
   status: SignalStatus;
   feedback?: string | null;
   displace_signal_id?: string;
+  /** Editor-owned override of the auto-scorer quality_score (0–100). Omit to leave unchanged (#810). */
+  quality_score?: number;
 }
 
 export async function reviewSignal(
@@ -1177,7 +1195,7 @@ export async function creditReferral(
 }
 
 // ---------------------------------------------------------------------------
-// Payouts — brief inclusion and weekly leaderboard prizes
+// Payouts — brief inclusion, plus read-only access to retired weekly prize history
 // ---------------------------------------------------------------------------
 
 export interface BriefInclusionPayoutResult {
@@ -1199,19 +1217,6 @@ export async function recordBriefInclusionPayouts(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ brief_date: briefDate, signal_ids: signalIds }),
-  });
-}
-
-/** Record top-3 weekly leaderboard prize earnings for the given ISO week. Idempotent. */
-export async function recordWeeklyPayouts(
-  env: Env,
-  week: string
-): Promise<DOResult<WeeklyPayoutResult>> {
-  const stub = getStub(env);
-  return doFetch<WeeklyPayoutResult>(stub, "/payouts/weekly", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ week }),
   });
 }
 

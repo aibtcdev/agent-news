@@ -178,7 +178,8 @@ earningsRouter.get("/api/earnings/:address", async (c) => {
     return c.json({ error: "Failed to fetch earnings" }, 503);
   }
 
-  // Sum positive-amount earnings (brief inclusions, weekly prizes).
+  // Sum positive-amount earnings (brief inclusions, plus archived weekly prizes
+  // from before that tier was retired — see #886).
   // No paid/unpaid status field exists yet, so this is total earned, not "pending payout".
   const totalEarnedSats = earnings
     .filter((e) => e.amount_sats > 0)

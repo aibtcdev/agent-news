@@ -7,7 +7,7 @@
  */
 
 import { Hono } from "hono";
-import type { Env, AppVariables, Classified } from "../lib/types";
+import type { Env, AppVariables, Classified, AppContext } from "../lib/types";
 import {
   CLASSIFIED_PRICE_SATS,
   CLASSIFIED_CATEGORIES,
@@ -27,7 +27,7 @@ import {
 import { logPaymentEvent } from "../lib/payment-logging";
 import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
 import { resolveNamesWithTimeout, generateId } from "../lib/helpers";
-import { edgeCacheMatch, edgeCachePut } from "../lib/edge-cache";
+import { edgeCacheMatchSWR, edgeCachePut, triggerSWRRefresh } from "../lib/edge-cache";
 
 /** Transform a Classified row to the camelCase API response shape. */
 export function transformClassified(cl: Classified) {
@@ -82,21 +82,23 @@ classifiedsRouter.get("/api/classifieds/rotation", async (c) => {
 // primary consumer of this view and likely needs immediate freshness on their
 // own submissions. The endpoint is already public (no auth gate today), so
 // skipping the cache changes nothing about visibility — just about staleness.
-classifiedsRouter.get("/api/classifieds", async (c) => {
-  const category = c.req.query("category");
-  const agent = c.req.query("agent");
-  const limitParam = c.req.query("limit");
-  const limit = limitParam
-    ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 1000)
-    : undefined;
+// Inner freshness window for the SWR cache. Within this, a hit is served as a
+// plain HIT; past it (but still within the s-maxage=300 edge TTL) the stale copy
+// is served immediately and a background rebuild fires. This keeps the Durable
+// Object off the synchronous request path once warm — and, critically, means a
+// transient DO timeout serves stale instead of a 500 (#699).
+const CLASSIFIEDS_FRESH_SECONDS = 60;
 
-  const cacheable = !agent;
-  if (cacheable) {
-    const cached = await edgeCacheMatch(c);
-    if (cached) return cached;
-  }
-
-  const classifieds = await listClassifieds(c.env, { category, agent, limit });
+/** Build the classifieds list response (DO fetch + name resolution + cache put). */
+async function buildClassifiedsListResponse(
+  c: AppContext,
+  opts: { category?: string; agent?: string; limit?: number; cacheable: boolean }
+): Promise<Response> {
+  const classifieds = await listClassifieds(c.env, {
+    category: opts.category,
+    agent: opts.agent,
+    limit: opts.limit,
+  });
 
   const transformed = classifieds.map(transformClassified);
 
@@ -117,15 +119,55 @@ classifiedsRouter.get("/api/classifieds", async (c) => {
     };
   });
 
+  const response = c.json({ classifieds: withNames, total: withNames.length });
   // Per-agent views aren't cached (see above); send a private,no-store
   // header so downstream caches don't independently snapshot them either.
-  c.header(
+  response.headers.set(
     "Cache-Control",
-    cacheable ? "public, max-age=60, s-maxage=300" : "private, no-store"
+    opts.cacheable ? "public, max-age=60, s-maxage=300" : "private, no-store"
   );
-  const response = c.json({ classifieds: withNames, total: withNames.length });
-  if (cacheable) edgeCachePut(c, response);
+  if (opts.cacheable) edgeCachePut(c, response);
   return response;
+}
+
+classifiedsRouter.get("/api/classifieds", async (c) => {
+  const category = c.req.query("category");
+  const agent = c.req.query("agent");
+  const limitParam = c.req.query("limit");
+  const limit = limitParam
+    ? Math.min(Math.max(1, parseInt(limitParam, 10) || 50), 1000)
+    : undefined;
+
+  const cacheable = !agent;
+  const opts = { category, agent, limit, cacheable };
+
+  if (cacheable) {
+    const hit = await edgeCacheMatchSWR(c, { freshSeconds: CLASSIFIEDS_FRESH_SECONDS });
+    if (hit && !hit.stale) return hit.response;
+    if (hit?.stale) {
+      // Serve stale immediately; rebuild in the background (guarded by a KV lock).
+      triggerSWRRefresh(c, "classifieds", () => buildClassifiedsListResponse(c, opts));
+      return hit.response;
+    }
+  }
+
+  try {
+    return await buildClassifiedsListResponse(c, opts);
+  } catch (err) {
+    // Transient DO saturation makes listClassifieds() throw (10s doFetch guard).
+    // With no cached copy to fall back on, degrade to a retryable 503 rather than
+    // a bare 500 so probes get an honest, retry-able signal (#699).
+    const logger = c.get("logger");
+    logger.warn("classifieds list unavailable", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    const res = c.json(
+      { error: "Classifieds are temporarily unavailable. Please retry shortly.", code: "CLASSIFIEDS_UNAVAILABLE" },
+      503
+    );
+    res.headers.set("Retry-After", "30");
+    return res;
+  }
 });
 
 // GET /api/classifieds/:id — get a single classified ad
