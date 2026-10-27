@@ -524,6 +524,31 @@ export async function getBriefByDate(env: Env, date: string): Promise<Brief | nu
   throw new Error(result.error ?? `Failed to fetch brief for ${date}`);
 }
 
+export interface BriefWeekSignalRow {
+  brief_date: string;
+  signal_id: string;
+  btc_address: string;
+  position: number;
+  beat_slug: string | null;
+}
+
+export interface BriefWeekBundle {
+  week: string;
+  first_date: string;
+  last_date: string;
+  briefs: Brief[];
+  signals: BriefWeekSignalRow[];
+}
+
+/** Fetch 7 days of briefs and included signals starting at `weekIso` (YYYY-MM-DD). */
+export async function getBriefWeek(env: Env, weekIso: string): Promise<BriefWeekBundle> {
+  const stub = getStub(env);
+  const result = await doFetch<BriefWeekBundle>(stub, `/briefs/week/${encodeURIComponent(weekIso)}`);
+  if (!result.ok) throw new Error(result.error ?? `Failed to fetch brief week for ${weekIso}`);
+  if (result.data === undefined) throw new Error("Missing data in brief week response");
+  return result.data;
+}
+
 export async function compileBriefData(
   env: Env,
   date?: string
