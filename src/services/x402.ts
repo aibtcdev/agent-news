@@ -229,9 +229,14 @@ export function mapVerificationError(
 
   if (isNonceConflict) {
     const side = isSenderConflict ? "sender" : "sponsor";
-    const hint = side === "sender"
-      ? "Re-fetch your sender nonce and re-sign the transaction before retrying."
-      : "Use the recover-nonce tool or check your relay nonce before retrying.";
+    const isDuplicate = code === "SENDER_NONCE_DUPLICATE" || terminalReason === "sender_nonce_duplicate";
+    // A duplicate means a tx at this nonce is already in flight. If it is this same payment,
+    // re-signing it at a new nonce would let both confirm (the payer pays twice).
+    const hint = isDuplicate
+      ? "A transaction from this sender at this nonce is already in flight. Do not re-sign this payment at a new nonce: if the in-flight transaction is this payment, both would confirm. Wait for it to settle; sign only a different payment at the next nonce."
+      : side === "sender"
+        ? "Re-fetch your sender nonce and re-sign the transaction before retrying."
+        : "Use the recover-nonce tool or check your relay nonce before retrying.";
     const retryAfter = (code && NONCE_GAP_CODES.has(code)) || terminalReason === "sender_nonce_gap"
       ? "30"
       : "5";

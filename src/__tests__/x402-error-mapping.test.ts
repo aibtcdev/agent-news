@@ -32,6 +32,8 @@ describe("mapVerificationError", () => {
       expect(result.status).toBe(409);
       expect(result.body.code).toBe("SENDER_NONCE_DUPLICATE");
       expect(result.body.error).toContain("(sender)");
+      expect(result.body.hint).toContain("Do not re-sign this payment");
+      expect(result.body.hint).not.toContain("Re-fetch your sender nonce");
       expect(result.headers?.["Retry-After"]).toBe("5");
     });
 
