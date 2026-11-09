@@ -10,7 +10,10 @@ concurrency:
 
 jobs:
   preview:
-    if: github.event.pull_request.head.repo.fork == false
+    # Dependabot PRs run like fork PRs: no Actions secrets, so the deploy below has no
+    # CLOUDFLARE_API_TOKEN and always fails. Typecheck still runs in ci.yml.
+    # https://docs.github.com/en/code-security/dependabot/troubleshooting-dependabot/troubleshooting-dependabot-on-github-actions
+    if: github.event.pull_request.head.repo.fork == false && github.event.pull_request.user.login != 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
       contents: read
