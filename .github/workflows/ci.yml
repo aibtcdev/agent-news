@@ -9,10 +9,11 @@ on:
 permissions:
   contents: read
 
+# PR runs share one group per PR, so a new push cancels the stale run. Pushes to main get
+# a group per run: sharing a group would let a newer push replace a pending run (queue: single).
 concurrency:
-  group: ci-${{ github.ref }}
-  # Cancel superseded PR runs only; every push to main still gets its own run.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   typecheck:
