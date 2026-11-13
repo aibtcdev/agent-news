@@ -3380,6 +3380,61 @@ export class NewsDO extends DurableObject<Env> {
       return c.json({ ok: true, data: rows[0] as unknown as Brief } satisfies DOResult<Brief>);
     });
 
+    // GET /briefs/week/:week_iso — get 7 days of briefs + included signals starting at week_iso
+    this.router.get("/briefs/week/:week_iso", (c) => {
+      const weekIso = c.req.param("week_iso");
+      const startMs = Date.parse(`${weekIso}T00:00:00Z`);
+      if (Number.isNaN(startMs)) {
+        return c.json(
+          { ok: false, error: "Invalid week_iso date format" } satisfies DOResult<unknown>,
+          400
+        );
+      }
+      const dates: string[] = [];
+      for (let i = 0; i < 7; i++) {
+        dates.push(new Date(startMs + i * 86_400_000).toISOString().slice(0, 10));
+      }
+      const firstDate = dates[0] as string;
+      const lastDate = dates[6] as string;
+
+      const briefs = this.ctx.storage.sql
+        .exec(
+          "SELECT * FROM briefs WHERE date >= ?1 AND date <= ?2 ORDER BY date ASC",
+          firstDate,
+          lastDate
+        )
+        .toArray() as unknown as Brief[];
+
+      const signals = this.ctx.storage.sql
+        .exec(
+          `SELECT bs.brief_date, bs.signal_id, bs.btc_address, bs.position, s.beat_slug
+           FROM brief_signals bs
+           LEFT JOIN signals s ON bs.signal_id = s.id
+           WHERE bs.brief_date >= ?1 AND bs.brief_date <= ?2 AND bs.retracted_at IS NULL
+           ORDER BY bs.brief_date ASC, bs.position ASC`,
+          firstDate,
+          lastDate
+        )
+        .toArray() as Array<{
+          brief_date: string;
+          signal_id: string;
+          btc_address: string;
+          position: number;
+          beat_slug: string | null;
+        }>;
+
+      return c.json({
+        ok: true,
+        data: {
+          week: weekIso,
+          first_date: firstDate,
+          last_date: lastDate,
+          briefs,
+          signals,
+        },
+      } satisfies DOResult<unknown>);
+    });
+
     // POST /briefs/compile — compile brief data for a date via SQL JOIN
     this.router.post("/briefs/compile", async (c) => {
       // Body is optional — only parse when the caller signals JSON is present.

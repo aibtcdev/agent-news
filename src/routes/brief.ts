@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import type { Env, AppVariables } from "../lib/types";
-import { getLatestBrief, getBriefByDate, listBriefDates, recordEarning, reconcilePaymentStage, stagePayment } from "../lib/do-client";
+import { getLatestBrief, getBriefByDate, getBriefWeek, listBriefDates, recordEarning, reconcilePaymentStage, stagePayment } from "../lib/do-client";
 import { BRIEF_PRICE_SATS, CORRESPONDENT_SHARE } from "../lib/constants";
-import { getUTCDate } from "../lib/helpers";
+import { getUTCDate, resolveNamesWithTimeout } from "../lib/helpers";
 import { logPaymentEvent } from "../lib/payment-logging";
 import { validateDateFormat } from "../lib/validators";
 import { buildLocalPaymentStatusUrl, buildPaymentRequired, verifyPayment, mapVerificationError } from "../services/x402";
@@ -106,6 +106,163 @@ briefRouter.get("/api/brief", async (c) => {
     ...jsonData,
     text: todaysBrief.text,
     ...flatInscriptionFields(todaysBrief),
+  });
+});
+
+interface WeeklyIncludedSignalLike {
+  signal_id?: string;
+  btc_address?: string;
+  beat_slug?: string | null;
+}
+
+interface WeeklySectionLike {
+  id?: string;
+  signalId?: string;
+  correspondent?: string;
+  beatSlug?: string | null;
+}
+
+// GET /api/brief/week/:week_iso — reduce 7 daily briefs starting at week_iso into a weekly summary (#898)
+briefRouter.get("/api/brief/week/:week_iso", async (c) => {
+  const weekIso = c.req.param("week_iso");
+
+  if (!validateDateFormat(weekIso)) {
+    return c.json(
+      { error: "Invalid week_iso format", hint: "Use YYYY-MM-DD" },
+      400
+    );
+  }
+  const parsedStart = new Date(`${weekIso}T12:00:00Z`);
+  if (
+    Number.isNaN(parsedStart.getTime()) ||
+    parsedStart.toISOString().slice(0, 10) !== weekIso
+  ) {
+    return c.json(
+      { error: "Invalid week_iso calendar date", hint: "Use a valid YYYY-MM-DD date" },
+      400
+    );
+  }
+
+  let bundle: Awaited<ReturnType<typeof getBriefWeek>>;
+  try {
+    bundle = await getBriefWeek(c.env, weekIso);
+  } catch (err) {
+    c.header("Retry-After", "30");
+    return c.json(
+      {
+        error: "Brief storage is temporarily unreachable — retry shortly.",
+        detail: err instanceof Error ? err.message : String(err),
+      },
+      503
+    );
+  }
+
+  // Group DB brief_signals by brief_date
+  const dbSignalsByDate = new Map<
+    string,
+    Array<{ btc_address: string; beat_slug: string | null }>
+  >();
+  for (const row of bundle.signals) {
+    const list = dbSignalsByDate.get(row.brief_date) ?? [];
+    list.push({ btc_address: row.btc_address, beat_slug: row.beat_slug });
+    dbSignalsByDate.set(row.brief_date, list);
+  }
+
+  const entryStats = new Map<
+    string,
+    { signal_count: number; beats: Set<string> }
+  >();
+  let totalSignals = 0;
+
+  const dailyBriefs = bundle.briefs.map((brief) => {
+    let jsonData: Record<string, unknown> = {};
+    if (brief.json_data) {
+      try {
+        jsonData = JSON.parse(brief.json_data) as Record<string, unknown>;
+      } catch {
+        jsonData = {};
+      }
+    }
+
+    // Prefer JSON included_signals, then DB brief_signals, then JSON sections
+    let daySignals: Array<{ btc_address: string; beat_slug: string | null }> = [];
+    if (Array.isArray(jsonData.included_signals) && jsonData.included_signals.length > 0) {
+      daySignals = (jsonData.included_signals as WeeklyIncludedSignalLike[])
+        .filter((s) => typeof s.btc_address === "string" && s.btc_address.length > 0)
+        .map((s) => ({
+          btc_address: s.btc_address as string,
+          beat_slug: typeof s.beat_slug === "string" ? s.beat_slug : null,
+        }));
+    } else if ((dbSignalsByDate.get(brief.date)?.length ?? 0) > 0) {
+      daySignals = dbSignalsByDate.get(brief.date) ?? [];
+    } else if (Array.isArray(jsonData.sections) && jsonData.sections.length > 0) {
+      daySignals = (jsonData.sections as WeeklySectionLike[])
+        .filter((s) => typeof s.correspondent === "string" && s.correspondent.length > 0)
+        .map((s) => ({
+          btc_address: s.correspondent as string,
+          beat_slug: typeof s.beatSlug === "string" ? s.beatSlug : null,
+        }));
+    }
+
+    for (const sig of daySignals) {
+      const existing = entryStats.get(sig.btc_address) ?? {
+        signal_count: 0,
+        beats: new Set<string>(),
+      };
+      existing.signal_count += 1;
+      if (sig.beat_slug) {
+        existing.beats.add(sig.beat_slug);
+      }
+      entryStats.set(sig.btc_address, existing);
+    }
+
+    totalSignals += daySignals.length;
+
+    const nestedInscription =
+      jsonData.inscription && typeof jsonData.inscription === "object"
+        ? (jsonData.inscription as { inscriptionId?: string | null })
+        : null;
+    const inscriptionId =
+      brief.inscription_id ?? nestedInscription?.inscriptionId ?? null;
+
+    return {
+      date: brief.date,
+      inscription_id: inscriptionId,
+      included_count: daySignals.length,
+    };
+  });
+
+  const addresses = [...entryStats.keys()];
+  const nameMap = await resolveNamesWithTimeout(
+    c.env.NEWS_KV,
+    addresses,
+    (p) => c.executionCtx.waitUntil(p)
+  );
+
+  const entries = [...entryStats.entries()]
+    .map(([btcAddress, stats]) => {
+      const info = nameMap.get(btcAddress);
+      return {
+        btc_address: btcAddress,
+        displayName: info?.name ?? null,
+        signal_count: stats.signal_count,
+        beats: [...stats.beats].sort((a, b) => a.localeCompare(b)),
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.signal_count - a.signal_count ||
+        a.btc_address.localeCompare(b.btc_address)
+    );
+
+  c.header("Cache-Control", "public, max-age=60, s-maxage=300");
+  return c.json({
+    week: bundle.week,
+    first_date: bundle.first_date,
+    last_date: bundle.last_date,
+    entries,
+    total_signals: totalSignals,
+    daily_briefs: dailyBriefs,
   });
 });
 
