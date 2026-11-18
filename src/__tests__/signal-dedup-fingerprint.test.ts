@@ -207,6 +207,27 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
     });
     expect(signalContentFingerprint(status(12345))).toBe(signalContentFingerprint(status(67890)));
   });
+
+  it("still collapses a block height written with `#` (#916 review)", () => {
+    // The `#` exemption must not let a `#`-spelled height through: the labeled
+    // block rule takes an optional `#`, so it fires before the catch-all.
+    const mined = (h: number) => ({
+      headline: `Bitcoin block #${h} mined`,
+      body: "Mempool clearing at 12 sat/vB.",
+      sources: [{ url: "https://mempool.space" }],
+    });
+    expect(signalContentFingerprint(mined(945123))).toBe(signalContentFingerprint(mined(945124)));
+  });
+
+  it("keeps comma-grouped PR numbers distinct", () => {
+    // `[\d,]{4,}` used to start at the comma in `#1,024`, past the lookbehind.
+    const pr = (n: string) => ({
+      headline: `landing-page PR #${n} merged`,
+      body: "Adds retry on Hiro 429.",
+      sources: [{ url: "https://example.com/changelog" }],
+    });
+    expect(signalContentFingerprint(pr("1,024"))).not.toBe(signalContentFingerprint(pr("1,031")));
+  });
 });
 
 /**
