@@ -80,7 +80,9 @@ export function generateId(): string {
  * (a confirmation count, a mempool depth) still normalises without needing a
  * new rule. Runs of 1-3 digits are deliberately left intact: PR numbers, BIP
  * numbers and version parts identify genuinely distinct stories and must keep
- * separating them.
+ * separating them. The catch-all also skips a number right after `#`,
+ * `/pull/` or `/issues/`: those are PR and issue numbers, and repos past #999
+ * would otherwise collapse #1024 and #1031 into one story (#915).
  */
 function normalizeRollingFields(input: string): string {
   return (
@@ -101,7 +103,7 @@ function normalizeRollingFields(input: string): string {
       // leaving `{NUM}-07-04` vs `{NUM}-07-05` stubbornly distinct.
       .replace(/\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?Z?)?/g, "{TS}")
       .replace(/[+-]?\d+(?:\.\d+)?%/g, "{PCT}")
-      .replace(/\b[\d,]{4,}(?:\.\d+)?\b/g, "{NUM}")
+      .replace(/(?<!#|\/(?:pull|issues)\/)\b[\d,]{4,}(?:\.\d+)?\b/g, "{NUM}")
   );
 }
 

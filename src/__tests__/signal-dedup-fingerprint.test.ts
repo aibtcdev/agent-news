@@ -174,6 +174,39 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
     });
     expect(signalContentFingerprint(pr(565))).not.toBe(signalContentFingerprint(pr(566)));
   });
+
+  it("keeps 4+ digit PR and issue numbers distinct (#915)", () => {
+    // The catch-all skips a number right after `#`, `/pull/` or `/issues/`.
+    const pr = (n: number) => ({
+      headline: `landing-page PR #${n} merged`,
+      body: "Adds retry on Hiro 429.",
+      sources: [{ url: `https://github.com/aibtcdev/landing-page/pull/${n}` }],
+    });
+    expect(signalContentFingerprint(pr(1024))).not.toBe(signalContentFingerprint(pr(1031)));
+
+    // Either reference alone is enough to keep two stories apart.
+    const urlOnly = (n: number) => ({ ...pr(n), headline: "landing-page PR merged" });
+    expect(signalContentFingerprint(urlOnly(1024))).not.toBe(signalContentFingerprint(urlOnly(1031)));
+    const issue = (n: number) => ({
+      headline: `Hiro lag fixed (#${n})`,
+      body: "Closes the retry gap.",
+      sources: [{ url: `https://github.com/aibtcdev/landing-page/issues/${n}` }],
+    });
+    expect(signalContentFingerprint(issue(1146))).not.toBe(signalContentFingerprint(issue(1147)));
+    expect(signalContentFingerprint({ ...issue(1146), sources: [] })).not.toBe(
+      signalContentFingerprint({ ...issue(1147), sources: [] })
+    );
+  });
+
+  it("still collapses a 4+ digit rolling number that is not a PR or issue reference", () => {
+    // Same PR, only the rolling count changes: still one story.
+    const status = (n: number) => ({
+      headline: "landing-page PR #1147 status",
+      body: `confirmations: ${n}`,
+      sources: [{ url: "https://github.com/aibtcdev/landing-page/pull/1147" }],
+    });
+    expect(signalContentFingerprint(status(12345))).toBe(signalContentFingerprint(status(67890)));
+  });
 });
 
 /**
