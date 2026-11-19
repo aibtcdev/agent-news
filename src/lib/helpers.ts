@@ -78,14 +78,38 @@ export function generateId(): string {
  * Labeled rules run first for precision. The final catch-all collapses any
  * remaining run of 4+ digits, so a rolling field a template author adds later
  * (a confirmation count, a mempool depth) still normalises without needing a
- * new rule. Runs of 1-3 digits are deliberately left intact: PR numbers, BIP
- * numbers and version parts identify genuinely distinct stories and must keep
- * separating them.
+ * new rule. Runs of 1-3 digits are left intact, so short BIP numbers and
+ * version parts keep separating distinct stories.
+ *
+ * Explicit PR/issue references are not rolling fields, so they are turned into
+ * a `{REF_N}` token before any numeric rule runs (#915). Repos past #999 then
+ * keep PR 1024 and PR 1031 apart, also when a `tx` or a price follows the
+ * number. The `_` before the digits leaves no word boundary, so no later rule
+ * can start on them. What counts as a reference:
+ * - `PR 1024`, `PR #1,024`, `pull request #1024`, and lists such as
+ *   `PRs #1024 and #1025` (every `#N` in the list);
+ * - `issue #1146` and `issues #1146, #1147`. `issue` needs the `#`, because
+ *   "to issue 21000 sBTC" is a verb with an amount that must still collapse;
+ * - `owner/repo#N` and hyphenated `repo-name#N` shorthand;
+ * - `/pull/N`, `/pulls/N`, `/issues/N` URL paths.
+ * A bare `#N` is NOT a reference: `block height #945123`, `nonce #12345` and
+ * `nonce#12345` must still collapse.
  */
+const refToken = (n: string): string => `{REF_${n.replace(/,/g, "")}}`;
+
 function normalizeRollingFields(input: string): string {
   return (
     input
       .replace(/\bblock\s+\d{5,7}\b/gi, "block {N}")
+      .replace(
+        /\b(?:(?:PRs?|pull requests?)\s*#?|issues?\s*#)\s*\d+(?:,\d{3})*\b(?:\s*(?:,|and|or|&)\s*#\s*\d+(?:,\d{3})*\b)*/gi,
+        (refs) => refs.replace(/\d+(?:,\d{3})*/g, refToken)
+      )
+      .replace(
+        /(?<![\w./:-])([\w.-]+\/[\w.-]+|[\w.]*-[\w.-]*)#(\d+)\b/g,
+        (_, repo: string, n: string) => `${repo}#${refToken(n)}`
+      )
+      .replace(/\/(pulls?|issues)\/(\d+)\b/gi, (_, kind: string, n: string) => `/${kind}/${refToken(n)}`)
       // Matches the word the templates actually use. The earlier form keyed
       // off a "tx"/"txs" abbreviation that never appears in filing text, so it
       // fired on nothing and the catch-all silently covered for it -- which

@@ -174,6 +174,102 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
     });
     expect(signalContentFingerprint(pr(565))).not.toBe(signalContentFingerprint(pr(566)));
   });
+
+  it("keeps 4+ digit PR and issue numbers distinct (#915)", () => {
+    // Explicit references become a token the catch-all can't reach.
+    const pr = (n: number) => ({
+      headline: `landing-page PR #${n} merged`,
+      body: "Adds retry on Hiro 429.",
+      sources: [{ url: `https://github.com/aibtcdev/landing-page/pull/${n}` }],
+    });
+    expect(signalContentFingerprint(pr(1024))).not.toBe(signalContentFingerprint(pr(1031)));
+
+    // Either reference alone is enough to keep two stories apart.
+    const urlOnly = (n: number) => ({ ...pr(n), headline: "landing-page PR merged" });
+    expect(signalContentFingerprint(urlOnly(1024))).not.toBe(signalContentFingerprint(urlOnly(1031)));
+    const issue = (n: number) => ({
+      headline: `Hiro lag fixed (#${n})`,
+      body: "Closes the retry gap.",
+      sources: [{ url: `https://github.com/aibtcdev/landing-page/issues/${n}` }],
+    });
+    expect(signalContentFingerprint(issue(1146))).not.toBe(signalContentFingerprint(issue(1147)));
+  });
+
+  // #916 review: a non-GitHub source, so only the headline reference separates these.
+  it.each([
+    ["landing-page PR 1024 merged", "landing-page PR 1031 merged"],
+    ["Hiro lag fixed in issue #1146", "Hiro lag fixed in issue #1147"],
+    ["landing-page PR #1,024 merged", "landing-page PR #1,031 merged"],
+    // #916 second review: `tx` after the number used to win via {TX_COUNT}.
+    ["Bitcoin Core PR 31234 tx relay fix", "Bitcoin Core PR 31240 tx relay fix"],
+    ["Bitcoin Core PR #31234: 2 transactions per package", "Bitcoin Core PR #31240: 2 transactions per package"],
+    // Shorthand and lists.
+    ["aibtcdev/landing-page#1024 merged", "aibtcdev/landing-page#1031 merged"],
+    ["landing-page#1024 merged", "landing-page#1031 merged"],
+    ["landing-page PRs #1024 and #1025", "landing-page PRs #2001 and #2002"],
+    ["landing-page PRs #1024 and #1025", "landing-page PRs #1024 and #1026"],
+    ["landing-page PRs #1024, #1025", "landing-page PRs #1024, #1026"],
+    ["Hiro issues #1146 and #1147 closed", "Hiro issues #1146 and #1148 closed"],
+  ])("keeps the reference in %j distinct from %j", (a, b) => {
+    const titled = (headline: string) => ({
+      headline,
+      body: "Adds retry on Hiro 429.",
+      sources: [{ url: "https://example.com/changelog" }],
+    });
+    expect(signalContentFingerprint(titled(a))).not.toBe(signalContentFingerprint(titled(b)));
+  });
+
+  it("keeps `/pulls/N` API URLs distinct (#916 review)", () => {
+    const api = (n: number) => ({
+      headline: "landing-page PR merged",
+      body: "Adds retry on Hiro 429.",
+      sources: [{ url: `https://api.github.com/repos/aibtcdev/landing-page/pulls/${n}` }],
+    });
+    expect(signalContentFingerprint(api(1024))).not.toBe(signalContentFingerprint(api(1031)));
+  });
+
+  it("still collapses a 4+ digit rolling number that is not a PR or issue reference", () => {
+    // Same PR, only the rolling count changes: still one story.
+    const status = (n: number) => ({
+      headline: "landing-page PR #1147 status",
+      body: `confirmations: ${n}`,
+      sources: [{ url: "https://github.com/aibtcdev/landing-page/pull/1147" }],
+    });
+    expect(signalContentFingerprint(status(12345))).toBe(signalContentFingerprint(status(67890)));
+  });
+
+  // #916 review: a bare `#N` is not a reference on its own, so these fall
+  // through to the catch-all and a re-file that only bumps the number still
+  // hits the 409.
+  it.each([
+    ["Bitcoin block #945123 mined", "Bitcoin block #945124 mined"],
+    ["Bitcoin block height #945123 mined", "Bitcoin block height #945124 mined"],
+    ["Mempool nonce #12345 stuck", "Mempool nonce #12346 stuck"],
+    ["Bitcoin block #945,123", "Bitcoin block #945,124"],
+    ["Mempool nonce#12345 stuck", "Mempool nonce#12346 stuck"],
+  ])("still collapses the `#`-spelled rolling field in %j and %j", (a, b) => {
+    const filed = (headline: string) => ({
+      headline,
+      body: "fees 12 sat/vB",
+      sources: [{ url: "https://mempool.space" }],
+    });
+    expect(signalContentFingerprint(filed(a))).toBe(signalContentFingerprint(filed(b)));
+  });
+
+  // #916 second review: `issue` is also a verb. Without a `#` it is not a
+  // reference, so an amount after it stays a rolling field (as on main).
+  it.each([
+    ["Stacks DAO to issue 21000 sBTC", "Stacks DAO to issue 22000 sBTC"],
+    ["Treasury will Issue 1,500,000 tokens", "Treasury will Issue 1,750,000 tokens"],
+    ["DAO issues 25000 STX in grants", "DAO issues 30000 STX in grants"],
+  ])("still collapses the amount after the verb in %j and %j", (a, b) => {
+    const filed = (headline: string) => ({
+      headline,
+      body: "fees 12 sat/vB",
+      sources: [{ url: "https://mempool.space" }],
+    });
+    expect(signalContentFingerprint(filed(a))).toBe(signalContentFingerprint(filed(b)));
+  });
 });
 
 /**
