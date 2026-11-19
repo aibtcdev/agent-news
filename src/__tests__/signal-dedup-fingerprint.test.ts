@@ -198,8 +198,18 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
   // #916 review: a non-GitHub source, so only the headline reference separates these.
   it.each([
     ["landing-page PR 1024 merged", "landing-page PR 1031 merged"],
-    ["Hiro lag fixed in issue 1146", "Hiro lag fixed in issue 1147"],
+    ["Hiro lag fixed in issue #1146", "Hiro lag fixed in issue #1147"],
     ["landing-page PR #1,024 merged", "landing-page PR #1,031 merged"],
+    // #916 second review: `tx` after the number used to win via {TX_COUNT}.
+    ["Bitcoin Core PR 31234 tx relay fix", "Bitcoin Core PR 31240 tx relay fix"],
+    ["Bitcoin Core PR #31234: 2 transactions per package", "Bitcoin Core PR #31240: 2 transactions per package"],
+    // Shorthand and lists.
+    ["aibtcdev/landing-page#1024 merged", "aibtcdev/landing-page#1031 merged"],
+    ["landing-page#1024 merged", "landing-page#1031 merged"],
+    ["landing-page PRs #1024 and #1025", "landing-page PRs #2001 and #2002"],
+    ["landing-page PRs #1024 and #1025", "landing-page PRs #1024 and #1026"],
+    ["landing-page PRs #1024, #1025", "landing-page PRs #1024, #1026"],
+    ["Hiro issues #1146 and #1147 closed", "Hiro issues #1146 and #1148 closed"],
   ])("keeps the reference in %j distinct from %j", (a, b) => {
     const titled = (headline: string) => ({
       headline,
@@ -236,7 +246,23 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
     ["Bitcoin block height #945123 mined", "Bitcoin block height #945124 mined"],
     ["Mempool nonce #12345 stuck", "Mempool nonce #12346 stuck"],
     ["Bitcoin block #945,123", "Bitcoin block #945,124"],
+    ["Mempool nonce#12345 stuck", "Mempool nonce#12346 stuck"],
   ])("still collapses the `#`-spelled rolling field in %j and %j", (a, b) => {
+    const filed = (headline: string) => ({
+      headline,
+      body: "fees 12 sat/vB",
+      sources: [{ url: "https://mempool.space" }],
+    });
+    expect(signalContentFingerprint(filed(a))).toBe(signalContentFingerprint(filed(b)));
+  });
+
+  // #916 second review: `issue` is also a verb. Without a `#` it is not a
+  // reference, so an amount after it stays a rolling field (as on main).
+  it.each([
+    ["Stacks DAO to issue 21000 sBTC", "Stacks DAO to issue 22000 sBTC"],
+    ["Treasury will Issue 1,500,000 tokens", "Treasury will Issue 1,750,000 tokens"],
+    ["DAO issues 25000 STX in grants", "DAO issues 30000 STX in grants"],
+  ])("still collapses the amount after the verb in %j and %j", (a, b) => {
     const filed = (headline: string) => ({
       headline,
       body: "fees 12 sat/vB",
