@@ -176,7 +176,7 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
   });
 
   it("keeps 4+ digit PR and issue numbers distinct (#915)", () => {
-    // The catch-all skips a number right after `#`, `/pull/` or `/issues/`.
+    // Explicit references become a token the catch-all can't reach.
     const pr = (n: number) => ({
       headline: `landing-page PR #${n} merged`,
       body: "Adds retry on Hiro 429.",
@@ -193,9 +193,29 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
       sources: [{ url: `https://github.com/aibtcdev/landing-page/issues/${n}` }],
     });
     expect(signalContentFingerprint(issue(1146))).not.toBe(signalContentFingerprint(issue(1147)));
-    expect(signalContentFingerprint({ ...issue(1146), sources: [] })).not.toBe(
-      signalContentFingerprint({ ...issue(1147), sources: [] })
-    );
+  });
+
+  // #916 review: a non-GitHub source, so only the headline reference separates these.
+  it.each([
+    ["landing-page PR 1024 merged", "landing-page PR 1031 merged"],
+    ["Hiro lag fixed in issue 1146", "Hiro lag fixed in issue 1147"],
+    ["landing-page PR #1,024 merged", "landing-page PR #1,031 merged"],
+  ])("keeps the reference in %j distinct from %j", (a, b) => {
+    const titled = (headline: string) => ({
+      headline,
+      body: "Adds retry on Hiro 429.",
+      sources: [{ url: "https://example.com/changelog" }],
+    });
+    expect(signalContentFingerprint(titled(a))).not.toBe(signalContentFingerprint(titled(b)));
+  });
+
+  it("keeps `/pulls/N` API URLs distinct (#916 review)", () => {
+    const api = (n: number) => ({
+      headline: "landing-page PR merged",
+      body: "Adds retry on Hiro 429.",
+      sources: [{ url: `https://api.github.com/repos/aibtcdev/landing-page/pulls/${n}` }],
+    });
+    expect(signalContentFingerprint(api(1024))).not.toBe(signalContentFingerprint(api(1031)));
   });
 
   it("still collapses a 4+ digit rolling number that is not a PR or issue reference", () => {
@@ -208,25 +228,21 @@ describe("signalContentFingerprint — rolling-field normalization", () => {
     expect(signalContentFingerprint(status(12345))).toBe(signalContentFingerprint(status(67890)));
   });
 
-  it("still collapses a block height written with `#` (#916 review)", () => {
-    // The `#` exemption must not let a `#`-spelled height through: the labeled
-    // block rule takes an optional `#`, so it fires before the catch-all.
-    const mined = (h: number) => ({
-      headline: `Bitcoin block #${h} mined`,
-      body: "Mempool clearing at 12 sat/vB.",
+  // #916 review: a bare `#N` is not a reference on its own, so these fall
+  // through to the catch-all and a re-file that only bumps the number still
+  // hits the 409.
+  it.each([
+    ["Bitcoin block #945123 mined", "Bitcoin block #945124 mined"],
+    ["Bitcoin block height #945123 mined", "Bitcoin block height #945124 mined"],
+    ["Mempool nonce #12345 stuck", "Mempool nonce #12346 stuck"],
+    ["Bitcoin block #945,123", "Bitcoin block #945,124"],
+  ])("still collapses the `#`-spelled rolling field in %j and %j", (a, b) => {
+    const filed = (headline: string) => ({
+      headline,
+      body: "fees 12 sat/vB",
       sources: [{ url: "https://mempool.space" }],
     });
-    expect(signalContentFingerprint(mined(945123))).toBe(signalContentFingerprint(mined(945124)));
-  });
-
-  it("keeps comma-grouped PR numbers distinct", () => {
-    // `[\d,]{4,}` used to start at the comma in `#1,024`, past the lookbehind.
-    const pr = (n: string) => ({
-      headline: `landing-page PR #${n} merged`,
-      body: "Adds retry on Hiro 429.",
-      sources: [{ url: "https://example.com/changelog" }],
-    });
-    expect(signalContentFingerprint(pr("1,024"))).not.toBe(signalContentFingerprint(pr("1,031")));
+    expect(signalContentFingerprint(filed(a))).toBe(signalContentFingerprint(filed(b)));
   });
 });
 

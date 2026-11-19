@@ -80,20 +80,19 @@ export function generateId(): string {
  * (a confirmation count, a mempool depth) still normalises without needing a
  * new rule. Runs of 1-3 digits are deliberately left intact: PR numbers, BIP
  * numbers and version parts identify genuinely distinct stories and must keep
- * separating them. The catch-all also skips a number right after `#`,
- * `/pull/` or `/issues/`, so repos past #999 don't collapse PR #1024 and
- * #1031 into one story (#915). It must start on a digit, so `#1,024` is not
- * matched from its comma either.
+ * separating them.
  *
- * Trade-off: the `#` exemption covers EVERY number written after `#`, not only
- * PR and issue numbers. A rolling field that templates spell with `#` needs
- * its own labeled rule above the catch-all, as the block rule does for
- * `block #945123`; otherwise a re-file that only bumps it would get past dedup.
+ * Explicit PR/issue references (`PR 1024`, `PR #1,024`, `pull request #1024`,
+ * `issue 1146`, `/pull/N`, `/pulls/N`, `/issues/N`) are turned into a `{REF_N}`
+ * token just before the catch-all, so repos past #999 keep PR 1024 and PR 1031
+ * apart (#915). The `_` before the digits leaves no word boundary for the
+ * catch-all to start on. A bare `#N` is deliberately NOT a reference:
+ * `block height #945123` or `nonce #12345` must still collapse.
  */
 function normalizeRollingFields(input: string): string {
   return (
     input
-      .replace(/\bblock\s+#?\d{5,7}\b/gi, "block {N}")
+      .replace(/\bblock\s+\d{5,7}\b/gi, "block {N}")
       // Matches the word the templates actually use. The earlier form keyed
       // off a "tx"/"txs" abbreviation that never appears in filing text, so it
       // fired on nothing and the catch-all silently covered for it -- which
@@ -109,7 +108,12 @@ function normalizeRollingFields(input: string): string {
       // leaving `{NUM}-07-04` vs `{NUM}-07-05` stubbornly distinct.
       .replace(/\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?Z?)?/g, "{TS}")
       .replace(/[+-]?\d+(?:\.\d+)?%/g, "{PCT}")
-      .replace(/(?<!#|\/(?:pull|issues)\/)\b\d[\d,]{3,}(?:\.\d+)?\b/g, "{NUM}")
+      .replace(
+        /\b(?:PR|pull request|issue)\s*#?\s*(\d+(?:,\d{3})*)\b/gi,
+        (_, n: string) => `{REF_${n.replace(/,/g, "")}}`
+      )
+      .replace(/\/(pulls?|issues)\/(\d+)\b/gi, "/$1/{REF_$2}")
+      .replace(/\b[\d,]{4,}(?:\.\d+)?\b/g, "{NUM}")
   );
 }
 
